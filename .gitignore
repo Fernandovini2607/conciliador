@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Configuração local (contém credenciais do Domínio em texto claro)
+config.json
+
+# Dados sensíveis: planilhas e extratos não devem ir pro Git
+*.xlsx
+*.xls
+*.ofx
+*.qfx
+*.csv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+Thumbs.db
+.DS_Store
+desktop.ini
