@@ -24,7 +24,7 @@ from parser_xlsx import (
 
 
 CAMPOS = [
-    ("data", "Data"),
+    ("data", "Data vencimento"),
     ("valor", "Valor"),
     ("descricao", "Descrição"),
 ]
@@ -354,7 +354,7 @@ class App(tk.Tk):
         cols = ("tipo", "data", "valor", "nf", "fornecedor", "desc_p", "desc_o", "diff")
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
-        tree.heading("data", text="Data")
+        tree.heading("data", text="Vencimento")
         tree.heading("valor", text="Valor")
         tree.heading("nf", text="Nº NF")
         tree.heading("fornecedor", text="Fornecedor")
@@ -410,8 +410,12 @@ class App(tk.Tk):
         self.tree_pend_p = ttk.Treeview(
             lado_p, columns=cols, show="headings", selectmode="browse",
         )
-        for c, w, a in [("data", 90, "center"), ("valor", 110, "e"), ("descricao", 260, "w")]:
-            self.tree_pend_p.heading(c, text=c.capitalize())
+        for c, t, w, a in [
+            ("data", "Vencimento", 90, "center"),
+            ("valor", "Valor", 110, "e"),
+            ("descricao", "Descrição", 260, "w"),
+        ]:
+            self.tree_pend_p.heading(c, text=t)
             self.tree_pend_p.column(c, width=w, anchor=a)
         sb_p = ttk.Scrollbar(lado_p, orient="vertical", command=self.tree_pend_p.yview)
         self.tree_pend_p.configure(yscrollcommand=sb_p.set)
@@ -424,8 +428,12 @@ class App(tk.Tk):
         self.tree_pend_o = ttk.Treeview(
             lado_o, columns=cols, show="headings", selectmode="browse",
         )
-        for c, w, a in [("data", 90, "center"), ("valor", 110, "e"), ("descricao", 260, "w")]:
-            self.tree_pend_o.heading(c, text=c.capitalize())
+        for c, t, w, a in [
+            ("data", "Data pagamento", 90, "center"),
+            ("valor", "Valor", 110, "e"),
+            ("descricao", "Descrição", 260, "w"),
+        ]:
+            self.tree_pend_o.heading(c, text=t)
             self.tree_pend_o.column(c, width=w, anchor=a)
         sb_o = ttk.Scrollbar(lado_o, orient="vertical", command=self.tree_pend_o.yview)
         self.tree_pend_o.configure(yscrollcommand=sb_o.set)
@@ -456,10 +464,10 @@ class App(tk.Tk):
         cols = ("data_p", "valor_p", "desc_p", "data_o", "valor_o", "desc_o", "diff_dias", "diff_valor")
         tree = ttk.Treeview(aba, columns=cols, show="headings", selectmode="browse")
         for c, t, w, a in [
-            ("data_p", "Data (pla)", 90, "center"),
+            ("data_p", "Venc. (pla)", 90, "center"),
             ("valor_p", "Valor (pla)", 90, "e"),
             ("desc_p", "Descrição (pla)", 220, "w"),
-            ("data_o", "Data (OFX)", 90, "center"),
+            ("data_o", "Pagto (OFX)", 90, "center"),
             ("valor_o", "Valor (OFX)", 90, "e"),
             ("desc_o", "Descrição (OFX)", 220, "w"),
             ("diff_dias", "Δ dias", 60, "center"),

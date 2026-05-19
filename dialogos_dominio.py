@@ -206,7 +206,7 @@ class DialogoFonte(tk.Toplevel):
     """
 
     PREVIEW_LINHAS = 15
-    CAMPOS = [("data", "Data"), ("valor", "Valor"), ("descricao", "Descrição")]
+    CAMPOS = [("data", "Data vencimento"), ("valor", "Valor"), ("descricao", "Descrição")]
     CAMPOS_EXTRAS = [
         ("data_emissao", "Data emissão"),
         ("numero_nf", "Nº NF"),
