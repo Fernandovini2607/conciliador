@@ -333,14 +333,23 @@ class DialogoFonte(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self._cancelar)
 
     def _troca_modo(self) -> None:
-        if self.modo_var.get() == "tabela":
-            self.frame_sql.pack_forget()
-            if not self.frame_tabela.winfo_ismapped():
-                self.frame_tabela.pack(fill="x", padx=10, pady=4, before=self.frame_sql)
-        else:
+        # Esconde os dois e remostra só o ativo. Usar pack/pack_forget direto
+        # (sem 'before=') evita TclError de janela não posicionada quando o
+        # diálogo ainda está em construção.
+        modo = self.modo_var.get()
+        try:
             self.frame_tabela.pack_forget()
-            if not self.frame_sql.winfo_ismapped():
-                self.frame_sql.pack(fill="x", padx=10, pady=4)
+            self.frame_sql.pack_forget()
+        except tk.TclError:
+            pass
+        if modo == "tabela":
+            self.frame_tabela.pack(
+                fill="x", padx=10, pady=4, before=self.frame_acao,
+            )
+        else:
+            self.frame_sql.pack(
+                fill="x", padx=10, pady=4, before=self.frame_acao,
+            )
 
     def _carrega_tabelas(self) -> None:
         schema = None if self.var_todas_tabelas.get() else parser_dominio.SCHEMA_PADRAO

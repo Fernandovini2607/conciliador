@@ -571,17 +571,26 @@ class App(tk.Tk):
         self.lbl_dominio.config(text="  |  ".join(partes))
 
     def _configurar_fonte_dominio(self) -> None:
+        print("[DEBUG main] _configurar_fonte_dominio iniciou")
         if self.conn_dominio is None:
+            print("[DEBUG main] conn_dominio é None, abortando")
             return
         fonte_atual = self.cfg.get("dominio_fonte", {})
         codi_emp = (self.cfg.get("dominio_empresa") or {}).get("codi_emp")
+        print(f"[DEBUG main] criando DialogoFonte, codi_emp={codi_emp}")
         dlg = DialogoFonte(self, self.conn_dominio, fonte_atual, codi_emp=codi_emp)
+        print("[DEBUG main] aguardando dialog fechar...")
         self.wait_window(dlg)
+        print(f"[DEBUG main] dialog fechou; dlg.fonte = {dlg.fonte!r}")
         if dlg.fonte is None:
+            print("[DEBUG main] fonte é None, abortando")
             return
+        print("[DEBUG main] salvando config...")
         self.cfg["dominio_fonte"] = dlg.fonte
         config.salvar(self.cfg)
+        print("[DEBUG main] habilitando botão Carregar pagamentos")
         self.btn_carregar_dominio.config(state="normal")
+        print("[DEBUG main] _configurar_fonte_dominio concluído")
 
     def _carregar_dominio(self) -> None:
         if self.conn_dominio is None:
