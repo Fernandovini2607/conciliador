@@ -332,10 +332,82 @@ class App(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
+        # Abas de dados crus (origem) — vêm primeiro no fluxo de leitura
+        self._monta_aba_planilha_dados()
+        self._monta_aba_ofx_dados()
+        self._monta_aba_dominio_dados()
+        # Abas de conciliação (resultado)
         self._monta_aba_conciliados()
         self._monta_aba_pendentes()
         self._monta_aba_sugestoes()
         self._monta_aba_dominio()
+
+    def _monta_aba_planilha_dados(self) -> None:
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Planilha (0)")
+        self._aba_planilha = aba
+
+        cols = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("linha", "Linha", 55, "center"),
+            ("venc", "Vencimento", 90, "center"),
+            ("emis", "Emissão", 90, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 80, "center"),
+            ("cnpj", "CNPJ", 130, "w"),
+            ("fornecedor", "Fornecedor", 260, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree_planilha = tree
+
+    def _monta_aba_ofx_dados(self) -> None:
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="OFX (0)")
+        self._aba_ofx = aba
+
+        cols = ("data", "valor", "memo")
+        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("data", "Data pagamento", 110, "center"),
+            ("valor", "Valor", 110, "e"),
+            ("memo", "Memo (banco)", 500, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree_ofx = tree
+
+    def _monta_aba_dominio_dados(self) -> None:
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Domínio dados (0)")
+        self._aba_dominio_dados = aba
+
+        cols = ("venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("venc", "Vencimento", 90, "center"),
+            ("emis", "Emissão", 90, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 80, "center"),
+            ("cnpj", "CNPJ", 130, "w"),
+            ("fornecedor", "Fornecedor", 280, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree_dominio_dados = tree
 
     def _monta_aba_conciliados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -571,26 +643,17 @@ class App(tk.Tk):
         self.lbl_dominio.config(text="  |  ".join(partes))
 
     def _configurar_fonte_dominio(self) -> None:
-        print("[DEBUG main] _configurar_fonte_dominio iniciou")
         if self.conn_dominio is None:
-            print("[DEBUG main] conn_dominio é None, abortando")
             return
         fonte_atual = self.cfg.get("dominio_fonte", {})
         codi_emp = (self.cfg.get("dominio_empresa") or {}).get("codi_emp")
-        print(f"[DEBUG main] criando DialogoFonte, codi_emp={codi_emp}")
         dlg = DialogoFonte(self, self.conn_dominio, fonte_atual, codi_emp=codi_emp)
-        print("[DEBUG main] aguardando dialog fechar...")
         self.wait_window(dlg)
-        print(f"[DEBUG main] dialog fechou; dlg.fonte = {dlg.fonte!r}")
         if dlg.fonte is None:
-            print("[DEBUG main] fonte é None, abortando")
             return
-        print("[DEBUG main] salvando config...")
         self.cfg["dominio_fonte"] = dlg.fonte
         config.salvar(self.cfg)
-        print("[DEBUG main] habilitando botão Carregar pagamentos")
         self.btn_carregar_dominio.config(state="normal")
-        print("[DEBUG main] _configurar_fonte_dominio concluído")
 
     def _carregar_dominio(self) -> None:
         if self.conn_dominio is None:
@@ -620,6 +683,7 @@ class App(tk.Tk):
             messagebox.showerror("Erro ao ler Domínio", str(e))
             return
         self._atualiza_label_dominio()
+        self._render_aba_dominio_dados()
         self._atualiza_botao_comparar()
 
     def _atualiza_botao_comparar(self) -> None:
@@ -712,9 +776,9 @@ class App(tk.Tk):
             )
 
         self.notebook.tab(
-            3,
+            6,
             text=(
-                f"Domínio (ok {n_ok} | falta {n_falta_dom} | só dom {len(sobras_dominio)})"
+                f"Comparação (ok {n_ok} | falta {n_falta_dom} | só dom {len(sobras_dominio)})"
             ),
         )
 
@@ -761,6 +825,7 @@ class App(tk.Tk):
         self._atualiza_label_planilha()
         self.btn_editar_colunas.config(state="normal")
         self._atualiza_botao()
+        self._render_aba_planilha()
         self._limpa_resultados()
 
     def _editar_colunas(self) -> None:
@@ -788,6 +853,7 @@ class App(tk.Tk):
         self.mapeamento_planilha = dlg.mapeamento
         self._atualiza_label_planilha()
         self._atualiza_botao()
+        self._render_aba_planilha()
         self._limpa_resultados()
 
     def _atualiza_label_planilha(self) -> None:
@@ -829,6 +895,7 @@ class App(tk.Tk):
             text=f"{self.caminho_ofx.name} — {len(self.transacoes_ofx)} pagamentos{extra}"
         )
         self._atualiza_botao()
+        self._render_aba_ofx()
         self._limpa_resultados()
 
     def _atualiza_botao(self) -> None:
@@ -846,7 +913,7 @@ class App(tk.Tk):
         self.lbl_resumo.config(text="")
         for item in self.tree_dominio.get_children():
             self.tree_dominio.delete(item)
-        self.notebook.tab(3, text="Domínio (0)")
+        self.notebook.tab(6, text="Comparação (0)")
         self._atualiza_botao_comparar()
 
     def _executar_conciliacao(self) -> None:
@@ -941,11 +1008,11 @@ class App(tk.Tk):
         self._render_conciliados()
         self._render_pendentes()
         self._render_sugestoes()
-        self.notebook.tab(0, text=f"Conciliados ({len(self.pares_conciliados)})")
+        self.notebook.tab(3, text=f"Conciliados ({len(self.pares_conciliados)})")
         self.notebook.tab(
-            1, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
+            4, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
         )
-        self.notebook.tab(2, text=f"Sugestões ({len(self.sugestoes)})")
+        self.notebook.tab(5, text=f"Sugestões ({len(self.sugestoes)})")
 
     def _render_conciliados(self) -> None:
         for item in self.tree_conciliados.get_children():
@@ -1022,6 +1089,61 @@ class App(tk.Tk):
                 tags=("destaque",),
             )
             self.itens_sugestoes[iid] = par
+
+    # ---------------- Abas de dados crus (origem) ----------------
+
+    @staticmethod
+    def _fmt_data(d) -> str:
+        return d.strftime("%d/%m/%Y") if d else ""
+
+    def _render_aba_planilha(self) -> None:
+        for item in self.tree_planilha.get_children():
+            self.tree_planilha.delete(item)
+        for t in self.transacoes_planilha:
+            self.tree_planilha.insert(
+                "", "end",
+                values=(
+                    t.linha if t.linha is not None else "",
+                    t.data.strftime("%d/%m/%Y"),
+                    self._fmt_data(t.extras.get("data_emissao")),
+                    f"{t.valor:.2f}",
+                    t.extras.get("numero_nf", ""),
+                    t.extras.get("cnpj", ""),
+                    t.extras.get("fornecedor", ""),
+                ),
+            )
+        self.notebook.tab(0, text=f"Planilha ({len(self.transacoes_planilha)})")
+
+    def _render_aba_ofx(self) -> None:
+        for item in self.tree_ofx.get_children():
+            self.tree_ofx.delete(item)
+        for t in self.transacoes_ofx:
+            self.tree_ofx.insert(
+                "", "end",
+                values=(
+                    t.data.strftime("%d/%m/%Y"),
+                    f"{t.valor:.2f}",
+                    t.descricao,
+                ),
+            )
+        self.notebook.tab(1, text=f"OFX ({len(self.transacoes_ofx)})")
+
+    def _render_aba_dominio_dados(self) -> None:
+        for item in self.tree_dominio_dados.get_children():
+            self.tree_dominio_dados.delete(item)
+        for t in self.transacoes_dominio:
+            self.tree_dominio_dados.insert(
+                "", "end",
+                values=(
+                    t.data.strftime("%d/%m/%Y"),
+                    self._fmt_data(t.extras.get("data_emissao")),
+                    f"{t.valor:.2f}",
+                    t.extras.get("numero_nf", ""),
+                    t.extras.get("cnpj", ""),
+                    t.extras.get("fornecedor", ""),
+                ),
+            )
+        self.notebook.tab(2, text=f"Domínio dados ({len(self.transacoes_dominio)})")
 
 
 if __name__ == "__main__":
