@@ -41,7 +41,7 @@ python main.py
 
 #### Pré-requisito: configurar o DSN ODBC
 
-O Domínio usa **Sybase SQL Anywhere** como banco. Antes de usar o app, configure o DSN no Windows:
+O Domínio usa **Sybase SQL Anywhere 17** como banco. Antes de usar o app, configure o DSN no Windows:
 
 1. **Painel de Controle → Ferramentas Administrativas → ODBC Data Sources (64-bit)**.
 2. Aba **Drivers**: confirme que existe `SQL Anywhere [versão]`. Se não existir, instale o **SQL Anywhere Client** correspondente à versão do seu Domínio.
@@ -54,25 +54,39 @@ O Domínio usa **Sybase SQL Anywhere** como banco. Antes de usar o app, configur
 
 #### No app
 
-1. **Conectar Domínio** → informe DSN, usuário, senha. Se OK, fica salvo em `config.json` local.
+1. **Conectar Domínio** → informe DSN, usuário, senha. A conexão é aberta como **read-only** (o usuário ODBC do Domínio não tem GRANT de UPDATE). As credenciais ficam em `data/dominio_config.json`.
 2. **Configurar fonte** → escolha entre:
-   - **Tabela + filtro**: dropdown lista todas as tabelas do banco. Selecione uma → "Carregar amostra" → veja as primeiras 15 linhas → mapeie as colunas Data/Valor/Descrição. Pode adicionar um WHERE opcional (ex.: `data_pagto BETWEEN '2026-01-01' AND '2026-01-31'`).
-   - **Query SQL manual**: cole uma instrução SELECT pronta. Carregue a amostra e mapeie as colunas pelos nomes retornados.
+   - **Tabela + filtro**: dropdown lista as tabelas do schema `bethadba` (default — desmarque "Mostrar todas" para ver outros schemas). Selecione uma → "Carregar amostra" → veja as primeiras 15 linhas → mapeie as colunas Data/Valor/Descrição. Pode adicionar um WHERE opcional (ex.: `DDOC_ENT BETWEEN '2026-01-01' AND '2026-01-31'`).
+   - **Query SQL manual**: cole uma instrução SELECT pronta — sempre prefixe as tabelas com `bethadba.`. Carregue a amostra e mapeie as colunas pelos nomes retornados.
 3. **Carregar pagamentos** → o app executa a query e lista os pagamentos do Domínio.
 4. **Comparar com Domínio** (habilita após conciliar e carregar) → preenche a aba **Domínio**:
    - **Verde** — Conciliado e no Domínio: tudo em ordem.
    - **Amarelo** — Conciliado mas falta no Domínio: pagamento bateu banco × planilha, mas não há lançamento contábil.
    - **Vermelho** — Só no Domínio: lançamento contábil sem reflexo no extrato/planilha.
 
-A configuração (DSN, credenciais, tabela/SQL, mapeamento) é salva em `config.json` na pasta do projeto. **Senha fica em texto claro** — só rode na sua máquina.
+#### Arquivos de configuração
+
+| Arquivo | Conteúdo | Versionado? |
+|---|---|---|
+| `config.json` | Preferências do app: mapeamento de colunas da planilha, fonte do Domínio (modo/tabela/SQL/where/mapeamento) | Não (gitignore) |
+| `data/dominio_config.json` | Credenciais ODBC do Domínio (DSN, usuário, senha) | Não (gitignore) |
+
+**Senha fica em texto claro** — só rode na sua máquina.
+
+#### Convenções herdadas do projeto Janco
+
+* Toda tabela do Domínio Escrita Fiscal vive no schema **`bethadba`** (sempre prefixar).
+* `connect_dominio(readonly=True)` é o context manager padrão; o app mantém uma conexão aberta durante a sessão via `open_connection()`.
+* **Gotcha SQL Anywhere**: `DISTINCT + ORDER BY` exige usar os aliases do SELECT, não nomes qualificados (erro -854 com `p.CODI_GRU`; use `grupo` se aliasou).
 
 ## Estrutura do projeto
 
 - `main.py` — janela Tkinter, ponto de entrada.
 - `parser_xlsx.py` — leitura da planilha, detecção de cabeçalho e colunas.
 - `parser_ofx.py` — leitura do OFX (filtra pagamentos).
-- `parser_dominio.py` — conexão ODBC e extração de pagamentos do Domínio.
+- `parser_dominio.py` — conexão ODBC (context manager + open_connection), `load/save_odbc_config`, exploração e extração de pagamentos do Domínio.
 - `dialogos_dominio.py` — diálogos da UI para conectar e selecionar fonte do Domínio.
 - `matcher.py` — algoritmo de conciliação e geração de sugestões.
-- `config.py` — persistência simples em `config.json`.
+- `config.py` — persistência de preferências em `config.json`.
+- `data/dominio_config.json` — credenciais ODBC (gerado no primeiro Conectar; gitignored).
 - `requirements.txt` — dependências.

@@ -13,8 +13,12 @@ venv/
 env/
 ENV/
 
-# Configuração local (contém credenciais do Domínio em texto claro)
+# Configuração local de preferências
 config.json
+
+# Credenciais do Domínio (padrão Janco: data/dominio_config.json)
+data/dominio_config.json
+data/*.json
 
 # Dados sensíveis: planilhas e extratos não devem ir pro Git
 *.xlsx

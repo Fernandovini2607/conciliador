@@ -226,8 +226,29 @@ class App(tk.Tk):
         self.comparacao_dominio: list[tuple[str, Par | Transacao]] = []
         # ↑ status, registro (Par para casados; Transacao para faltantes)
         self.cfg = config.carregar()
+        self._migrar_config_legado()
 
         self._monta_ui()
+
+    def _migrar_config_legado(self) -> None:
+        """Se a config antiga tinha credenciais em cfg["dominio"], move pra
+        data/dominio_config.json (padrão Janco) e renomeia o restante para
+        cfg["dominio_fonte"]."""
+        legado = self.cfg.get("dominio")
+        if not isinstance(legado, dict):
+            return
+        cred_keys = {"dsn", "usuario", "senha"}
+        if cred_keys & legado.keys():
+            auth_atual = parser_dominio.load_odbc_config()
+            for k in cred_keys:
+                if k in legado:
+                    auth_atual[k] = legado.pop(k)
+            if auth_atual.get("dsn"):
+                parser_dominio.save_odbc_config(auth_atual)
+        if legado:
+            self.cfg.setdefault("dominio_fonte", {}).update(legado)
+        del self.cfg["dominio"]
+        config.salvar(self.cfg)
 
     # ------------------------------------------------------------------ UI
 
@@ -457,36 +478,34 @@ class App(tk.Tk):
     # --------------------------------------------------------- Domínio
 
     def _conectar_dominio(self) -> None:
-        dlg = DialogoConexao(self, self.cfg.get("dominio", {}))
+        dlg = DialogoConexao(self)
         self.wait_window(dlg)
-        if dlg.conn is None or dlg.dados is None:
+        if dlg.conn is None:
             return
         self.conn_dominio = dlg.conn
-        cfg_dom = self.cfg.setdefault("dominio", {})
-        cfg_dom.update(dlg.dados)
-        config.salvar(self.cfg)
-        self.lbl_dominio.config(text=f"Conectado: DSN={dlg.dados['dsn']}")
+        cred = parser_dominio.load_odbc_config()
+        self.lbl_dominio.config(text=f"Conectado (read-only): DSN={cred.get('dsn', '?')}")
         self.btn_fonte.config(state="normal")
-        if cfg_dom.get("mapeamento"):
+        if self.cfg.get("dominio_fonte", {}).get("mapeamento"):
             self.btn_carregar_dominio.config(state="normal")
 
     def _configurar_fonte_dominio(self) -> None:
         if self.conn_dominio is None:
             return
-        dlg = DialogoFonte(self, self.conn_dominio, self.cfg.get("dominio", {}))
+        fonte_atual = self.cfg.get("dominio_fonte", {})
+        dlg = DialogoFonte(self, self.conn_dominio, fonte_atual)
         self.wait_window(dlg)
         if dlg.fonte is None:
             return
-        cfg_dom = self.cfg.setdefault("dominio", {})
-        cfg_dom.update(dlg.fonte)
+        self.cfg["dominio_fonte"] = dlg.fonte
         config.salvar(self.cfg)
         self.btn_carregar_dominio.config(state="normal")
 
     def _carregar_dominio(self) -> None:
         if self.conn_dominio is None:
             return
-        cfg_dom = self.cfg.get("dominio", {})
-        if not cfg_dom.get("mapeamento"):
+        fonte = self.cfg.get("dominio_fonte", {})
+        if not fonte.get("mapeamento"):
             messagebox.showinfo(
                 "Sem fonte",
                 "Configure a fonte de pagamentos primeiro.",
@@ -494,13 +513,13 @@ class App(tk.Tk):
             return
         try:
             self.transacoes_dominio = parser_dominio.extrair_pagamentos(
-                self.conn_dominio, cfg_dom,
+                self.conn_dominio, fonte,
             )
         except Exception as e:
             messagebox.showerror("Erro ao ler Domínio", str(e))
             return
         self.lbl_dominio.config(
-            text=f"Conectado — {len(self.transacoes_dominio)} pagamentos no Domínio"
+            text=f"Conectado (read-only) — {len(self.transacoes_dominio)} pagamentos no Domínio"
         )
         self._atualiza_botao_comparar()
 
