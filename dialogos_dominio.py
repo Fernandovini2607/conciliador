@@ -205,7 +205,7 @@ class DialogoFonte(tk.Toplevel):
     Recebe e devolve um dict de **fonte** (``dominio_fonte`` no config.json).
     """
 
-    PREVIEW_LINHAS = 15
+    PREVIEW_LINHAS = 100
     CAMPOS = [
         ("data", "Data vencimento"),
         ("data_emissao", "Data emissão"),
@@ -323,7 +323,7 @@ class DialogoFonte(tk.Toplevel):
         self.frame_sql.pack(fill="x", padx=10, pady=4)
         self.frame_acao.pack(fill="x", padx=10, pady=4)
         self.frame_map.pack(fill="x", padx=10, pady=6)
-        ttk.Label(self, text="Amostra (15 linhas):").pack(anchor="w", padx=10)
+        ttk.Label(self, text=f"Amostra (até {self.PREVIEW_LINHAS} linhas):").pack(anchor="w", padx=10)
         self.frame_preview.pack(fill="both", expand=True, padx=10, pady=4)
         self.frame_fim.pack(fill="x", padx=10, pady=8)
 
