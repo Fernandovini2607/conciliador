@@ -404,44 +404,61 @@ class DialogoFonte(tk.Toplevel):
                 cb.set("")
 
     def _confirmar(self) -> None:
-        if not self.colunas_atuais:
-            messagebox.showinfo(
-                "Carregue uma amostra",
-                "Clique em 'Carregar amostra' antes de confirmar.",
-                parent=self,
-            )
-            return
-        mapa: dict[str, str] = {}
-        for campo, rotulo in self.CAMPOS:
-            valor = self.combos[campo].get().strip()
-            if not valor:
-                messagebox.showwarning(
-                    "Mapeamento incompleto",
-                    f"Escolha a coluna correspondente a '{rotulo}'.",
+        print("[DEBUG] _confirmar() iniciou")
+        print(f"[DEBUG] colunas_atuais = {self.colunas_atuais!r}")
+        try:
+            if not self.colunas_atuais:
+                print("[DEBUG] colunas_atuais vazio → bloqueando")
+                messagebox.showinfo(
+                    "Carregue uma amostra",
+                    "Clique em 'Carregar amostra' antes de confirmar.",
                     parent=self,
                 )
                 return
-            mapa[campo] = valor
+            mapa: dict[str, str] = {}
+            for campo, rotulo in self.CAMPOS:
+                valor = self.combos[campo].get().strip()
+                print(f"[DEBUG] combo[{campo!r}] = {valor!r}")
+                if not valor:
+                    print(f"[DEBUG] campo {campo!r} vazio → bloqueando")
+                    messagebox.showwarning(
+                        "Mapeamento incompleto",
+                        f"Escolha a coluna correspondente a '{rotulo}'.",
+                        parent=self,
+                    )
+                    return
+                mapa[campo] = valor
+            print(f"[DEBUG] mapa montado = {mapa!r}")
 
-        modo = self.modo_var.get()
-        if modo == "tabela":
-            tabela = self.cb_tabela.get().strip()
-            if not tabela:
-                messagebox.showwarning("Tabela vazia", "Escolha uma tabela.", parent=self)
-                return
-            self.fonte = {
-                "modo": "tabela",
-                "tabela": tabela,
-                "where": self.txt_where.get("1.0", "end").strip(),
-                "mapeamento": mapa,
-            }
-        else:
-            sql = self.txt_sql.get("1.0", "end").strip()
-            if not sql:
-                messagebox.showwarning("SQL vazio", "Cole uma query SQL.", parent=self)
-                return
-            self.fonte = {"modo": "sql", "sql": sql, "mapeamento": mapa}
-        self.destroy()
+            modo = self.modo_var.get()
+            print(f"[DEBUG] modo = {modo!r}")
+            if modo == "tabela":
+                tabela = self.cb_tabela.get().strip()
+                if not tabela:
+                    messagebox.showwarning("Tabela vazia", "Escolha uma tabela.", parent=self)
+                    return
+                self.fonte = {
+                    "modo": "tabela",
+                    "tabela": tabela,
+                    "where": self.txt_where.get("1.0", "end").strip(),
+                    "mapeamento": mapa,
+                }
+            else:
+                sql = self.txt_sql.get("1.0", "end").strip()
+                print(f"[DEBUG] sql len = {len(sql)}")
+                if not sql:
+                    messagebox.showwarning("SQL vazio", "Cole uma query SQL.", parent=self)
+                    return
+                self.fonte = {"modo": "sql", "sql": sql, "mapeamento": mapa}
+            print(f"[DEBUG] fonte definida: {self.fonte!r}")
+            print("[DEBUG] chamando destroy()")
+            self.destroy()
+            print("[DEBUG] destroy concluído")
+        except Exception as e:
+            import traceback
+            print(f"[DEBUG] EXCEÇÃO em _confirmar: {e}")
+            traceback.print_exc()
+            messagebox.showerror("Erro ao confirmar", str(e), parent=self)
 
     def _cancelar(self) -> None:
         self.fonte = None
