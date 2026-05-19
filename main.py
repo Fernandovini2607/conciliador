@@ -29,6 +29,15 @@ CAMPOS = [
     ("descricao", "Descrição"),
 ]
 
+CAMPOS_EXTRAS_UI = [
+    ("data_emissao", "Data emissão"),
+    ("numero_nf", "Nº NF"),
+    ("cnpj", "CNPJ fornecedor"),
+    ("fornecedor", "Fornecedor"),
+]
+
+OPCAO_VAZIA = "(não usar)"
+
 
 class DialogoMapeamento(tk.Toplevel):
     """Modal para o usuário escolher quais colunas da planilha são Data/Valor/Descrição."""
@@ -72,12 +81,34 @@ class DialogoMapeamento(tk.Toplevel):
             cb.bind("<<ComboboxSelected>>", lambda _e: self._atualiza_preview())
             self.combos[campo] = cb
 
+        # ----- Campos extras opcionais (data emissão, NF, CNPJ, fornecedor)
+        opcoes_extras = [OPCAO_VAZIA] + self.opcoes
+        ttk.Separator(self, orient="horizontal").grid(
+            row=len(CAMPOS) + 1, column=0, columnspan=2, sticky="we", padx=12, pady=(6, 2),
+        )
+        ttk.Label(
+            self, text="Campos extras (opcionais — deixe vazio se a planilha não tem):",
+            font=("TkDefaultFont", 9, "italic"),
+        ).grid(row=len(CAMPOS) + 2, column=0, columnspan=2, padx=12, pady=(2, 4), sticky="w")
+        for j, (campo, rotulo) in enumerate(CAMPOS_EXTRAS_UI):
+            row = len(CAMPOS) + 3 + j
+            ttk.Label(self, text=f"{rotulo}:").grid(row=row, column=0, padx=12, pady=2, sticky="e")
+            cb = ttk.Combobox(self, values=opcoes_extras, state="readonly", width=48)
+            cb.grid(row=row, column=1, padx=(0, 12), pady=2, sticky="w")
+            idx_sug = estrutura.sugestao.get(campo)
+            if idx_sug is not None and 0 <= idx_sug < len(self.opcoes):
+                cb.current(idx_sug + 1)  # +1 porque tem OPCAO_VAZIA no início
+            else:
+                cb.current(0)
+            self.combos[campo] = cb
+
+        row_preview = len(CAMPOS) + 3 + len(CAMPOS_EXTRAS_UI)
         ttk.Label(self, text="Preview das primeiras linhas:").grid(
-            row=len(CAMPOS) + 1, column=0, columnspan=2, padx=12, pady=(8, 2), sticky="w",
+            row=row_preview, column=0, columnspan=2, padx=12, pady=(8, 2), sticky="w",
         )
 
         preview_frame = ttk.Frame(self)
-        preview_frame.grid(row=len(CAMPOS) + 2, column=0, columnspan=2, padx=12, sticky="we")
+        preview_frame.grid(row=row_preview + 1, column=0, columnspan=2, padx=12, sticky="we")
 
         cols = ("linha", "data", "valor", "descricao")
         self.preview = ttk.Treeview(
@@ -96,11 +127,11 @@ class DialogoMapeamento(tk.Toplevel):
 
         self.lbl_status = ttk.Label(self, text="")
         self.lbl_status.grid(
-            row=len(CAMPOS) + 3, column=0, columnspan=2, padx=12, pady=(4, 0), sticky="w",
+            row=row_preview + 2, column=0, columnspan=2, padx=12, pady=(4, 0), sticky="w",
         )
 
         botoes = ttk.Frame(self)
-        botoes.grid(row=len(CAMPOS) + 4, column=0, columnspan=2, pady=(8, 12), padx=12, sticky="e")
+        botoes.grid(row=row_preview + 3, column=0, columnspan=2, pady=(8, 12), padx=12, sticky="e")
         ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=6)
         ttk.Button(botoes, text="Confirmar", command=self._confirmar).pack(side="right", padx=6)
 
@@ -184,10 +215,16 @@ class DialogoMapeamento(tk.Toplevel):
         if len(set(mapa.values())) < 3:
             messagebox.showwarning(
                 "Colunas duplicadas",
-                "Cada campo precisa apontar para uma coluna diferente.",
+                "Os campos obrigatórios (Data/Valor/Descrição) precisam apontar "
+                "para colunas diferentes.",
                 parent=self,
             )
             return
+        # Campos extras: índice 0 = "(não usar)", >0 = mapeado (subtrai 1)
+        for campo, _ in CAMPOS_EXTRAS_UI:
+            sel = self.combos[campo].current()
+            if sel > 0:
+                mapa[campo] = sel - 1
         self.mapeamento = mapa
         self.destroy()
 
@@ -314,20 +351,24 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
-        cols = ("tipo", "data", "valor", "desc_p", "desc_o", "diff")
+        cols = ("tipo", "data", "valor", "nf", "fornecedor", "desc_p", "desc_o", "diff")
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
         tree.heading("data", text="Data")
         tree.heading("valor", text="Valor")
+        tree.heading("nf", text="Nº NF")
+        tree.heading("fornecedor", text="Fornecedor")
         tree.heading("desc_p", text="Descrição (planilha)")
         tree.heading("desc_o", text="Descrição (OFX)")
         tree.heading("diff", text="Diferenças")
-        tree.column("tipo", width=80, anchor="w")
-        tree.column("data", width=90, anchor="center")
-        tree.column("valor", width=110, anchor="e")
-        tree.column("desc_p", width=300, anchor="w")
-        tree.column("desc_o", width=300, anchor="w")
-        tree.column("diff", width=140, anchor="w")
+        tree.column("tipo", width=70, anchor="w")
+        tree.column("data", width=85, anchor="center")
+        tree.column("valor", width=100, anchor="e")
+        tree.column("nf", width=80, anchor="center")
+        tree.column("fornecedor", width=200, anchor="w")
+        tree.column("desc_p", width=240, anchor="w")
+        tree.column("desc_o", width=240, anchor="w")
+        tree.column("diff", width=130, anchor="w")
         tree.tag_configure("auto", background="#d4edda")
         tree.tag_configure("manual", background="#cfe2ff")
 
@@ -456,18 +497,29 @@ class App(tk.Tk):
         )
         instr.pack(anchor="w", padx=6, pady=(6, 4))
 
-        cols = ("status", "data", "valor", "desc_concil", "desc_dominio")
+        cols = (
+            "status", "vencimento", "valor", "emissao", "nf",
+            "cnpj", "fornecedor", "desc_concil", "desc_dominio",
+        )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("status", text="Status")
-        tree.heading("data", text="Data")
+        tree.heading("vencimento", text="Vencimento")
         tree.heading("valor", text="Valor")
+        tree.heading("emissao", text="Emissão")
+        tree.heading("nf", text="Nº NF")
+        tree.heading("cnpj", text="CNPJ")
+        tree.heading("fornecedor", text="Fornecedor")
         tree.heading("desc_concil", text="Descrição (planilha/OFX)")
         tree.heading("desc_dominio", text="Descrição (Domínio)")
-        tree.column("status", width=180, anchor="w")
-        tree.column("data", width=90, anchor="center")
-        tree.column("valor", width=110, anchor="e")
-        tree.column("desc_concil", width=320, anchor="w")
-        tree.column("desc_dominio", width=320, anchor="w")
+        tree.column("status", width=160, anchor="w")
+        tree.column("vencimento", width=85, anchor="center")
+        tree.column("valor", width=95, anchor="e")
+        tree.column("emissao", width=85, anchor="center")
+        tree.column("nf", width=75, anchor="center")
+        tree.column("cnpj", width=130, anchor="w")
+        tree.column("fornecedor", width=200, anchor="w")
+        tree.column("desc_concil", width=200, anchor="w")
+        tree.column("desc_dominio", width=200, anchor="w")
         tree.tag_configure("ok", background="#d4edda")
         tree.tag_configure("falta_dominio", background="#fff3cd")
         tree.tag_configure("falta_concil", background="#f8d7da")
@@ -596,26 +648,41 @@ class App(tk.Tk):
         for item in self.tree_dominio.get_children():
             self.tree_dominio.delete(item)
 
+        def _fmt_data(d) -> str:
+            return d.strftime("%d/%m/%Y") if d else ""
+
         n_ok = n_falta_dom = 0
         for status, par, t_dom in resultados:
-            if status == "ok":
+            ok = status == "ok"
+            if ok:
                 n_ok += 1
                 rotulo = "Conciliado e no Domínio"
-                desc_dom = t_dom.descricao if t_dom else ""
             else:
                 n_falta_dom += 1
                 rotulo = "Conciliado, falta no Domínio"
-                desc_dom = ""
+            # Extras: prioriza Domínio se houver, depois planilha
+            origem_extras = t_dom.extras if t_dom else par.planilha.extras
+            extras_fallback = par.planilha.extras
+            emissao = origem_extras.get("data_emissao") or extras_fallback.get("data_emissao")
+            nf = origem_extras.get("numero_nf") or extras_fallback.get("numero_nf", "")
+            cnpj = origem_extras.get("cnpj") or extras_fallback.get("cnpj", "")
+            fornecedor = origem_extras.get("fornecedor") or extras_fallback.get("fornecedor", "")
+            desc_dom = t_dom.descricao if t_dom else ""
+
             self.tree_dominio.insert(
                 "", "end",
                 values=(
                     rotulo,
                     par.planilha.data.strftime("%d/%m/%Y"),
                     f"{par.planilha.valor:.2f}",
+                    _fmt_data(emissao),
+                    nf,
+                    cnpj,
+                    fornecedor,
                     par.planilha.descricao or par.ofx.descricao,
                     desc_dom,
                 ),
-                tags=("ok" if status == "ok" else "falta_dominio",),
+                tags=("ok" if ok else "falta_dominio",),
             )
 
         for t in sobras_dominio:
@@ -625,6 +692,10 @@ class App(tk.Tk):
                     "No Domínio, sem conciliação",
                     t.data.strftime("%d/%m/%Y"),
                     f"{t.valor:.2f}",
+                    _fmt_data(t.extras.get("data_emissao")),
+                    t.extras.get("numero_nf", ""),
+                    t.extras.get("cnpj", ""),
+                    t.extras.get("fornecedor", ""),
                     "",
                     t.descricao,
                 ),
@@ -876,12 +947,16 @@ class App(tk.Tk):
             if par.diff_dias or par.diff_valor:
                 diff_txt = f"Δ {par.diff_dias}d, R$ {par.diff_valor:.2f}"
             tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
+            nf = par.planilha.extras.get("numero_nf", "") or par.ofx.extras.get("numero_nf", "")
+            fornecedor = par.planilha.extras.get("fornecedor", "") or par.ofx.extras.get("fornecedor", "")
             iid = self.tree_conciliados.insert(
                 "", "end",
                 values=(
                     tipo_txt,
                     par.planilha.data.strftime("%d/%m/%Y"),
                     f"{par.planilha.valor:.2f}",
+                    nf,
+                    fornecedor,
                     par.planilha.descricao,
                     par.ofx.descricao,
                     diff_txt,

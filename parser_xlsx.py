@@ -2,18 +2,24 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
 
+# Campos extras opcionais que podem ser mapeados a partir de qualquer fonte
+# (planilha, Domínio). Quando o campo não é mapeado fica fora do dict ``extras``.
+CAMPOS_EXTRAS = ("data_emissao", "numero_nf", "cnpj", "fornecedor")
+
+
 @dataclass
 class Transacao:
-    data: date
+    data: date                           # data de vencimento (ou pagamento, conforme mapeado)
     valor: Decimal
     descricao: str
     origem: str = "planilha"
     linha: int | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -24,18 +30,20 @@ class EstruturaPlanilha:
     linha_cabecalho: int = 1
 
 
+# Aliases para auto-detecção das colunas obrigatórias (Data/Valor/Descrição)
 DATA_ALIASES = {
     "data", "date", "dt", "dia",
     "data lancamento", "data lançamento", "data do lancamento", "data do lançamento",
-    "data emissao", "data emissão", "data movimento", "data mov",
+    "data movimento", "data mov",
     "data pagamento", "data pgto", "data operacao", "data operação",
     "data credito", "data crédito", "data debito", "data débito",
-    "vencimento", "data vencimento", "data compensacao", "data compensação",
+    "vencimento", "data vencimento", "venc", "data venc",
+    "data compensacao", "data compensação",
 }
 VALOR_ALIASES = {
     "valor", "value", "amount", "montante", "vlr", "vl",
     "total", "quantia", "r$", "valor (r$)", "valor r$",
-    "valor lancamento", "valor lançamento",
+    "valor lancamento", "valor lançamento", "valor parcela", "valor da parcela",
     "credito", "crédito", "debito", "débito",
     "entrada", "saida", "saída",
 }
@@ -44,15 +52,41 @@ DESC_ALIASES = {
     "historico", "histórico", "detalhes", "detalhe",
     "lancamento", "lançamento", "evento", "transacao", "transação",
     "referencia", "referência", "ref",
-    "beneficiario", "beneficiário", "favorecido", "fornecedor",
     "documento", "doc", "complemento",
+}
+
+# Aliases para os campos extras opcionais
+DATA_EMISSAO_ALIASES = {
+    "data emissao", "data emissão", "emissao", "emissão",
+    "data nf", "data da nota", "data documento", "dt emissao", "dt emissão",
+}
+NUMERO_NF_ALIASES = {
+    "nf", "n nf", "n° nf", "nº nf", "numero nf", "número nf",
+    "numero da nf", "número da nf", "num nf", "n nota", "nº nota",
+    "numero", "número", "numero documento", "número documento", "doc",
+    "nota", "nota fiscal", "numero nota fiscal",
+}
+CNPJ_ALIASES = {
+    "cnpj", "cnpj fornecedor", "cnpj do fornecedor", "cgc", "cnpj/cpf",
+    "documento fornecedor", "doc fornecedor",
+}
+FORNECEDOR_ALIASES = {
+    "fornecedor", "nome fornecedor", "nome do fornecedor", "razao social",
+    "razão social", "razao", "razão", "beneficiario", "beneficiário",
+    "favorecido", "credor", "pagamento a", "para", "destinatario", "destinatário",
 }
 
 ALIAS_MAP = {
     "data": DATA_ALIASES,
     "valor": VALOR_ALIASES,
     "descricao": DESC_ALIASES,
+    "data_emissao": DATA_EMISSAO_ALIASES,
+    "numero_nf": NUMERO_NF_ALIASES,
+    "cnpj": CNPJ_ALIASES,
+    "fornecedor": FORNECEDOR_ALIASES,
 }
+
+CAMPOS_OBRIGATORIOS = ("data", "valor", "descricao")
 
 
 def _normaliza(texto: object) -> str:
@@ -126,9 +160,17 @@ def _detecta_linha_cabecalho(linhas: list[tuple], max_busca: int = 15) -> int:
 
 
 def _mapeia_por_nome(cabecalho: list[str]) -> dict[str, int]:
+    """Auto-detecta colunas obrigatórias E extras pelo nome do cabeçalho.
+
+    Estratégia: prioriza aliases mais específicos primeiro (data_emissao tem
+    'data emissao' que é mais específico que só 'data'; vencimento idem).
+    """
     mapa: dict[str, int] = {}
     usados: set[int] = set()
-    for campo, aliases in ALIAS_MAP.items():
+    # Ordem importa: campos mais específicos antes dos genéricos
+    ordem = ("data_emissao", "numero_nf", "cnpj", "fornecedor", "data", "valor", "descricao")
+    for campo in ordem:
+        aliases = ALIAS_MAP[campo]
         for idx, cel in enumerate(cabecalho):
             if idx in usados:
                 continue
@@ -230,13 +272,18 @@ def descobrir_estrutura(caminho: str | Path) -> EstruturaPlanilha:
 
 
 def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int]) -> list[Transacao]:
-    faltando = {"data", "valor", "descricao"} - mapeamento.keys()
+    faltando = set(CAMPOS_OBRIGATORIOS) - mapeamento.keys()
     if faltando:
         raise ValueError(f"Mapeamento incompleto: {', '.join(sorted(faltando))}")
 
     i_data = mapeamento["data"]
     i_valor = mapeamento["valor"]
     i_desc = mapeamento["descricao"]
+    indices_extras = {
+        campo: mapeamento[campo]
+        for campo in CAMPOS_EXTRAS
+        if campo in mapeamento and isinstance(mapeamento[campo], int) and mapeamento[campo] >= 0
+    }
     base = estrutura.linha_cabecalho + 1
 
     transacoes: list[Transacao] = []
@@ -250,8 +297,25 @@ def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int])
         descricao = ""
         if i_desc < len(linha) and linha[i_desc] is not None:
             descricao = str(linha[i_desc]).strip()
+
+        extras: dict[str, Any] = {}
+        for campo, idx in indices_extras.items():
+            if idx >= len(linha):
+                continue
+            valor_celula = linha[idx]
+            if valor_celula is None or valor_celula == "":
+                continue
+            if campo == "data_emissao":
+                d = para_data(valor_celula)
+                if d is not None:
+                    extras[campo] = d
+            else:
+                # numero_nf, cnpj, fornecedor — tratados como string
+                extras[campo] = str(valor_celula).strip()
+
         transacoes.append(Transacao(
-            data=data, valor=valor, descricao=descricao, linha=base + offset,
+            data=data, valor=valor, descricao=descricao,
+            linha=base + offset, extras=extras,
         ))
     return transacoes
 

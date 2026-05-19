@@ -25,7 +25,7 @@ from typing import Any, Iterator
 
 import pyodbc
 
-from parser_xlsx import Transacao, para_data, para_decimal
+from parser_xlsx import CAMPOS_EXTRAS, Transacao, para_data, para_decimal
 
 DOMINIO_CONFIG_PATH = Path(__file__).parent / "data" / "dominio_config.json"
 SCHEMA_PADRAO = "bethadba"
@@ -264,15 +264,29 @@ def extrair_pagamentos(
     como parâmetro se o SQL contiver ``?``).
     """
     mapeamento: dict[str, str] = fonte["mapeamento"]
+    # Apenas extras realmente mapeados (não vazios)
+    extras_pedidos = {
+        campo: mapeamento[campo]
+        for campo in CAMPOS_EXTRAS
+        if mapeamento.get(campo)
+    }
+
     if fonte.get("modo") == "sql":
         sql = fonte["sql"]
-        # Se o usuário usou ? no SQL e temos codi_emp, passamos como parâmetro.
         params: tuple[Any, ...] = (codi_emp,) if (codi_emp is not None and "?" in sql) else ()
         colunas, linhas = executar_query(conn, sql, params)
     else:
         cols_pedidas = [mapeamento["data"], mapeamento["valor"], mapeamento["descricao"]]
+        cols_pedidas.extend(extras_pedidos.values())
+        # Remove duplicatas mantendo ordem
+        vistos: set[str] = set()
+        cols_unicas: list[str] = []
+        for c in cols_pedidas:
+            if c not in vistos:
+                cols_unicas.append(c)
+                vistos.add(c)
         sql, params = _monta_select(
-            fonte["tabela"], cols_pedidas, fonte.get("where", ""), codi_emp=codi_emp,
+            fonte["tabela"], cols_unicas, fonte.get("where", ""), codi_emp=codi_emp,
         )
         colunas, linhas = executar_query(conn, sql, params)
 
@@ -284,6 +298,11 @@ def extrair_pagamentos(
         raise ValueError(
             f"Coluna do mapeamento não encontrada no resultado da query: {e}"
         )
+    indices_extras = {
+        campo: colunas.index(col_nome)
+        for campo, col_nome in extras_pedidos.items()
+        if col_nome in colunas
+    }
 
     transacoes: list[Transacao] = []
     for linha in linhas:
@@ -292,7 +311,21 @@ def extrair_pagamentos(
         if data is None or valor is None:
             continue
         descricao = "" if linha[i_desc] is None else str(linha[i_desc]).strip()
+
+        extras: dict[str, Any] = {}
+        for campo, idx in indices_extras.items():
+            celula = linha[idx]
+            if celula is None or celula == "":
+                continue
+            if campo == "data_emissao":
+                d = para_data(celula)
+                if d is not None:
+                    extras[campo] = d
+            else:
+                extras[campo] = str(celula).strip()
+
         transacoes.append(Transacao(
-            data=data, valor=abs(valor), descricao=descricao, origem="dominio",
+            data=data, valor=abs(valor), descricao=descricao,
+            origem="dominio", extras=extras,
         ))
     return transacoes
