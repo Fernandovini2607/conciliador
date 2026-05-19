@@ -4,7 +4,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import config
 import parser_dominio
-from dialogos_dominio import DialogoConexao, DialogoFonte
+from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
 from matcher import (
     Par,
     Resultado,
@@ -272,6 +272,10 @@ class App(tk.Tk):
         topo3 = ttk.Frame(self, padding=(10, 0, 10, 6))
         topo3.pack(fill="x")
         ttk.Button(topo3, text="Conectar Domínio", command=self._conectar_dominio).pack(side="left", padx=4)
+        self.btn_empresa = ttk.Button(
+            topo3, text="Selecionar empresa", command=self._selecionar_empresa, state="disabled",
+        )
+        self.btn_empresa.pack(side="left", padx=4)
         self.btn_fonte = ttk.Button(
             topo3, text="Configurar fonte", command=self._configurar_fonte_dominio, state="disabled",
         )
@@ -483,11 +487,34 @@ class App(tk.Tk):
         if dlg.conn is None:
             return
         self.conn_dominio = dlg.conn
-        cred = parser_dominio.load_odbc_config()
-        self.lbl_dominio.config(text=f"Conectado (read-only): DSN={cred.get('dsn', '?')}")
+        self.btn_empresa.config(state="normal")
         self.btn_fonte.config(state="normal")
         if self.cfg.get("dominio_fonte", {}).get("mapeamento"):
             self.btn_carregar_dominio.config(state="normal")
+        self._atualiza_label_dominio()
+
+    def _selecionar_empresa(self) -> None:
+        if self.conn_dominio is None:
+            return
+        dlg = DialogoSelecionarEmpresa(
+            self, self.conn_dominio, self.cfg.get("dominio_empresa"),
+        )
+        self.wait_window(dlg)
+        if dlg.empresa is None:
+            return
+        self.cfg["dominio_empresa"] = dlg.empresa
+        config.salvar(self.cfg)
+        self._atualiza_label_dominio()
+
+    def _atualiza_label_dominio(self) -> None:
+        cred = parser_dominio.load_odbc_config()
+        emp = self.cfg.get("dominio_empresa")
+        partes = [f"Conectado (read-only): DSN={cred.get('dsn', '?')}"]
+        if emp:
+            partes.append(f"Empresa: {emp['codi_emp']} — {emp['razao'][:40]}")
+        if self.transacoes_dominio:
+            partes.append(f"{len(self.transacoes_dominio)} pagamentos carregados")
+        self.lbl_dominio.config(text="  |  ".join(partes))
 
     def _configurar_fonte_dominio(self) -> None:
         if self.conn_dominio is None:
@@ -511,16 +538,24 @@ class App(tk.Tk):
                 "Configure a fonte de pagamentos primeiro.",
             )
             return
+        emp = self.cfg.get("dominio_empresa") or {}
+        codi_emp = emp.get("codi_emp")
+        if codi_emp is None and fonte.get("modo") == "tabela":
+            if not messagebox.askyesno(
+                "Sem empresa selecionada",
+                "Você não selecionou uma empresa — a query vai retornar "
+                "lançamentos de TODAS as empresas misturadas.\n\n"
+                "Deseja continuar mesmo assim?",
+            ):
+                return
         try:
             self.transacoes_dominio = parser_dominio.extrair_pagamentos(
-                self.conn_dominio, fonte,
+                self.conn_dominio, fonte, codi_emp=codi_emp,
             )
         except Exception as e:
             messagebox.showerror("Erro ao ler Domínio", str(e))
             return
-        self.lbl_dominio.config(
-            text=f"Conectado (read-only) — {len(self.transacoes_dominio)} pagamentos no Domínio"
-        )
+        self._atualiza_label_dominio()
         self._atualiza_botao_comparar()
 
     def _atualiza_botao_comparar(self) -> None:

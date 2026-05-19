@@ -158,43 +158,123 @@ def amostra(
 def executar_query(
     conn: pyodbc.Connection,
     sql: str,
+    params: tuple[Any, ...] = (),
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
     cursor = conn.cursor()
-    cursor.execute(sql)
+    cursor.execute(sql, params) if params else cursor.execute(sql)
     colunas = [c[0] for c in cursor.description]
     linhas = [tuple(r) for r in cursor.fetchall()]
     return colunas, linhas
 
 
+# ---------------------------------------------------------- empresas
+
+def listar_empresas(conn: pyodbc.Connection) -> list[dict[str, Any]]:
+    """Lista empresas cadastradas em ``bethadba.geempre``.
+
+    Como os nomes das colunas mudam entre versões do Domínio (RAZA_EMP /
+    RAZAO_EMP / RAZAO_SOCIAL etc.), tenta variantes conhecidas e cai num
+    fallback que inspeciona o schema da tabela.
+    """
+    cursor = conn.cursor()
+    tentativas = [
+        ("SELECT CODI_EMP, RAZA_EMP, CGCE_EMP FROM bethadba.geempre ORDER BY RAZA_EMP",
+         ("codi_emp", "razao", "cnpj")),
+        ("SELECT CODI_EMP, RAZAO_EMP, CGCE_EMP FROM bethadba.geempre ORDER BY RAZAO_EMP",
+         ("codi_emp", "razao", "cnpj")),
+        ("SELECT CODI_EMP, NOME_EMP, CGCE_EMP FROM bethadba.geempre ORDER BY NOME_EMP",
+         ("codi_emp", "razao", "cnpj")),
+    ]
+    for sql, _ in tentativas:
+        try:
+            cursor.execute(sql)
+            return [
+                {"codi_emp": r[0], "razao": str(r[1] or "").strip(),
+                 "cnpj": str(r[2] or "").strip()}
+                for r in cursor.fetchall()
+            ]
+        except pyodbc.Error:
+            continue
+
+    # Fallback: SELECT * e detecta colunas
+    cursor.execute("SELECT * FROM bethadba.geempre")
+    colunas = [c[0].upper() for c in cursor.description]
+    idx_emp = next((i for i, c in enumerate(colunas) if c == "CODI_EMP"), None)
+    idx_raz = next(
+        (i for i, c in enumerate(colunas) if "RAZ" in c or "NOME" in c),
+        None,
+    )
+    idx_cnpj = next(
+        (i for i, c in enumerate(colunas) if "CGC" in c or "CNPJ" in c),
+        None,
+    )
+    if idx_emp is None:
+        raise RuntimeError("Tabela bethadba.geempre não tem coluna CODI_EMP.")
+    resultado = []
+    for r in cursor.fetchall():
+        resultado.append({
+            "codi_emp": r[idx_emp],
+            "razao": str(r[idx_raz] or "").strip() if idx_raz is not None else "",
+            "cnpj": str(r[idx_cnpj] or "").strip() if idx_cnpj is not None else "",
+        })
+    resultado.sort(key=lambda e: e["razao"])
+    return resultado
+
+
 # --------------------------------------------------- extração de pagamentos
 
-def _monta_select(tabela: str, colunas: list[str], where: str) -> str:
+def _monta_select(
+    tabela: str,
+    colunas: list[str],
+    where: str,
+    codi_emp: int | None = None,
+) -> tuple[str, tuple[Any, ...]]:
+    """Monta SELECT com WHERE composto. Quando ``codi_emp`` é informado,
+    injeta automaticamente ``CODI_EMP = ?`` no filtro (parâmetro pyodbc)."""
     sql = f"SELECT {', '.join(colunas)} FROM {tabela}"
+    cond: list[str] = []
+    params: list[Any] = []
     if where.strip():
-        sql += f" WHERE {where.strip()}"
-    return sql
+        cond.append(f"({where.strip()})")
+    if codi_emp is not None:
+        cond.append("CODI_EMP = ?")
+        params.append(codi_emp)
+    if cond:
+        sql += " WHERE " + " AND ".join(cond)
+    return sql, tuple(params)
 
 
 def extrair_pagamentos(
     conn: pyodbc.Connection,
     fonte: dict[str, Any],
+    codi_emp: int | None = None,
 ) -> list[Transacao]:
     """Extrai pagamentos do Domínio conforme a configuração da fonte.
 
     ``fonte`` aceita dois modos:
 
-    * ``{"modo": "tabela", "tabela": "bethadba.efpagamentos",
+    * ``{"modo": "tabela", "tabela": "bethadba.efentradas",
        "mapeamento": {data, valor, descricao}, "where": "...opcional"}``
     * ``{"modo": "sql", "sql": "SELECT ...",
        "mapeamento": {data, valor, descricao}}``
+
+    Quando ``codi_emp`` é fornecido e o modo é "tabela", a função injeta
+    ``CODI_EMP = ?`` no WHERE automaticamente. No modo "sql" o filtro deve
+    estar dentro do SELECT escrito pelo usuário (o app só passa ``codi_emp``
+    como parâmetro se o SQL contiver ``?``).
     """
     mapeamento: dict[str, str] = fonte["mapeamento"]
     if fonte.get("modo") == "sql":
-        colunas, linhas = executar_query(conn, fonte["sql"])
+        sql = fonte["sql"]
+        # Se o usuário usou ? no SQL e temos codi_emp, passamos como parâmetro.
+        params: tuple[Any, ...] = (codi_emp,) if (codi_emp is not None and "?" in sql) else ()
+        colunas, linhas = executar_query(conn, sql, params)
     else:
         cols_pedidas = [mapeamento["data"], mapeamento["valor"], mapeamento["descricao"]]
-        sql = _monta_select(fonte["tabela"], cols_pedidas, fonte.get("where", ""))
-        colunas, linhas = executar_query(conn, sql)
+        sql, params = _monta_select(
+            fonte["tabela"], cols_pedidas, fonte.get("where", ""), codi_emp=codi_emp,
+        )
+        colunas, linhas = executar_query(conn, sql, params)
 
     try:
         i_data = colunas.index(mapeamento["data"])

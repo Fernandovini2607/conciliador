@@ -92,6 +92,112 @@ class DialogoConexao(tk.Toplevel):
         self.destroy()
 
 
+class DialogoSelecionarEmpresa(tk.Toplevel):
+    """Lista as empresas de ``bethadba.geempre`` com campo de busca.
+
+    Recebe a conexão e devolve em ``self.empresa`` o dicionário escolhido
+    ``{"codi_emp": int, "razao": str, "cnpj": str}`` (ou ``None`` se cancelar).
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        conn: pyodbc.Connection,
+        empresa_atual: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(master)
+        self.title("Selecionar empresa")
+        self.transient(master)
+        self.grab_set()
+        self.geometry("680x520")
+
+        self.conn = conn
+        self.empresa: dict[str, Any] | None = None
+        self.empresas: list[dict[str, Any]] = []
+        self.codi_atual = (empresa_atual or {}).get("codi_emp")
+
+        topo = ttk.Frame(self, padding=(10, 10, 10, 4))
+        topo.pack(fill="x")
+        ttk.Label(topo, text="Buscar:").pack(side="left")
+        self.var_busca = tk.StringVar()
+        self.var_busca.trace_add("write", lambda *_a: self._aplica_filtro())
+        ent = ttk.Entry(topo, textvariable=self.var_busca, width=40)
+        ent.pack(side="left", padx=6)
+        ent.focus_set()
+
+        ttk.Button(topo, text="Recarregar", command=self._carregar).pack(side="left", padx=4)
+
+        meio = ttk.Frame(self, padding=(10, 0, 10, 4))
+        meio.pack(fill="both", expand=True)
+        cols = ("codi", "razao", "cnpj")
+        self.tree = ttk.Treeview(meio, columns=cols, show="headings", selectmode="browse")
+        self.tree.heading("codi", text="Código")
+        self.tree.heading("razao", text="Razão social")
+        self.tree.heading("cnpj", text="CNPJ")
+        self.tree.column("codi", width=70, anchor="center")
+        self.tree.column("razao", width=380, anchor="w")
+        self.tree.column("cnpj", width=140, anchor="w")
+        sb = ttk.Scrollbar(meio, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree.bind("<Double-Button-1>", lambda _e: self._confirmar())
+
+        rodape = ttk.Frame(self, padding=(10, 4, 10, 10))
+        rodape.pack(fill="x")
+        self.lbl_status = ttk.Label(rodape, text="")
+        self.lbl_status.pack(side="left")
+        ttk.Button(rodape, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
+        ttk.Button(rodape, text="Selecionar", command=self._confirmar).pack(side="right", padx=4)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Escape>", lambda _e: self._cancelar())
+        self.bind("<Return>", lambda _e: self._confirmar())
+
+        self._carregar()
+
+    def _carregar(self) -> None:
+        self.lbl_status.config(text="Carregando empresas…")
+        self.update_idletasks()
+        try:
+            self.empresas = parser_dominio.listar_empresas(self.conn)
+        except Exception as e:
+            messagebox.showerror("Erro ao listar empresas", str(e), parent=self)
+            self.empresas = []
+        self.lbl_status.config(text=f"{len(self.empresas)} empresas")
+        self._aplica_filtro()
+
+    def _aplica_filtro(self) -> None:
+        termo = self.var_busca.get().strip().lower()
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for emp in self.empresas:
+            if termo:
+                buscavel = f"{emp['codi_emp']} {emp['razao']} {emp['cnpj']}".lower()
+                if termo not in buscavel:
+                    continue
+            iid = self.tree.insert(
+                "", "end", values=(emp["codi_emp"], emp["razao"], emp["cnpj"]),
+            )
+            if emp["codi_emp"] == self.codi_atual:
+                self.tree.selection_set(iid)
+                self.tree.see(iid)
+
+    def _confirmar(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Sem seleção", "Escolha uma empresa.", parent=self)
+            return
+        vals = self.tree.item(sel[0], "values")
+        codi = int(vals[0]) if str(vals[0]).isdigit() else vals[0]
+        self.empresa = {"codi_emp": codi, "razao": vals[1], "cnpj": vals[2]}
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.empresa = None
+        self.destroy()
+
+
 class DialogoFonte(tk.Toplevel):
     """Depois de conectar: escolhe tabela (ou query SQL), mostra amostra
     e mapeia colunas Data/Valor/Descrição.
