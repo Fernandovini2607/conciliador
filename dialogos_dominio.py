@@ -206,14 +206,14 @@ class DialogoFonte(tk.Toplevel):
     """
 
     PREVIEW_LINHAS = 15
-    CAMPOS = [("data", "Data vencimento"), ("valor", "Valor"), ("descricao", "Descrição")]
-    CAMPOS_EXTRAS = [
+    CAMPOS = [
+        ("data", "Data vencimento"),
         ("data_emissao", "Data emissão"),
+        ("valor", "Valor"),
         ("numero_nf", "Nº NF"),
         ("cnpj", "CNPJ fornecedor"),
         ("fornecedor", "Fornecedor"),
     ]
-    OPCAO_VAZIA = "(não usar)"
 
     def __init__(
         self,
@@ -288,39 +288,19 @@ class DialogoFonte(tk.Toplevel):
             command=self._carrega_amostra,
         ).pack(side="left", padx=4)
 
-        # ----- mapeamento
+        # ----- mapeamento (6 campos obrigatórios em 2 linhas de 3)
         self.frame_map = ttk.Frame(self)
         self.combos: dict[str, ttk.Combobox] = {}
         mapeamento = cfg.get("mapeamento", {})
 
-        # Linha 0: campos obrigatórios
-        ttk.Label(
-            self.frame_map, text="Obrigatórios:",
-            font=("TkDefaultFont", 9, "bold"),
-        ).grid(row=0, column=0, columnspan=6, padx=4, pady=(0, 2), sticky="w")
         for i, (campo, rotulo) in enumerate(self.CAMPOS):
+            row = i // 3
+            col = (i % 3) * 2
             ttk.Label(self.frame_map, text=f"{rotulo}:").grid(
-                row=1, column=i * 2, padx=(0, 4), sticky="e",
+                row=row, column=col, padx=(0, 4), pady=2, sticky="e",
             )
             cb = ttk.Combobox(self.frame_map, state="readonly", width=22)
-            cb.grid(row=1, column=i * 2 + 1, padx=(0, 12), sticky="w")
-            if mapeamento.get(campo):
-                cb.set(mapeamento[campo])
-            self.combos[campo] = cb
-
-        # Linha 2-3: campos extras opcionais
-        ttk.Label(
-            self.frame_map, text="Extras (opcionais):",
-            font=("TkDefaultFont", 9, "bold"),
-        ).grid(row=2, column=0, columnspan=6, padx=4, pady=(8, 2), sticky="w")
-        for i, (campo, rotulo) in enumerate(self.CAMPOS_EXTRAS):
-            row = 3 + (i // 2)
-            col = (i % 2) * 3
-            ttk.Label(self.frame_map, text=f"{rotulo}:").grid(
-                row=row, column=col, padx=(0, 4), sticky="e",
-            )
-            cb = ttk.Combobox(self.frame_map, state="readonly", width=22)
-            cb.grid(row=row, column=col + 1, padx=(0, 12), sticky="w")
+            cb.grid(row=row, column=col + 1, padx=(0, 12), pady=2, sticky="w")
             if mapeamento.get(campo):
                 cb.set(mapeamento[campo])
             self.combos[campo] = cb
@@ -400,21 +380,13 @@ class DialogoFonte(tk.Toplevel):
         for linha in linhas:
             self.tree.insert("", "end", values=tuple(str(c) if c is not None else "" for c in linha))
 
-        campos_extras_set = {c for c, _ in self.CAMPOS_EXTRAS}
         for campo, cb in self.combos.items():
             atual = cb.get()
-            if campo in campos_extras_set:
-                cb["values"] = [self.OPCAO_VAZIA] + colunas
-                if atual in colunas:
-                    cb.set(atual)
-                else:
-                    cb.set(self.OPCAO_VAZIA)
+            cb["values"] = colunas
+            if atual in colunas:
+                cb.set(atual)
             else:
-                cb["values"] = colunas
-                if atual in colunas:
-                    cb.set(atual)
-                else:
-                    cb.set("")
+                cb.set("")
 
     def _confirmar(self) -> None:
         if not self.colunas_atuais:
@@ -425,20 +397,16 @@ class DialogoFonte(tk.Toplevel):
             )
             return
         mapa: dict[str, str] = {}
-        for campo, _ in self.CAMPOS:
+        for campo, rotulo in self.CAMPOS:
             valor = self.combos[campo].get().strip()
             if not valor:
                 messagebox.showwarning(
                     "Mapeamento incompleto",
-                    f"Escolha a coluna correspondente a {campo}.",
+                    f"Escolha a coluna correspondente a '{rotulo}'.",
                     parent=self,
                 )
                 return
             mapa[campo] = valor
-        for campo, _ in self.CAMPOS_EXTRAS:
-            valor = self.combos[campo].get().strip()
-            if valor and valor != self.OPCAO_VAZIA:
-                mapa[campo] = valor
 
         modo = self.modo_var.get()
         if modo == "tabela":

@@ -25,18 +25,12 @@ from parser_xlsx import (
 
 CAMPOS = [
     ("data", "Data vencimento"),
-    ("valor", "Valor"),
-    ("descricao", "Descrição"),
-]
-
-CAMPOS_EXTRAS_UI = [
     ("data_emissao", "Data emissão"),
+    ("valor", "Valor"),
     ("numero_nf", "Nº NF"),
     ("cnpj", "CNPJ fornecedor"),
     ("fornecedor", "Fornecedor"),
 ]
-
-OPCAO_VAZIA = "(não usar)"
 
 
 class DialogoMapeamento(tk.Toplevel):
@@ -81,28 +75,7 @@ class DialogoMapeamento(tk.Toplevel):
             cb.bind("<<ComboboxSelected>>", lambda _e: self._atualiza_preview())
             self.combos[campo] = cb
 
-        # ----- Campos extras opcionais (data emissão, NF, CNPJ, fornecedor)
-        opcoes_extras = [OPCAO_VAZIA] + self.opcoes
-        ttk.Separator(self, orient="horizontal").grid(
-            row=len(CAMPOS) + 1, column=0, columnspan=2, sticky="we", padx=12, pady=(6, 2),
-        )
-        ttk.Label(
-            self, text="Campos extras (opcionais — deixe vazio se a planilha não tem):",
-            font=("TkDefaultFont", 9, "italic"),
-        ).grid(row=len(CAMPOS) + 2, column=0, columnspan=2, padx=12, pady=(2, 4), sticky="w")
-        for j, (campo, rotulo) in enumerate(CAMPOS_EXTRAS_UI):
-            row = len(CAMPOS) + 3 + j
-            ttk.Label(self, text=f"{rotulo}:").grid(row=row, column=0, padx=12, pady=2, sticky="e")
-            cb = ttk.Combobox(self, values=opcoes_extras, state="readonly", width=48)
-            cb.grid(row=row, column=1, padx=(0, 12), pady=2, sticky="w")
-            idx_sug = estrutura.sugestao.get(campo)
-            if idx_sug is not None and 0 <= idx_sug < len(self.opcoes):
-                cb.current(idx_sug + 1)  # +1 porque tem OPCAO_VAZIA no início
-            else:
-                cb.current(0)
-            self.combos[campo] = cb
-
-        row_preview = len(CAMPOS) + 3 + len(CAMPOS_EXTRAS_UI)
+        row_preview = len(CAMPOS) + 1
         ttk.Label(self, text="Preview das primeiras linhas:").grid(
             row=row_preview, column=0, columnspan=2, padx=12, pady=(8, 2), sticky="w",
         )
@@ -110,18 +83,24 @@ class DialogoMapeamento(tk.Toplevel):
         preview_frame = ttk.Frame(self)
         preview_frame.grid(row=row_preview + 1, column=0, columnspan=2, padx=12, sticky="we")
 
-        cols = ("linha", "data", "valor", "descricao")
+        cols = ("linha", "data", "data_emissao", "valor", "numero_nf", "cnpj", "fornecedor")
         self.preview = ttk.Treeview(
             preview_frame, columns=cols, show="headings", height=self.PREVIEW_LINHAS,
         )
         self.preview.heading("linha", text="Linha")
-        self.preview.heading("data", text="Data")
+        self.preview.heading("data", text="Vencimento")
+        self.preview.heading("data_emissao", text="Emissão")
         self.preview.heading("valor", text="Valor")
-        self.preview.heading("descricao", text="Descrição")
-        self.preview.column("linha", width=55, anchor="center")
-        self.preview.column("data", width=140, anchor="w")
-        self.preview.column("valor", width=130, anchor="e")
-        self.preview.column("descricao", width=360, anchor="w")
+        self.preview.heading("numero_nf", text="Nº NF")
+        self.preview.heading("cnpj", text="CNPJ")
+        self.preview.heading("fornecedor", text="Fornecedor")
+        self.preview.column("linha", width=45, anchor="center")
+        self.preview.column("data", width=85, anchor="w")
+        self.preview.column("data_emissao", width=85, anchor="w")
+        self.preview.column("valor", width=90, anchor="e")
+        self.preview.column("numero_nf", width=70, anchor="center")
+        self.preview.column("cnpj", width=130, anchor="w")
+        self.preview.column("fornecedor", width=200, anchor="w")
         self.preview.tag_configure("erro", background="#f8d7da")
         self.preview.pack(side="left", fill="both", expand=True)
 
@@ -161,31 +140,49 @@ class DialogoMapeamento(tk.Toplevel):
                 return linha[i] if 0 <= i < len(linha) else None
 
             cel_data = _cel(idxs["data"])
+            cel_emis = _cel(idxs["data_emissao"])
             cel_valor = _cel(idxs["valor"])
-            cel_desc = _cel(idxs["descricao"])
+            cel_nf = _cel(idxs["numero_nf"])
+            cel_cnpj = _cel(idxs["cnpj"])
+            cel_forn = _cel(idxs["fornecedor"])
 
             data_parsed = para_data(cel_data) if idxs["data"] >= 0 else None
+            emis_parsed = para_data(cel_emis) if idxs["data_emissao"] >= 0 else None
             valor_parsed = para_decimal(cel_valor) if idxs["valor"] >= 0 else None
 
-            if data_parsed is not None and valor_parsed is not None:
+            # Tag de erro: campo essencial (venc, valor) ou emissão não converteu
+            if data_parsed is None or valor_parsed is None or emis_parsed is None:
+                tag = "erro"
+            else:
                 total_validas += 1
                 tag = ""
-            else:
-                tag = "erro"
 
-            data_txt = (
-                data_parsed.strftime("%d/%m/%Y") if data_parsed
-                else (f"✗ {cel_data!r}" if cel_data not in (None, "") else "—")
-            )
-            valor_txt = (
-                f"{valor_parsed:.2f}" if valor_parsed is not None
-                else (f"✗ {cel_valor!r}" if cel_valor not in (None, "") else "—")
-            )
-            desc_txt = "" if cel_desc is None else str(cel_desc)
+            def _fmt_data_txt(parsed, raw):
+                if parsed:
+                    return parsed.strftime("%d/%m/%Y")
+                if raw in (None, ""):
+                    return "—"
+                return f"✗ {raw!r}"
+
+            def _fmt_str(raw):
+                if raw in (None, ""):
+                    return "—"
+                return str(raw)
 
             self.preview.insert(
                 "", "end",
-                values=(base + offset, data_txt, valor_txt, desc_txt),
+                values=(
+                    base + offset,
+                    _fmt_data_txt(data_parsed, cel_data),
+                    _fmt_data_txt(emis_parsed, cel_emis),
+                    (
+                        f"{valor_parsed:.2f}" if valor_parsed is not None
+                        else (f"✗ {cel_valor!r}" if cel_valor not in (None, "") else "—")
+                    ),
+                    _fmt_str(cel_nf),
+                    _fmt_str(cel_cnpj),
+                    _fmt_str(cel_forn),
+                ),
                 tags=(tag,) if tag else (),
             )
 
@@ -202,29 +199,23 @@ class DialogoMapeamento(tk.Toplevel):
 
     def _confirmar(self) -> None:
         mapa: dict[str, int] = {}
-        for campo, _ in CAMPOS:
+        for campo, rotulo in CAMPOS:
             sel = self.combos[campo].current()
             if sel < 0:
                 messagebox.showwarning(
                     "Mapeamento incompleto",
-                    f"Selecione a coluna para '{campo}'.",
+                    f"Selecione a coluna para '{rotulo}'.",
                     parent=self,
                 )
                 return
             mapa[campo] = sel
-        if len(set(mapa.values())) < 3:
+        if len(set(mapa.values())) < len(CAMPOS):
             messagebox.showwarning(
                 "Colunas duplicadas",
-                "Os campos obrigatórios (Data/Valor/Descrição) precisam apontar "
-                "para colunas diferentes.",
+                "Cada campo precisa apontar para uma coluna diferente da planilha.",
                 parent=self,
             )
             return
-        # Campos extras: índice 0 = "(não usar)", >0 = mapeado (subtrai 1)
-        for campo, _ in CAMPOS_EXTRAS_UI:
-            sel = self.combos[campo].current()
-            if sel > 0:
-                mapa[campo] = sel - 1
         self.mapeamento = mapa
         self.destroy()
 
@@ -351,24 +342,26 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
-        cols = ("tipo", "data", "valor", "nf", "fornecedor", "desc_p", "desc_o", "diff")
+        cols = ("tipo", "data", "valor", "emissao", "nf", "cnpj", "fornecedor", "memo_ofx", "diff")
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
         tree.heading("data", text="Vencimento")
         tree.heading("valor", text="Valor")
+        tree.heading("emissao", text="Emissão")
         tree.heading("nf", text="Nº NF")
+        tree.heading("cnpj", text="CNPJ")
         tree.heading("fornecedor", text="Fornecedor")
-        tree.heading("desc_p", text="Descrição (planilha)")
-        tree.heading("desc_o", text="Descrição (OFX)")
+        tree.heading("memo_ofx", text="Memo OFX")
         tree.heading("diff", text="Diferenças")
-        tree.column("tipo", width=70, anchor="w")
+        tree.column("tipo", width=65, anchor="w")
         tree.column("data", width=85, anchor="center")
-        tree.column("valor", width=100, anchor="e")
-        tree.column("nf", width=80, anchor="center")
-        tree.column("fornecedor", width=200, anchor="w")
-        tree.column("desc_p", width=240, anchor="w")
-        tree.column("desc_o", width=240, anchor="w")
-        tree.column("diff", width=130, anchor="w")
+        tree.column("valor", width=95, anchor="e")
+        tree.column("emissao", width=85, anchor="center")
+        tree.column("nf", width=70, anchor="center")
+        tree.column("cnpj", width=130, anchor="w")
+        tree.column("fornecedor", width=180, anchor="w")
+        tree.column("memo_ofx", width=200, anchor="w")
+        tree.column("diff", width=110, anchor="w")
         tree.tag_configure("auto", background="#d4edda")
         tree.tag_configure("manual", background="#cfe2ff")
 
@@ -406,14 +399,15 @@ class App(tk.Tk):
         lado_p = ttk.LabelFrame(corpo, text="Só na planilha")
         lado_p.pack(side="left", fill="both", expand=True, padx=(6, 3), pady=(0, 4))
 
-        cols = ("data", "valor", "descricao")
+        cols_p = ("data", "valor", "nf", "fornecedor")
         self.tree_pend_p = ttk.Treeview(
-            lado_p, columns=cols, show="headings", selectmode="browse",
+            lado_p, columns=cols_p, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
             ("data", "Vencimento", 90, "center"),
-            ("valor", "Valor", 110, "e"),
-            ("descricao", "Descrição", 260, "w"),
+            ("valor", "Valor", 95, "e"),
+            ("nf", "Nº NF", 70, "center"),
+            ("fornecedor", "Fornecedor", 220, "w"),
         ]:
             self.tree_pend_p.heading(c, text=t)
             self.tree_pend_p.column(c, width=w, anchor=a)
@@ -425,13 +419,14 @@ class App(tk.Tk):
         lado_o = ttk.LabelFrame(corpo, text="Só no OFX")
         lado_o.pack(side="left", fill="both", expand=True, padx=(3, 6), pady=(0, 4))
 
+        cols_o = ("data", "valor", "descricao")
         self.tree_pend_o = ttk.Treeview(
-            lado_o, columns=cols, show="headings", selectmode="browse",
+            lado_o, columns=cols_o, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
             ("data", "Data pagamento", 90, "center"),
             ("valor", "Valor", 110, "e"),
-            ("descricao", "Descrição", 260, "w"),
+            ("descricao", "Memo OFX", 280, "w"),
         ]:
             self.tree_pend_o.heading(c, text=t)
             self.tree_pend_o.column(c, width=w, anchor=a)
@@ -461,17 +456,18 @@ class App(tk.Tk):
         )
         instr.pack(anchor="w", padx=6, pady=(6, 4))
 
-        cols = ("data_p", "valor_p", "desc_p", "data_o", "valor_o", "desc_o", "diff_dias", "diff_valor")
+        cols = ("data_p", "valor_p", "nf_p", "forn_p", "data_o", "valor_o", "memo_o", "diff_dias", "diff_valor")
         tree = ttk.Treeview(aba, columns=cols, show="headings", selectmode="browse")
         for c, t, w, a in [
             ("data_p", "Venc. (pla)", 90, "center"),
             ("valor_p", "Valor (pla)", 90, "e"),
-            ("desc_p", "Descrição (pla)", 220, "w"),
+            ("nf_p", "NF (pla)", 70, "center"),
+            ("forn_p", "Fornecedor (pla)", 200, "w"),
             ("data_o", "Pagto (OFX)", 90, "center"),
             ("valor_o", "Valor (OFX)", 90, "e"),
-            ("desc_o", "Descrição (OFX)", 220, "w"),
-            ("diff_dias", "Δ dias", 60, "center"),
-            ("diff_valor", "Δ R$", 80, "e"),
+            ("memo_o", "Memo (OFX)", 200, "w"),
+            ("diff_dias", "Δ dias", 55, "center"),
+            ("diff_valor", "Δ R$", 75, "e"),
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
@@ -507,7 +503,7 @@ class App(tk.Tk):
 
         cols = (
             "status", "vencimento", "valor", "emissao", "nf",
-            "cnpj", "fornecedor", "desc_concil", "desc_dominio",
+            "cnpj", "fornecedor", "memo_ofx",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("status", text="Status")
@@ -517,17 +513,15 @@ class App(tk.Tk):
         tree.heading("nf", text="Nº NF")
         tree.heading("cnpj", text="CNPJ")
         tree.heading("fornecedor", text="Fornecedor")
-        tree.heading("desc_concil", text="Descrição (planilha/OFX)")
-        tree.heading("desc_dominio", text="Descrição (Domínio)")
-        tree.column("status", width=160, anchor="w")
+        tree.heading("memo_ofx", text="Memo OFX")
+        tree.column("status", width=180, anchor="w")
         tree.column("vencimento", width=85, anchor="center")
-        tree.column("valor", width=95, anchor="e")
+        tree.column("valor", width=100, anchor="e")
         tree.column("emissao", width=85, anchor="center")
         tree.column("nf", width=75, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
-        tree.column("fornecedor", width=200, anchor="w")
-        tree.column("desc_concil", width=200, anchor="w")
-        tree.column("desc_dominio", width=200, anchor="w")
+        tree.column("fornecedor", width=220, anchor="w")
+        tree.column("memo_ofx", width=200, anchor="w")
         tree.tag_configure("ok", background="#d4edda")
         tree.tag_configure("falta_dominio", background="#fff3cd")
         tree.tag_configure("falta_concil", background="#f8d7da")
@@ -675,7 +669,6 @@ class App(tk.Tk):
             nf = origem_extras.get("numero_nf") or extras_fallback.get("numero_nf", "")
             cnpj = origem_extras.get("cnpj") or extras_fallback.get("cnpj", "")
             fornecedor = origem_extras.get("fornecedor") or extras_fallback.get("fornecedor", "")
-            desc_dom = t_dom.descricao if t_dom else ""
 
             self.tree_dominio.insert(
                 "", "end",
@@ -687,8 +680,7 @@ class App(tk.Tk):
                     nf,
                     cnpj,
                     fornecedor,
-                    par.planilha.descricao or par.ofx.descricao,
-                    desc_dom,
+                    par.ofx.descricao,
                 ),
                 tags=("ok" if ok else "falta_dominio",),
             )
@@ -705,7 +697,6 @@ class App(tk.Tk):
                     t.extras.get("cnpj", ""),
                     t.extras.get("fornecedor", ""),
                     "",
-                    t.descricao,
                 ),
                 tags=("falta_concil",),
             )
@@ -955,17 +946,18 @@ class App(tk.Tk):
             if par.diff_dias or par.diff_valor:
                 diff_txt = f"Δ {par.diff_dias}d, R$ {par.diff_valor:.2f}"
             tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
-            nf = par.planilha.extras.get("numero_nf", "") or par.ofx.extras.get("numero_nf", "")
-            fornecedor = par.planilha.extras.get("fornecedor", "") or par.ofx.extras.get("fornecedor", "")
+            emissao = par.planilha.extras.get("data_emissao")
+            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
             iid = self.tree_conciliados.insert(
                 "", "end",
                 values=(
                     tipo_txt,
                     par.planilha.data.strftime("%d/%m/%Y"),
                     f"{par.planilha.valor:.2f}",
-                    nf,
-                    fornecedor,
-                    par.planilha.descricao,
+                    emissao_txt,
+                    par.planilha.extras.get("numero_nf", ""),
+                    par.planilha.extras.get("cnpj", ""),
+                    par.planilha.extras.get("fornecedor", ""),
                     par.ofx.descricao,
                     diff_txt,
                 ),
@@ -980,7 +972,12 @@ class App(tk.Tk):
         for t in self.pendentes_planilha:
             iid = self.tree_pend_p.insert(
                 "", "end",
-                values=(t.data.strftime("%d/%m/%Y"), f"{t.valor:.2f}", t.descricao),
+                values=(
+                    t.data.strftime("%d/%m/%Y"),
+                    f"{t.valor:.2f}",
+                    t.extras.get("numero_nf", ""),
+                    t.extras.get("fornecedor", ""),
+                ),
             )
             self.itens_pendentes_p[iid] = t
 
@@ -1004,7 +1001,8 @@ class App(tk.Tk):
                 values=(
                     par.planilha.data.strftime("%d/%m/%Y"),
                     f"{par.planilha.valor:.2f}",
-                    par.planilha.descricao,
+                    par.planilha.extras.get("numero_nf", ""),
+                    par.planilha.extras.get("fornecedor", ""),
                     par.ofx.data.strftime("%d/%m/%Y"),
                     f"{par.ofx.valor:.2f}",
                     par.ofx.descricao,

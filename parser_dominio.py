@@ -264,7 +264,11 @@ def extrair_pagamentos(
     como parâmetro se o SQL contiver ``?``).
     """
     mapeamento: dict[str, str] = fonte["mapeamento"]
-    # Apenas extras realmente mapeados (não vazios)
+    obrigatorios = ("data", "valor", "data_emissao", "numero_nf", "cnpj", "fornecedor")
+    faltando = [c for c in obrigatorios if not mapeamento.get(c)]
+    if faltando:
+        raise ValueError(f"Mapeamento incompleto no Domínio: {', '.join(faltando)}")
+
     extras_pedidos = {
         campo: mapeamento[campo]
         for campo in CAMPOS_EXTRAS
@@ -276,7 +280,7 @@ def extrair_pagamentos(
         params: tuple[Any, ...] = (codi_emp,) if (codi_emp is not None and "?" in sql) else ()
         colunas, linhas = executar_query(conn, sql, params)
     else:
-        cols_pedidas = [mapeamento["data"], mapeamento["valor"], mapeamento["descricao"]]
+        cols_pedidas = [mapeamento["data"], mapeamento["valor"]]
         cols_pedidas.extend(extras_pedidos.values())
         # Remove duplicatas mantendo ordem
         vistos: set[str] = set()
@@ -293,7 +297,6 @@ def extrair_pagamentos(
     try:
         i_data = colunas.index(mapeamento["data"])
         i_valor = colunas.index(mapeamento["valor"])
-        i_desc = colunas.index(mapeamento["descricao"])
     except ValueError as e:
         raise ValueError(
             f"Coluna do mapeamento não encontrada no resultado da query: {e}"
@@ -310,7 +313,6 @@ def extrair_pagamentos(
         valor = para_decimal(linha[i_valor])
         if data is None or valor is None:
             continue
-        descricao = "" if linha[i_desc] is None else str(linha[i_desc]).strip()
 
         extras: dict[str, Any] = {}
         for campo, idx in indices_extras.items():
@@ -325,7 +327,7 @@ def extrair_pagamentos(
                 extras[campo] = str(celula).strip()
 
         transacoes.append(Transacao(
-            data=data, valor=abs(valor), descricao=descricao,
+            data=data, valor=abs(valor), descricao="",
             origem="dominio", extras=extras,
         ))
     return transacoes

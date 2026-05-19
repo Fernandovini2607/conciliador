@@ -7,8 +7,8 @@ from typing import Any, Iterable
 from openpyxl import load_workbook
 
 
-# Campos extras opcionais que podem ser mapeados a partir de qualquer fonte
-# (planilha, Domínio). Quando o campo não é mapeado fica fora do dict ``extras``.
+# Campos que enriquecem cada Transacao além da chave de match (data+valor).
+# Para planilha e Domínio são TODOS obrigatórios; para OFX nunca são preenchidos.
 CAMPOS_EXTRAS = ("data_emissao", "numero_nf", "cnpj", "fornecedor")
 
 
@@ -79,14 +79,14 @@ FORNECEDOR_ALIASES = {
 ALIAS_MAP = {
     "data": DATA_ALIASES,
     "valor": VALOR_ALIASES,
-    "descricao": DESC_ALIASES,
     "data_emissao": DATA_EMISSAO_ALIASES,
     "numero_nf": NUMERO_NF_ALIASES,
     "cnpj": CNPJ_ALIASES,
     "fornecedor": FORNECEDOR_ALIASES,
 }
 
-CAMPOS_OBRIGATORIOS = ("data", "valor", "descricao")
+# 6 campos obrigatórios para planilha/Domínio. OFX usa só (data, valor).
+CAMPOS_OBRIGATORIOS = ("data", "valor", "data_emissao", "numero_nf", "cnpj", "fornecedor")
 
 
 def _normaliza(texto: object) -> str:
@@ -168,7 +168,7 @@ def _mapeia_por_nome(cabecalho: list[str]) -> dict[str, int]:
     mapa: dict[str, int] = {}
     usados: set[int] = set()
     # Ordem importa: campos mais específicos antes dos genéricos
-    ordem = ("data_emissao", "numero_nf", "cnpj", "fornecedor", "data", "valor", "descricao")
+    ordem = ("data_emissao", "numero_nf", "cnpj", "fornecedor", "data", "valor")
     for campo in ordem:
         aliases = ALIAS_MAP[campo]
         for idx, cel in enumerate(cabecalho):
@@ -233,16 +233,18 @@ def _mapeia_por_conteudo(
             novo["valor"] = idx
             usados.add(idx)
 
-    if "descricao" not in ja_mapeado:
+    # fornecedor por conteúdo: coluna com texto mais longo entre as não usadas
+    if "fornecedor" not in ja_mapeado:
         candidatos = []
         for c in range(n_colunas):
             if c in usados or n_strings[c] == 0:
                 continue
             media = soma_len_texto[c] / n_strings[c]
-            candidatos.append((media, c))
+            if media >= 5:  # nome de fornecedor tem pelo menos 5 chars em média
+                candidatos.append((media, c))
         if candidatos:
             idx = max(candidatos)[1]
-            novo["descricao"] = idx
+            novo["fornecedor"] = idx
 
     return novo
 
@@ -260,7 +262,8 @@ def descobrir_estrutura(caminho: str | Path) -> EstruturaPlanilha:
     linhas_dados = todas[idx_cab + 1:]
 
     mapa = _mapeia_por_nome(cabecalho)
-    if len(mapa) < 3:
+    # Se não detectou tudo pelo nome, tenta complementar pelo conteúdo
+    if len(set(mapa.keys()) & set(CAMPOS_OBRIGATORIOS)) < len(CAMPOS_OBRIGATORIOS):
         mapa.update(_mapeia_por_conteudo(linhas_dados, len(cabecalho), mapa))
 
     return EstruturaPlanilha(
@@ -278,7 +281,6 @@ def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int])
 
     i_data = mapeamento["data"]
     i_valor = mapeamento["valor"]
-    i_desc = mapeamento["descricao"]
     indices_extras = {
         campo: mapeamento[campo]
         for campo in CAMPOS_EXTRAS
@@ -294,9 +296,6 @@ def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int])
         valor = para_decimal(linha[i_valor]) if i_valor < len(linha) else None
         if data is None or valor is None:
             continue
-        descricao = ""
-        if i_desc < len(linha) and linha[i_desc] is not None:
-            descricao = str(linha[i_desc]).strip()
 
         extras: dict[str, Any] = {}
         for campo, idx in indices_extras.items():
@@ -310,11 +309,10 @@ def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int])
                 if d is not None:
                     extras[campo] = d
             else:
-                # numero_nf, cnpj, fornecedor — tratados como string
                 extras[campo] = str(valor_celula).strip()
 
         transacoes.append(Transacao(
-            data=data, valor=valor, descricao=descricao,
+            data=data, valor=valor, descricao="",
             linha=base + offset, extras=extras,
         ))
     return transacoes
