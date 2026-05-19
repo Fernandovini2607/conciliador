@@ -220,6 +220,7 @@ class DialogoFonte(tk.Toplevel):
         master: tk.Misc,
         conn: pyodbc.Connection,
         fonte_atual: dict[str, Any],
+        codi_emp: int | None = None,
     ) -> None:
         super().__init__(master)
         self.title("Selecionar fonte de pagamentos no Domínio")
@@ -228,6 +229,7 @@ class DialogoFonte(tk.Toplevel):
         self.geometry("960x680")
 
         self.conn = conn
+        self.codi_emp = codi_emp
         self.fonte: dict[str, Any] | None = None
         self.colunas_atuais: list[str] = []
         self.tabelas: list[str] = []
@@ -362,7 +364,20 @@ class DialogoFonte(tk.Toplevel):
                 if not sql:
                     messagebox.showinfo("SQL", "Cole uma query SQL.", parent=self)
                     return
-                colunas, linhas = parser_dominio.executar_query(self.conn, sql)
+                params: tuple[Any, ...] = ()
+                if "?" in sql:
+                    if self.codi_emp is None:
+                        messagebox.showwarning(
+                            "Empresa não selecionada",
+                            "A query tem '?' (placeholder de CODI_EMP), mas você "
+                            "não selecionou uma empresa na tela principal.\n\n"
+                            "Feche este diálogo, clique em 'Selecionar empresa' e "
+                            "tente de novo.",
+                            parent=self,
+                        )
+                        return
+                    params = (self.codi_emp,)
+                colunas, linhas = parser_dominio.executar_query(self.conn, sql, params)
                 linhas = linhas[: self.PREVIEW_LINHAS]
         except Exception as e:
             messagebox.showerror("Erro ao carregar", str(e), parent=self)

@@ -574,7 +574,8 @@ class App(tk.Tk):
         if self.conn_dominio is None:
             return
         fonte_atual = self.cfg.get("dominio_fonte", {})
-        dlg = DialogoFonte(self, self.conn_dominio, fonte_atual)
+        codi_emp = (self.cfg.get("dominio_empresa") or {}).get("codi_emp")
+        dlg = DialogoFonte(self, self.conn_dominio, fonte_atual, codi_emp=codi_emp)
         self.wait_window(dlg)
         if dlg.fonte is None:
             return
