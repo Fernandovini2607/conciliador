@@ -347,8 +347,24 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Planilha (0)")
         self._aba_planilha = aba
 
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=4, pady=4)
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_planilha = tk.StringVar()
+        self.filtro_planilha.trace_add("write", lambda *_a: self._render_aba_planilha())
+        ttk.Entry(topo, textvariable=self.filtro_planilha, width=40).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar", command=lambda: self.filtro_planilha.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_planilha = ttk.Label(topo, text="", foreground="#666")
+        self.lbl_filtro_planilha.pack(side="left", padx=8)
+
+        # Treeview + scrollbar
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True)
         cols = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
-        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("linha", "Linha", 55, "center"),
             ("venc", "Vencimento", 90, "center"),
@@ -360,7 +376,7 @@ class App(tk.Tk):
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
-        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
@@ -371,8 +387,24 @@ class App(tk.Tk):
         self.notebook.add(aba, text="OFX (0)")
         self._aba_ofx = aba
 
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=4, pady=4)
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_ofx = tk.StringVar()
+        self.filtro_ofx.trace_add("write", lambda *_a: self._render_aba_ofx())
+        ttk.Entry(topo, textvariable=self.filtro_ofx, width=40).pack(side="left")
+        ttk.Button(topo, text="Limpar", command=lambda: self.filtro_ofx.set("")).pack(
+            side="left", padx=4,
+        )
+        self.lbl_filtro_ofx = ttk.Label(topo, text="", foreground="#666")
+        self.lbl_filtro_ofx.pack(side="left", padx=8)
+
+        # Treeview + scrollbar
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True)
         cols = ("data", "valor", "memo")
-        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("data", "Data pagamento", 110, "center"),
             ("valor", "Valor", 110, "e"),
@@ -380,7 +412,7 @@ class App(tk.Tk):
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
-        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
@@ -391,8 +423,36 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Domínio dados (0)")
         self._aba_dominio_dados = aba
 
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=4, pady=4)
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_dominio = tk.StringVar()
+        self.filtro_dominio.trace_add(
+            "write", lambda *_a: self._render_aba_dominio_dados(),
+        )
+        ttk.Entry(topo, textvariable=self.filtro_dominio, width=40).pack(side="left")
+        ttk.Label(topo, text="Status:").pack(side="left", padx=(12, 4))
+        self.filtro_dominio_status = tk.StringVar(value="Todos")
+        cb_status = ttk.Combobox(
+            topo, textvariable=self.filtro_dominio_status, state="readonly",
+            values=["Todos", "Aberto", "Parcial", "Paga"], width=10,
+        )
+        cb_status.pack(side="left")
+        cb_status.bind(
+            "<<ComboboxSelected>>", lambda _e: self._render_aba_dominio_dados(),
+        )
+        ttk.Button(topo, text="Limpar", command=self._limpa_filtros_dominio).pack(
+            side="left", padx=4,
+        )
+        self.lbl_filtro_dominio = ttk.Label(topo, text="", foreground="#666")
+        self.lbl_filtro_dominio.pack(side="left", padx=8)
+
+        # Treeview + scrollbar
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True)
         cols = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
-        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("venc", "Vencimento", 85, "center"),
             ("emis", "Emissão", 85, "center"),
@@ -408,11 +468,15 @@ class App(tk.Tk):
         tree.tag_configure("paga", background="#d4edda")
         tree.tag_configure("parcial", background="#fff3cd")
         tree.tag_configure("aberto", background="#f8d7da")
-        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_dominio_dados = tree
+
+    def _limpa_filtros_dominio(self) -> None:
+        self.filtro_dominio.set("")
+        self.filtro_dominio_status.set("Todos")
 
     def _monta_aba_conciliados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1104,64 +1168,100 @@ class App(tk.Tk):
     def _render_aba_planilha(self) -> None:
         for item in self.tree_planilha.get_children():
             self.tree_planilha.delete(item)
+        termo = self.filtro_planilha.get().strip().lower() if hasattr(self, "filtro_planilha") else ""
+        mostradas = 0
         for t in self.transacoes_planilha:
-            self.tree_planilha.insert(
-                "", "end",
-                values=(
-                    t.linha if t.linha is not None else "",
-                    t.data.strftime("%d/%m/%Y"),
-                    self._fmt_data(t.extras.get("data_emissao")),
-                    f"{t.valor:.2f}",
-                    t.extras.get("numero_nf", ""),
-                    t.extras.get("cnpj", ""),
-                    t.extras.get("fornecedor", ""),
-                ),
+            row = (
+                str(t.linha) if t.linha is not None else "",
+                t.data.strftime("%d/%m/%Y"),
+                self._fmt_data(t.extras.get("data_emissao")),
+                f"{t.valor:.2f}",
+                t.extras.get("numero_nf", "") or "",
+                t.extras.get("cnpj", "") or "",
+                t.extras.get("fornecedor", "") or "",
             )
-        self.notebook.tab(0, text=f"Planilha ({len(self.transacoes_planilha)})")
+            if termo and termo not in " ".join(row).lower():
+                continue
+            self.tree_planilha.insert("", "end", values=row)
+            mostradas += 1
+        total = len(self.transacoes_planilha)
+        self.notebook.tab(0, text=f"Planilha ({total})")
+        if hasattr(self, "lbl_filtro_planilha"):
+            self.lbl_filtro_planilha.config(
+                text=f"Mostrando {mostradas} de {total}" if termo else f"{total} lançamentos",
+            )
 
     def _render_aba_ofx(self) -> None:
         for item in self.tree_ofx.get_children():
             self.tree_ofx.delete(item)
+        termo = self.filtro_ofx.get().strip().lower() if hasattr(self, "filtro_ofx") else ""
+        mostradas = 0
         for t in self.transacoes_ofx:
-            self.tree_ofx.insert(
-                "", "end",
-                values=(
-                    t.data.strftime("%d/%m/%Y"),
-                    f"{t.valor:.2f}",
-                    t.descricao,
-                ),
+            row = (
+                t.data.strftime("%d/%m/%Y"),
+                f"{t.valor:.2f}",
+                t.descricao or "",
             )
-        self.notebook.tab(1, text=f"OFX ({len(self.transacoes_ofx)})")
+            if termo and termo not in " ".join(row).lower():
+                continue
+            self.tree_ofx.insert("", "end", values=row)
+            mostradas += 1
+        total = len(self.transacoes_ofx)
+        self.notebook.tab(1, text=f"OFX ({total})")
+        if hasattr(self, "lbl_filtro_ofx"):
+            self.lbl_filtro_ofx.config(
+                text=f"Mostrando {mostradas} de {total}" if termo else f"{total} pagamentos",
+            )
 
     def _render_aba_dominio_dados(self) -> None:
         for item in self.tree_dominio_dados.get_children():
             self.tree_dominio_dados.delete(item)
+        termo = self.filtro_dominio.get().strip().lower() if hasattr(self, "filtro_dominio") else ""
+        status_pedido = self.filtro_dominio_status.get() if hasattr(self, "filtro_dominio_status") else "Todos"
+        mostradas = 0
         for t in self.transacoes_dominio:
-            status = t.extras.get("status", "")
+            status = t.extras.get("status", "") or ""
             v_pago = t.extras.get("valor_pago")
             pago_txt = f"{v_pago:.2f}" if v_pago is not None else ""
             tag = ""
-            if status.lower().startswith("pag"):
+            sl = status.lower()
+            if sl.startswith("pag"):
                 tag = "paga"
-            elif status.lower().startswith("parc"):
+            elif sl.startswith("parc"):
                 tag = "parcial"
-            elif status.lower().startswith("ab"):
+            elif sl.startswith("ab"):
                 tag = "aberto"
-            self.tree_dominio_dados.insert(
-                "", "end",
-                values=(
-                    t.data.strftime("%d/%m/%Y"),
-                    self._fmt_data(t.extras.get("data_emissao")),
-                    f"{t.valor:.2f}",
-                    pago_txt,
-                    status,
-                    t.extras.get("numero_nf", ""),
-                    t.extras.get("cnpj", ""),
-                    t.extras.get("fornecedor", ""),
-                ),
-                tags=(tag,) if tag else (),
+            # Filtro de status
+            if status_pedido != "Todos":
+                if status_pedido == "Aberto" and tag != "aberto":
+                    continue
+                if status_pedido == "Parcial" and tag != "parcial":
+                    continue
+                if status_pedido == "Paga" and tag != "paga":
+                    continue
+            row = (
+                t.data.strftime("%d/%m/%Y"),
+                self._fmt_data(t.extras.get("data_emissao")),
+                f"{t.valor:.2f}",
+                pago_txt,
+                status,
+                t.extras.get("numero_nf", "") or "",
+                t.extras.get("cnpj", "") or "",
+                t.extras.get("fornecedor", "") or "",
             )
-        self.notebook.tab(2, text=f"Domínio dados ({len(self.transacoes_dominio)})")
+            if termo and termo not in " ".join(row).lower():
+                continue
+            self.tree_dominio_dados.insert(
+                "", "end", values=row, tags=(tag,) if tag else (),
+            )
+            mostradas += 1
+        total = len(self.transacoes_dominio)
+        self.notebook.tab(2, text=f"Domínio dados ({total})")
+        if hasattr(self, "lbl_filtro_dominio"):
+            tem_filtro = termo or status_pedido != "Todos"
+            self.lbl_filtro_dominio.config(
+                text=f"Mostrando {mostradas} de {total}" if tem_filtro else f"{total} parcelas",
+            )
 
 
 if __name__ == "__main__":
