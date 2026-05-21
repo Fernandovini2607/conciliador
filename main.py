@@ -377,7 +377,7 @@ class App(tk.Tk):
         self.transacoes_planilha: list[Transacao] = []
         self.transacoes_ofx: list[Transacao] = []
         self.caminho_planilha: Path | None = None
-        self.caminho_ofx: Path | None = None
+        self.caminhos_ofx: list[Path] = []
         self.estrutura_planilha: EstruturaPlanilha | None = None
         self.mapeamento_planilha: dict[str, int] | None = None
 
@@ -654,12 +654,13 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("data", "valor", "memo")
+        cols = ("data", "banco", "valor", "memo")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("data", "Data pagamento", 130, "center"),
-            ("valor", "Valor", 120, "e"),
-            ("memo", "Memo (banco)", 520, "w"),
+            ("data", "Data pagamento", 125, "center"),
+            ("banco", "Banco", 140, "w"),
+            ("valor", "Valor", 110, "e"),
+            ("memo", "Memo", 460, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -673,12 +674,16 @@ class App(tk.Tk):
     def _row_ofx(self, t) -> tuple:
         return (
             t.data.strftime("%d/%m/%Y"),
+            t.extras.get("banco", "") or "",
             f"{t.valor:.2f}",
             t.descricao or "",
         )
 
-    COLS_OFX = ("data", "valor", "memo")
-    LABELS_OFX = {"data": "Data pagamento", "valor": "Valor", "memo": "Memo (banco)"}
+    COLS_OFX = ("data", "banco", "valor", "memo")
+    LABELS_OFX = {
+        "data": "Data pagamento", "banco": "Banco",
+        "valor": "Valor", "memo": "Memo",
+    }
 
     def _on_click_header_ofx(self, event: tk.Event) -> None:
         self._abrir_filtro_excel(
@@ -1336,21 +1341,51 @@ class App(tk.Tk):
         )
 
     def _abrir_ofx(self) -> None:
-        caminho = filedialog.askopenfilename(
-            title="Selecione o OFX",
+        caminhos = filedialog.askopenfilenames(
+            title="Selecione um ou mais OFX (Ctrl+clique pra vários)",
             filetypes=[("OFX", "*.ofx"), ("Todos", "*.*")],
         )
-        if not caminho:
+        if not caminhos:
             return
-        try:
-            self.transacoes_ofx, ignorados = ler_ofx(caminho)
-        except Exception as e:
-            messagebox.showerror("Erro ao ler OFX", str(e))
+
+        self.transacoes_ofx = []
+        self.caminhos_ofx = []
+        total_ignorados = 0
+        erros: list[str] = []
+
+        for caminho in caminhos:
+            try:
+                txs, ignorados = ler_ofx(caminho)
+            except Exception as e:
+                erros.append(f"{Path(caminho).name}: {e}")
+                continue
+            self.transacoes_ofx.extend(txs)
+            self.caminhos_ofx.append(Path(caminho))
+            total_ignorados += ignorados
+
+        if erros:
+            messagebox.showerror(
+                "Erro ao ler um ou mais OFX",
+                "\n".join(erros),
+            )
+
+        if not self.transacoes_ofx:
+            self.lbl_ofx.config(text="(nenhum OFX carregado)")
+            self._atualiza_botao()
             return
-        self.caminho_ofx = Path(caminho)
-        extra = f" ({ignorados} recebimentos ignorados)" if ignorados else ""
+
+        n_arquivos = len(self.caminhos_ofx)
+        bancos = sorted({t.extras.get("banco", "") for t in self.transacoes_ofx if t.extras.get("banco")})
+        n_bancos = len(bancos)
+        extra_ign = f" ({total_ignorados} recebimentos ignorados)" if total_ignorados else ""
+        if n_arquivos == 1:
+            prefixo = self.caminhos_ofx[0].name
+        else:
+            prefixo = f"{n_arquivos} arquivos OFX"
+            if n_bancos > 0:
+                prefixo += f" ({n_bancos} banco{'s' if n_bancos > 1 else ''})"
         self.lbl_ofx.config(
-            text=f"{self.caminho_ofx.name} — {len(self.transacoes_ofx)} pagamentos{extra}"
+            text=f"{prefixo} — {len(self.transacoes_ofx)} pagamentos{extra_ign}"
         )
         self._atualiza_botao()
         self._render_aba_ofx()
