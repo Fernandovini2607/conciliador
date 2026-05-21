@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox, ttk
 import config
 import parser_dominio
 from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
-from dialogos_taxas import DialogoConfigurarTaxas
+from dialogos_taxas import DialogoConfigurarTaxas, DialogoNovaRegra
 from lancamentos import LancamentoContabil, gerar_lancamentos_contabeis
 from matcher import (
     Par,
@@ -935,6 +935,10 @@ class App(tk.Tk):
             botoes, text="Conciliar selecionadas →",
             command=self._conciliar_selecionadas,
         ).pack(side="left", padx=6, pady=6)
+        ttk.Button(
+            botoes, text="Criar lançamento padrão (do OFX selecionado)",
+            command=self._criar_lancamento_padrao,
+        ).pack(side="left", padx=6, pady=6)
 
     def _monta_aba_sugestoes(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1862,6 +1866,45 @@ class App(tk.Tk):
 
         dlg = DialogoConfigurarTaxas(self, regras, _on_change)
         self.wait_window(dlg)
+
+    def _criar_lancamento_padrao(self) -> None:
+        """Atalho: cria uma regra de taxa a partir do pendente OFX
+        selecionado e a salva imediatamente em cfg["regras_taxas"]."""
+        sel = self.tree_pend_o.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione um lançamento na lista do OFX (lado direito) "
+                "para criar uma regra a partir dele.",
+            )
+            return
+        transacao = self.itens_pendentes_o[sel[0]]
+        memo = transacao.descricao or ""
+        if not memo.strip():
+            messagebox.showwarning(
+                "Memo vazio",
+                "O lançamento selecionado não tem memo/descrição — não dá "
+                "para gerar um padrão automático.",
+            )
+            return
+
+        # Pré-preenche com o memo completo; o usuário pode editar para algo
+        # mais geral (substring) que vá capturar variações em meses futuros.
+        regra_inicial = {"padrao": memo, "historico": ""}
+        dlg = DialogoNovaRegra(self, regra_inicial)
+        dlg.title("Criar regra a partir do OFX selecionado")
+        self.wait_window(dlg)
+        if not dlg.regra:
+            return
+
+        # Salva a nova regra e refaz os lançamentos contábeis
+        regras = list(self.cfg.get("regras_taxas", []))
+        regras.append(dlg.regra)
+        self.cfg["regras_taxas"] = regras
+        config.salvar(self.cfg)
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
+        self._atualiza_resumo()
 
     def _gerar_lancamentos_contabeis(self) -> None:
         """Classifica os pendentes OFX brutos contra as regras de taxas e
