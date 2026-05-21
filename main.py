@@ -814,6 +814,12 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
+        self.lbl_info_conciliados = ttk.Label(
+            aba, text="", foreground="#1f3a68",
+            font=("TkDefaultFont", 9, "italic"),
+        )
+        self.lbl_info_conciliados.pack(side="top", fill="x", padx=6, pady=(6, 0))
+
         cols = (
             "tipo", "data", "pagto", "valor", "emissao",
             "nf", "cnpj", "fornecedor", "memo_ofx", "diff",
@@ -1089,6 +1095,11 @@ class App(tk.Tk):
             return
         self._atualiza_label_dominio()
         self._render_aba_dominio_dados()
+        # Se já houver conciliação P×O feita, refiltra e atualiza a aba Conciliados
+        if self.pares_conciliados:
+            self._filtrar_conciliados_por_dominio()
+            self._render_conciliados()
+            self._redesenha_abas()
         self._atualiza_botao_comparar()
 
     def _atualiza_botao_comparar(self) -> None:
@@ -1096,22 +1107,18 @@ class App(tk.Tk):
         self.btn_comparar_dominio.config(state="normal" if pode else "disabled")
 
     def _comparar_com_dominio(self) -> None:
-        from collections import defaultdict
-        from decimal import Decimal
+        # Refiltra conciliados pela regra triple (data_venc, valor, NF)
+        self._filtrar_conciliados_por_dominio()
+        self._render_conciliados()
+        self._redesenha_abas()
 
-        idx_dom: dict[tuple, list[Transacao]] = defaultdict(list)
-        for t in self.transacoes_dominio:
-            idx_dom[(t.data, t.valor.quantize(Decimal("0.01")))].append(t)
-
+        # Monta a aba Comparação detalhada (verde/amarelo/vermelho)
         resultados: list[tuple[str, Par, Transacao | None]] = []
         usados: set[int] = set()
         for par in self.pares_conciliados:
-            chave = (par.planilha.data, par.planilha.valor.quantize(Decimal("0.01")))
-            candidatos = [t for t in idx_dom.get(chave, []) if id(t) not in usados]
-            if candidatos:
-                t_dom = candidatos[0]
-                usados.add(id(t_dom))
-                resultados.append(("ok", par, t_dom))
+            if par.dominio is not None:
+                resultados.append(("ok", par, par.dominio))
+                usados.add(id(par.dominio))
             else:
                 resultados.append(("falta_dominio", par, None))
 
@@ -1329,12 +1336,53 @@ class App(tk.Tk):
         self.pendentes_planilha = pend_p
         self.pendentes_ofx = pend_o
         self._recalcula_sugestoes()
+        # Segunda fase: se Domínio carregado, filtra Conciliados pra triple-match
+        self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
         self._atualiza_botao_comparar()
 
     def _recalcula_sugestoes(self) -> None:
         self.sugestoes = gerar_sugestoes(self.pendentes_planilha, self.pendentes_ofx)
+
+    @staticmethod
+    def _normaliza_nf(v) -> str:
+        return str(v).strip() if v is not None else ""
+
+    def _filtrar_conciliados_por_dominio(self) -> None:
+        """Para cada par P×O em pares_conciliados, busca um match no
+        Domínio por (data_vencimento, valor, número da NF) e armazena
+        em par.dominio. Se Domínio não estiver carregado, limpa as
+        atribuições anteriores."""
+        # Limpa associações antigas
+        for par in self.pares_conciliados:
+            par.dominio = None
+
+        if not self.transacoes_dominio:
+            return
+
+        from collections import defaultdict
+        from decimal import Decimal
+
+        def _chave(t):
+            nf = self._normaliza_nf(t.extras.get("numero_nf", ""))
+            return (t.data, t.valor.quantize(Decimal("0.01")), nf)
+
+        indice: dict[tuple, list[Transacao]] = defaultdict(list)
+        for t in self.transacoes_dominio:
+            indice[_chave(t)].append(t)
+
+        usados: set[int] = set()
+        for par in self.pares_conciliados:
+            chave = (
+                par.planilha.data,
+                par.planilha.valor.quantize(Decimal("0.01")),
+                self._normaliza_nf(par.planilha.extras.get("numero_nf", "")),
+            )
+            candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
+            if candidatos:
+                par.dominio = candidatos[0]
+                usados.add(id(par.dominio))
 
     def _atualiza_resumo(self) -> None:
         self.lbl_resumo.config(
@@ -1383,6 +1431,8 @@ class App(tk.Tk):
         if t_o in self.pendentes_ofx:
             self.pendentes_ofx.remove(t_o)
         self._recalcula_sugestoes()
+        # Refiltra contra o Domínio (o novo par pode ou não bater)
+        self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
 
@@ -1423,7 +1473,16 @@ class App(tk.Tk):
         for item in self.tree_conciliados.get_children():
             self.tree_conciliados.delete(item)
         self.itens_pares.clear()
-        for par in self.pares_conciliados:
+
+        # Quando Domínio está carregado, mostra só triple-matched.
+        # Sem Domínio, mostra todos os pares P×O (fluxo parcial).
+        dominio_ativo = bool(self.transacoes_dominio)
+        if dominio_ativo:
+            pares_mostrar = [p for p in self.pares_conciliados if p.dominio is not None]
+        else:
+            pares_mostrar = list(self.pares_conciliados)
+
+        for par in pares_mostrar:
             diff_txt = ""
             if par.diff_dias or par.diff_valor:
                 diff_txt = f"Δ {par.diff_dias}d, R$ {par.diff_valor:.2f}"
@@ -1450,6 +1509,27 @@ class App(tk.Tk):
                 tags=(par.tipo,),
             )
             self.itens_pares[iid] = par
+
+        # Atualiza label informativa da aba se existir
+        if hasattr(self, "lbl_info_conciliados"):
+            total_po = len(self.pares_conciliados)
+            mostrando = len(pares_mostrar)
+            if dominio_ativo:
+                falta_dom = total_po - mostrando
+                self.lbl_info_conciliados.config(
+                    text=(
+                        f"Triple-match (Planilha × OFX × Domínio): {mostrando} "
+                        f"— {falta_dom} pares P×O não bateram com o Domínio "
+                        f"(ver aba Comparação)"
+                    ),
+                )
+            else:
+                self.lbl_info_conciliados.config(
+                    text=(
+                        f"{mostrando} pares Planilha × OFX. Carregue o "
+                        f"Domínio pra ver os conciliados finais."
+                    ),
+                )
 
     def _render_pendentes(self) -> None:
         for item in self.tree_pend_p.get_children():

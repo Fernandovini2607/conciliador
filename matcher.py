@@ -8,12 +8,17 @@ from parser_xlsx import Transacao
 
 @dataclass
 class Par:
-    """Par de transações conciliadas (auto ou manual) ou sugerido."""
+    """Par de transações conciliadas (auto ou manual) ou sugerido.
+
+    ``dominio`` é preenchido na segunda fase (Conciliados × Domínio) quando
+    existe um lançamento equivalente no Domínio (data_venc + valor + NF).
+    """
     planilha: Transacao
     ofx: Transacao
     tipo: str = "auto"  # "auto", "manual", "sugestao"
     diff_dias: int = 0
     diff_valor: Decimal = Decimal("0")
+    dominio: Transacao | None = None
 
 
 @dataclass
