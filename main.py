@@ -812,9 +812,9 @@ class App(tk.Tk):
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
-        tree.tag_configure("paga", background="#d4edda")
-        tree.tag_configure("parcial", background="#fff3cd")
-        tree.tag_configure("aberto", background="#f8d7da")
+        tree.tag_configure("aberto", background="#d4edda")    # verde
+        tree.tag_configure("parcial", background="#cfe2ff")   # azul claro
+        tree.tag_configure("paga", background="#e9ecef")      # cinza (já liquidada)
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
@@ -1069,9 +1069,9 @@ class App(tk.Tk):
         tree.column("fornecedor", width=170, anchor="w")
         tree.column("memo_ofx", width=160, anchor="w")
         tree.column("status_dom", width=110, anchor="center")
-        tree.tag_configure("paga", background="#d4edda")
-        tree.tag_configure("parcial", background="#fff3cd")
-        tree.tag_configure("aberto", background="#f8d7da")
+        tree.tag_configure("aberto", background="#d4edda")    # verde
+        tree.tag_configure("parcial", background="#cfe2ff")   # azul claro
+        tree.tag_configure("paga", background="#e9ecef")      # cinza (já liquidada)
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
