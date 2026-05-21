@@ -17,15 +17,16 @@ class DialogoNovaRegra(tk.Toplevel):
         master: tk.Misc,
         regra_atual: dict[str, Any] | None = None,
         plano_contas: list | None = None,
+        tipo: str = "memo",
     ) -> None:
         super().__init__(master)
-        self.title("Nova regra" if not regra_atual else "Editar regra")
         self.transient(master)
         self.grab_set()
         self.resizable(False, False)
 
         self.regra: dict[str, str] | None = None
         self.plano_contas = plano_contas or []
+        self.tipo = (regra_atual or {}).get("tipo") or tipo
         # opções formatadas: "1.01.001 - CAIXA"
         self._opcoes_conta: list[str] = [
             f"{c.codigo} - {c.descricao}" for c in self.plano_contas
@@ -33,10 +34,16 @@ class DialogoNovaRegra(tk.Toplevel):
         # Map código → descrição (pra validar/buscar)
         self._codigos_validos: set[str] = {c.codigo for c in self.plano_contas}
 
-        ttk.Label(
-            self,
-            text="Padrão do memo (texto que aparece no OFX, sem distinguir maiúsculas):",
-        ).grid(row=0, column=0, padx=10, pady=(10, 2), sticky="w")
+        if self.tipo == "fornecedor":
+            self.title("Regra por fornecedor" if not regra_atual else "Editar regra por fornecedor")
+            label_padrao = "Padrão (CNPJ ou parte do nome do fornecedor):"
+        else:
+            self.title("Regra por memo" if not regra_atual else "Editar regra por memo")
+            label_padrao = "Padrão do memo (texto que aparece no OFX):"
+
+        ttk.Label(self, text=label_padrao).grid(
+            row=0, column=0, padx=10, pady=(10, 2), sticky="w",
+        )
         self.entry_padrao = ttk.Entry(self, width=60)
         self.entry_padrao.grid(row=1, column=0, padx=10, pady=2, sticky="we")
 
@@ -119,7 +126,12 @@ class DialogoNovaRegra(tk.Toplevel):
                 "Campo vazio", "Informe o histórico contábil.", parent=self,
             )
             return
-        self.regra = {"padrao": padrao, "historico": historico, "conta": conta}
+        self.regra = {
+            "tipo": self.tipo,
+            "padrao": padrao,
+            "historico": historico,
+            "conta": conta,
+        }
         self.destroy()
 
     def _cancelar(self) -> None:
@@ -155,10 +167,10 @@ class DialogoConfigurarTaxas(tk.Toplevel):
         info = ttk.Label(
             self,
             text=(
-                "Cada lançamento OFX cujo memo contenha um destes padrões "
-                "(substring, sem distinguir maiúsculas) será classificado "
-                "automaticamente como lançamento contábil e aparecerá na "
-                "aba 'Lançamentos contábeis'."
+                "Regras de classificação de lançamentos. Dois tipos:\n"
+                "• Memo: casa contra o memo do OFX nos pendentes (tarifas, IOF, juros).\n"
+                "• Fornecedor: casa contra CNPJ/nome do fornecedor nos pares "
+                "conciliados que faltam no Domínio."
             ),
             wraplength=660,
         )
@@ -166,7 +178,14 @@ class DialogoConfigurarTaxas(tk.Toplevel):
 
         botoes_top = ttk.Frame(self)
         botoes_top.pack(fill="x", padx=10, pady=4)
-        ttk.Button(botoes_top, text="+ Adicionar", command=self._adicionar).pack(side="left", padx=2)
+        ttk.Button(
+            botoes_top, text="+ Regra por memo",
+            command=lambda: self._adicionar(tipo="memo"),
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            botoes_top, text="+ Regra por fornecedor",
+            command=lambda: self._adicionar(tipo="fornecedor"),
+        ).pack(side="left", padx=2)
         ttk.Button(botoes_top, text="✎ Editar", command=self._editar).pack(side="left", padx=2)
         ttk.Button(botoes_top, text="− Remover", command=self._remover).pack(side="left", padx=2)
         self.lbl_count = ttk.Label(botoes_top, text="", foreground="#666")
@@ -174,14 +193,16 @@ class DialogoConfigurarTaxas(tk.Toplevel):
 
         corpo = ttk.Frame(self)
         corpo.pack(fill="both", expand=True, padx=10, pady=4)
-        cols = ("padrao", "historico", "conta")
+        cols = ("tipo", "padrao", "historico", "conta")
         self.tree = ttk.Treeview(corpo, columns=cols, show="headings", selectmode="browse")
-        self.tree.heading("padrao", text="Padrão (memo)")
+        self.tree.heading("tipo", text="Tipo")
+        self.tree.heading("padrao", text="Padrão")
         self.tree.heading("historico", text="Histórico contábil")
         self.tree.heading("conta", text="Conta contábil")
-        self.tree.column("padrao", width=200, anchor="w")
-        self.tree.column("historico", width=300, anchor="w")
-        self.tree.column("conta", width=120, anchor="w")
+        self.tree.column("tipo", width=90, anchor="center")
+        self.tree.column("padrao", width=180, anchor="w")
+        self.tree.column("historico", width=260, anchor="w")
+        self.tree.column("conta", width=110, anchor="w")
         sb = ttk.Scrollbar(corpo, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -198,9 +219,11 @@ class DialogoConfigurarTaxas(tk.Toplevel):
         for item in self.tree.get_children():
             self.tree.delete(item)
         for r in self.regras:
+            tipo = (r.get("tipo") or "memo").capitalize()
             self.tree.insert(
                 "", "end",
                 values=(
+                    tipo,
                     r.get("padrao", ""),
                     r.get("historico", ""),
                     r.get("conta", ""),
@@ -208,8 +231,8 @@ class DialogoConfigurarTaxas(tk.Toplevel):
             )
         self.lbl_count.config(text=f"{len(self.regras)} regra(s)")
 
-    def _adicionar(self) -> None:
-        dlg = DialogoNovaRegra(self, plano_contas=self.plano_contas)
+    def _adicionar(self, tipo: str = "memo") -> None:
+        dlg = DialogoNovaRegra(self, plano_contas=self.plano_contas, tipo=tipo)
         self.wait_window(dlg)
         if dlg.regra:
             self.regras.append(dlg.regra)

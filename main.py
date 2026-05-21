@@ -403,6 +403,7 @@ class App(tk.Tk):
         self.comparacao_dominio: list[tuple[str, Par | Transacao]] = []
         # ↑ status, registro (Par para casados; Transacao para faltantes)
         self.lancamentos_contabeis: list[LancamentoContabil] = []
+        self.ids_pares_classificados: set[int] = set()
 
         self.cfg = config.carregar()
         self._migrar_config_legado()
@@ -1117,6 +1118,63 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
 
         self.tree_dominio = tree
+        self._itens_comparacao: dict[str, Par] = {}  # iid → Par (pra atalho)
+
+        botoes = ttk.Frame(aba)
+        botoes.pack(side="bottom", fill="x")
+        ttk.Button(
+            botoes, text="Criar regra de fornecedor (do amarelo selecionado)",
+            command=self._criar_regra_fornecedor,
+        ).pack(side="left", padx=6, pady=6)
+
+    def _criar_regra_fornecedor(self) -> None:
+        """Atalho: cria regra do tipo 'fornecedor' a partir do par amarelo
+        (conciliado mas falta no Domínio) selecionado na aba Comparação."""
+        if not self._exigir_empresa("criar regras"):
+            return
+        sel = self.tree_dominio.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha amarela (Conciliado, falta no Domínio) "
+                "para criar uma regra de fornecedor.",
+            )
+            return
+        par = self._itens_comparacao.get(sel[0])
+        if par is None or par.dominio is not None:
+            messagebox.showwarning(
+                "Linha inválida",
+                "A regra de fornecedor só faz sentido para linhas amarelas "
+                "(Conciliado, falta no Domínio).",
+            )
+            return
+        cnpj = par.planilha.extras.get("cnpj", "") or ""
+        fornecedor = par.planilha.extras.get("fornecedor", "") or ""
+        # Pré-popular com CNPJ se houver, senão nome
+        sugestao = cnpj if cnpj else fornecedor
+        if not sugestao.strip():
+            messagebox.showwarning(
+                "Sem dados do fornecedor",
+                "O par selecionado não tem CNPJ nem nome de fornecedor "
+                "preenchidos.",
+            )
+            return
+        dlg = DialogoNovaRegra(
+            self,
+            regra_atual={"padrao": sugestao, "historico": "", "conta": ""},
+            plano_contas=self.plano_contas,
+            tipo="fornecedor",
+        )
+        emp = self._empresa_selecionada()
+        dlg.title(f"Regra de fornecedor — {emp['razao'][:60]} (empresa {emp['codi_emp']})")
+        self.wait_window(dlg)
+        if not dlg.regra:
+            return
+        regras = self._get_regras_empresa()
+        regras.append(dlg.regra)
+        self._set_regras_empresa(regras)
+        self._gerar_lancamentos_contabeis()
+        self._comparar_com_dominio()  # re-renderiza tirando o par classificado
 
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1375,10 +1433,13 @@ class App(tk.Tk):
     def _comparar_com_dominio(self) -> None:
         # Refiltra conciliados pela regra triple (data_venc, valor, NF)
         self._filtrar_conciliados_por_dominio()
+        # Regenera lançamentos: pares sem Domínio podem virar lançamento
+        self._gerar_lancamentos_contabeis()
         self._render_conciliados()
         self._redesenha_abas()
 
-        # Monta a aba Comparação detalhada (verde/amarelo/vermelho)
+        # Monta a aba Comparação detalhada (verde/amarelo/vermelho).
+        # Pares "sem Domínio" que viraram lançamento contábil são ocultados.
         resultados: list[tuple[str, Par, Transacao | None]] = []
         usados: set[int] = set()
         for par in self.pares_conciliados:
@@ -1386,6 +1447,8 @@ class App(tk.Tk):
                 resultados.append(("ok", par, par.dominio))
                 usados.add(id(par.dominio))
             else:
+                if id(par) in self.ids_pares_classificados:
+                    continue  # já tem regra de fornecedor — virou lançamento
                 resultados.append(("falta_dominio", par, None))
 
         # Pagamentos no Domínio que ninguém casou
@@ -1401,6 +1464,7 @@ class App(tk.Tk):
     ) -> None:
         for item in self.tree_dominio.get_children():
             self.tree_dominio.delete(item)
+        self._itens_comparacao.clear()
 
         def _fmt_data(d) -> str:
             return d.strftime("%d/%m/%Y") if d else ""
@@ -1422,7 +1486,7 @@ class App(tk.Tk):
             cnpj = origem_extras.get("cnpj") or extras_fallback.get("cnpj", "")
             fornecedor = origem_extras.get("fornecedor") or extras_fallback.get("fornecedor", "")
 
-            self.tree_dominio.insert(
+            iid = self.tree_dominio.insert(
                 "", "end",
                 values=(
                     rotulo,
@@ -1436,6 +1500,7 @@ class App(tk.Tk):
                 ),
                 tags=("ok" if ok else "falta_dominio",),
             )
+            self._itens_comparacao[iid] = par
 
         for t in sobras_dominio:
             self.tree_dominio.insert(
@@ -2119,21 +2184,36 @@ class App(tk.Tk):
         self._atualiza_resumo()
 
     def _gerar_lancamentos_contabeis(self) -> None:
-        """Classifica os pendentes OFX brutos contra as regras de taxas da
-        EMPRESA ATUAL e deriva ``pendentes_ofx`` (visível) removendo os
-        classificados. Quando não há empresa selecionada, nenhuma regra é
-        aplicada (todos os pendentes ficam visíveis)."""
+        """Classifica DUAS fontes contra as regras da EMPRESA ATUAL:
+        - Pendentes OFX brutos → regras tipo memo
+        - Pares conciliados sem Domínio → regras tipo fornecedor
+
+        Deriva ``pendentes_ofx`` (visível, sem classificados) e marca os pares
+        que viraram lançamento em ``self.ids_pares_classificados`` (usado pra
+        ocultá-los na aba Comparação).
+        """
         regras = self._get_regras_empresa()
+        # Candidatos a "fornecedor": pares P×O sem match no Domínio
+        pares_sem_dominio = [
+            p for p in self.pares_conciliados if p.dominio is None
+        ]
         self.lancamentos_contabeis = gerar_lancamentos_contabeis(
-            self.pendentes_ofx_brutos, regras,
+            self.pendentes_ofx_brutos, regras, pares_sem_dominio,
         )
-        ids_classificados = {
+        # Deriva pendentes_ofx (visível) removendo os classificados por memo
+        ids_trans_classificadas = {
             id(l.transacao_origem) for l in self.lancamentos_contabeis
-            if l.transacao_origem is not None
+            if l.tipo_regra == "memo" and l.transacao_origem is not None
         }
         self.pendentes_ofx = [
-            t for t in self.pendentes_ofx_brutos if id(t) not in ids_classificados
+            t for t in self.pendentes_ofx_brutos
+            if id(t) not in ids_trans_classificadas
         ]
+        # Pares (sem Domínio) que viraram lançamento — pra ocultar em Comparação
+        self.ids_pares_classificados: set[int] = {
+            id(l.par_origem) for l in self.lancamentos_contabeis
+            if l.tipo_regra == "fornecedor" and l.par_origem is not None
+        }
         if hasattr(self, "tree_lancamentos"):
             self._render_aba_lancamentos()
 
