@@ -409,24 +409,40 @@ class App(tk.Tk):
         self._monta_ui()
 
     def _migrar_config_legado(self) -> None:
-        """Se a config antiga tinha credenciais em cfg["dominio"], move pra
-        data/dominio_config.json (padrão Janco) e renomeia o restante para
-        cfg["dominio_fonte"]."""
+        """Migrações de formato de config:
+        1) cfg["dominio"] (credenciais misturadas) → data/dominio_config.json
+           + cfg["dominio_fonte"].
+        2) cfg["regras_taxas"] (lista global) → cfg["regras_taxas_por_empresa"]
+           vinculada à empresa atualmente selecionada (se houver)."""
+        precisa_salvar = False
+
         legado = self.cfg.get("dominio")
-        if not isinstance(legado, dict):
-            return
-        cred_keys = {"dsn", "usuario", "senha"}
-        if cred_keys & legado.keys():
-            auth_atual = parser_dominio.load_odbc_config()
-            for k in cred_keys:
-                if k in legado:
-                    auth_atual[k] = legado.pop(k)
-            if auth_atual.get("dsn"):
-                parser_dominio.save_odbc_config(auth_atual)
-        if legado:
-            self.cfg.setdefault("dominio_fonte", {}).update(legado)
-        del self.cfg["dominio"]
-        config.salvar(self.cfg)
+        if isinstance(legado, dict):
+            cred_keys = {"dsn", "usuario", "senha"}
+            if cred_keys & legado.keys():
+                auth_atual = parser_dominio.load_odbc_config()
+                for k in cred_keys:
+                    if k in legado:
+                        auth_atual[k] = legado.pop(k)
+                if auth_atual.get("dsn"):
+                    parser_dominio.save_odbc_config(auth_atual)
+            if legado:
+                self.cfg.setdefault("dominio_fonte", {}).update(legado)
+            del self.cfg["dominio"]
+            precisa_salvar = True
+
+        # Migração 2: regras_taxas globais → por empresa atual
+        if "regras_taxas" in self.cfg:
+            regras_legacy = self.cfg.pop("regras_taxas", [])
+            emp = self.cfg.get("dominio_empresa") or {}
+            codi = emp.get("codi_emp")
+            if regras_legacy and codi is not None:
+                por_emp = self.cfg.setdefault("regras_taxas_por_empresa", {})
+                por_emp[str(codi)] = regras_legacy
+            precisa_salvar = True
+
+        if precisa_salvar:
+            config.salvar(self.cfg)
 
     # ------------------------------------------------------------------ UI
 
@@ -1092,13 +1108,19 @@ class App(tk.Tk):
             text=(
                 "Lançamentos contábeis gerados a partir dos pendentes do OFX "
                 "que casam com as regras de taxas configuradas. Use "
-                "'Configurar taxas' (linha de ações) para adicionar/remover."
+                "'Configurar taxas' (linha de ações) para adicionar/remover. "
+                "As regras são vinculadas à empresa selecionada no Domínio."
             ),
             wraplength=1100,
             foreground="#1f3a68",
             font=("TkDefaultFont", 9, "italic"),
         )
         info.pack(side="top", fill="x", padx=6, pady=(6, 2))
+
+        self.lbl_lancamentos_empresa = ttk.Label(
+            aba, text="", foreground="#555",
+        )
+        self.lbl_lancamentos_empresa.pack(side="top", fill="x", padx=6, pady=(0, 4))
 
         cols = ("data", "banco", "valor", "historico", "memo", "padrao")
         tree = ttk.Treeview(aba, columns=cols, show="headings")
@@ -1144,6 +1166,9 @@ class App(tk.Tk):
         self.cfg["dominio_empresa"] = dlg.empresa
         config.salvar(self.cfg)
         self._atualiza_label_dominio()
+        # Regras de taxas mudam com a empresa — recalcula lançamentos
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
 
     def _atualiza_label_dominio(self) -> None:
         cred = parser_dominio.load_odbc_config()
@@ -1856,20 +1881,64 @@ class App(tk.Tk):
 
     # ------------------------------------ Lançamentos contábeis ------------
 
+    def _empresa_selecionada(self) -> dict | None:
+        emp = self.cfg.get("dominio_empresa")
+        if isinstance(emp, dict) and emp.get("codi_emp") is not None:
+            return emp
+        return None
+
+    def _get_regras_empresa(self) -> list[dict]:
+        """Devolve a lista de regras de taxas vinculadas à empresa atual.
+        Lista vazia quando nenhuma empresa está selecionada."""
+        emp = self._empresa_selecionada()
+        if not emp:
+            return []
+        chave = str(emp["codi_emp"])
+        return list(self.cfg.get("regras_taxas_por_empresa", {}).get(chave, []))
+
+    def _set_regras_empresa(self, regras: list[dict]) -> None:
+        emp = self._empresa_selecionada()
+        if not emp:
+            return
+        chave = str(emp["codi_emp"])
+        self.cfg.setdefault("regras_taxas_por_empresa", {})[chave] = regras
+        config.salvar(self.cfg)
+
+    def _exigir_empresa(self, acao: str) -> bool:
+        """Mostra aviso e retorna False se não há empresa selecionada."""
+        if self._empresa_selecionada():
+            return True
+        messagebox.showwarning(
+            "Selecione uma empresa",
+            f"Selecione a empresa do Domínio antes de {acao}.\n\n"
+            "As regras de taxas são salvas por empresa (cada empresa tem seu "
+            "próprio conjunto de regras).",
+        )
+        return False
+
     def _abrir_config_taxas(self) -> None:
-        regras = list(self.cfg.get("regras_taxas", []))
+        if not self._exigir_empresa("configurar regras de taxas"):
+            return
+        emp = self._empresa_selecionada()
+        regras = self._get_regras_empresa()
 
         def _on_change(novas: list[dict]) -> None:
-            self.cfg["regras_taxas"] = novas
-            config.salvar(self.cfg)
+            self._set_regras_empresa(novas)
             self._gerar_lancamentos_contabeis()
+            self._redesenha_abas()
 
         dlg = DialogoConfigurarTaxas(self, regras, _on_change)
+        dlg.title(
+            f"Configurar regras — {emp['razao'][:60]} "
+            f"(empresa {emp['codi_emp']})"
+        )
         self.wait_window(dlg)
 
     def _criar_lancamento_padrao(self) -> None:
         """Atalho: cria uma regra de taxa a partir do pendente OFX
-        selecionado e a salva imediatamente em cfg["regras_taxas"]."""
+        selecionado e a salva imediatamente nas regras da empresa atual."""
+        if not self._exigir_empresa("criar regras de taxas"):
+            return
         sel = self.tree_pend_o.selection()
         if not sel:
             messagebox.showinfo(
@@ -1892,24 +1961,26 @@ class App(tk.Tk):
         # mais geral (substring) que vá capturar variações em meses futuros.
         regra_inicial = {"padrao": memo, "historico": ""}
         dlg = DialogoNovaRegra(self, regra_inicial)
-        dlg.title("Criar regra a partir do OFX selecionado")
+        emp = self._empresa_selecionada()
+        dlg.title(f"Criar regra — {emp['razao'][:60]} (empresa {emp['codi_emp']})")
         self.wait_window(dlg)
         if not dlg.regra:
             return
 
         # Salva a nova regra e refaz os lançamentos contábeis
-        regras = list(self.cfg.get("regras_taxas", []))
+        regras = self._get_regras_empresa()
         regras.append(dlg.regra)
-        self.cfg["regras_taxas"] = regras
-        config.salvar(self.cfg)
+        self._set_regras_empresa(regras)
         self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
         self._atualiza_resumo()
 
     def _gerar_lancamentos_contabeis(self) -> None:
-        """Classifica os pendentes OFX brutos contra as regras de taxas e
-        deriva ``pendentes_ofx`` (visível) removendo os classificados."""
-        regras = self.cfg.get("regras_taxas", [])
+        """Classifica os pendentes OFX brutos contra as regras de taxas da
+        EMPRESA ATUAL e deriva ``pendentes_ofx`` (visível) removendo os
+        classificados. Quando não há empresa selecionada, nenhuma regra é
+        aplicada (todos os pendentes ficam visíveis)."""
+        regras = self._get_regras_empresa()
         self.lancamentos_contabeis = gerar_lancamentos_contabeis(
             self.pendentes_ofx_brutos, regras,
         )
@@ -1942,6 +2013,22 @@ class App(tk.Tk):
         self.notebook.tab(
             idx, text=f"Lançamentos contábeis ({len(self.lancamentos_contabeis)})",
         )
+        # Atualiza label que indica qual empresa está ativa
+        if hasattr(self, "lbl_lancamentos_empresa"):
+            emp = self._empresa_selecionada()
+            n_regras = len(self._get_regras_empresa())
+            if emp:
+                self.lbl_lancamentos_empresa.config(
+                    text=(
+                        f"Empresa ativa: {emp['razao']} (código {emp['codi_emp']}) "
+                        f"— {n_regras} regra(s) cadastrada(s)"
+                    ),
+                )
+            else:
+                self.lbl_lancamentos_empresa.config(
+                    text="⚠ Nenhuma empresa selecionada — clique em "
+                         "'Selecionar empresa' para ativar regras.",
+                )
 
 
 if __name__ == "__main__":
