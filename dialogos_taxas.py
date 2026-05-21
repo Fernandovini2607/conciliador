@@ -258,6 +258,117 @@ class DialogoLancamentoManual(tk.Toplevel):
         self.destroy()
 
 
+class DialogoEditarPar(tk.Toplevel):
+    """Edita os 6 dados do lado da planilha de um par P×OFX. Útil quando
+    o motivo do par não ter casado com o Domínio é dado preenchido errado
+    (NF errada, valor digitado errado, etc.).
+
+    Devolve dict com os novos valores em ``self.resultado``, ou ``None``
+    se cancelar.
+    """
+
+    def __init__(self, master: tk.Misc, par) -> None:
+        super().__init__(master)
+        self.title("Editar dados do lançamento (lado planilha)")
+        self.transient(master)
+        self.grab_set()
+        self.resizable(False, False)
+
+        self.par = par
+        self.resultado: dict[str, Any] | None = None
+
+        p = par.planilha
+        emissao_atual = p.extras.get("data_emissao")
+        emissao_txt = emissao_atual.strftime("%d/%m/%Y") if emissao_atual else ""
+
+        campos = [
+            ("Data vencimento (dd/mm/aaaa):", p.data.strftime("%d/%m/%Y"), "data"),
+            ("Data emissão (dd/mm/aaaa) — opcional:", emissao_txt, "data_emissao"),
+            ("Valor (use ponto pra decimal ou vírgula brasileira):", f"{p.valor:.2f}", "valor"),
+            ("Nº NF:", p.extras.get("numero_nf", "") or "", "numero_nf"),
+            ("CNPJ fornecedor:", p.extras.get("cnpj", "") or "", "cnpj"),
+            ("Fornecedor (razão social):", p.extras.get("fornecedor", "") or "", "fornecedor"),
+        ]
+
+        # Cabeçalho explicativo
+        ttk.Label(
+            self,
+            text=(
+                "Edite os dados da PLANILHA (não mexe no OFX). Após salvar, "
+                "o app re-tenta casar com o Domínio."
+            ),
+            wraplength=460,
+            foreground="#555",
+            font=("TkDefaultFont", 9, "italic"),
+        ).grid(row=0, column=0, padx=10, pady=(10, 4), sticky="w")
+
+        self.entries: dict[str, ttk.Entry] = {}
+        for i, (label, valor, key) in enumerate(campos):
+            ttk.Label(self, text=label).grid(
+                row=1 + i * 2, column=0, padx=10, pady=(8, 2), sticky="w",
+            )
+            entry = ttk.Entry(self, width=55)
+            entry.grid(row=2 + i * 2, column=0, padx=10, pady=2, sticky="we")
+            entry.insert(0, str(valor))
+            self.entries[key] = entry
+
+        botoes = ttk.Frame(self)
+        botoes.grid(row=1 + len(campos) * 2, column=0, padx=10, pady=(12, 10), sticky="e")
+        ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
+        ttk.Button(botoes, text="Salvar", command=self._confirmar).pack(side="right", padx=4)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Escape>", lambda _e: self._cancelar())
+
+    def _confirmar(self) -> None:
+        # Import local pra evitar dep circular no topo do arquivo
+        from parser_xlsx import para_data, para_decimal
+
+        v = {k: e.get().strip() for k, e in self.entries.items()}
+
+        data = para_data(v["data"])
+        if data is None:
+            messagebox.showwarning(
+                "Data inválida",
+                "Informe a data de vencimento no formato dd/mm/aaaa.",
+                parent=self,
+            )
+            return
+
+        data_emissao = None
+        if v["data_emissao"]:
+            data_emissao = para_data(v["data_emissao"])
+            if data_emissao is None:
+                messagebox.showwarning(
+                    "Data inválida",
+                    "Data de emissão no formato dd/mm/aaaa ou deixe em branco.",
+                    parent=self,
+                )
+                return
+
+        valor = para_decimal(v["valor"])
+        if valor is None or valor <= 0:
+            messagebox.showwarning(
+                "Valor inválido", "Informe um valor numérico maior que zero.",
+                parent=self,
+            )
+            return
+
+        self.resultado = {
+            "data": data,
+            "data_emissao": data_emissao,
+            "valor": valor,
+            "numero_nf": v["numero_nf"],
+            "cnpj": v["cnpj"],
+            "fornecedor": v["fornecedor"],
+        }
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.resultado = None
+        self.destroy()
+
+
 class DialogoConfigurarTaxas(tk.Toplevel):
     """Listagem editável de regras de taxas/movimentações bancárias.
 

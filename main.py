@@ -7,6 +7,7 @@ import parser_dominio
 from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
 from dialogos_taxas import (
     DialogoConfigurarTaxas,
+    DialogoEditarPar,
     DialogoLancamentoManual,
     DialogoNovaRegra,
 )
@@ -1129,6 +1130,10 @@ class App(tk.Tk):
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x")
         ttk.Button(
+            botoes, text="Editar dados",
+            command=self._editar_par_amarelo,
+        ).pack(side="left", padx=6, pady=6)
+        ttk.Button(
             botoes, text="Lançar manualmente",
             command=self._lancar_manual,
         ).pack(side="left", padx=6, pady=6)
@@ -1136,6 +1141,65 @@ class App(tk.Tk):
             botoes, text="Criar regra de fornecedor (do amarelo selecionado)",
             command=self._criar_regra_fornecedor,
         ).pack(side="left", padx=6, pady=6)
+
+    def _editar_par_amarelo(self) -> None:
+        """Edita os dados do lado da planilha de um par amarelo (Conciliado,
+        falta no Domínio). Útil pra corrigir NF/valor/CNPJ que estavam
+        errados e impediam o match com o Domínio."""
+        sel = self.tree_dominio.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha amarela (Conciliado, falta no Domínio) "
+                "para editar.",
+            )
+            return
+        par = self._itens_comparacao.get(sel[0])
+        if par is None or par.dominio is not None:
+            messagebox.showwarning(
+                "Linha inválida",
+                "Edição só faz sentido para linhas amarelas (Conciliado, "
+                "falta no Domínio).",
+            )
+            return
+
+        dlg = DialogoEditarPar(self, par)
+        self.wait_window(dlg)
+        if not dlg.resultado:
+            return
+
+        # Aplica as alterações na Transacao da planilha
+        r = dlg.resultado
+        par.planilha.data = r["data"]
+        par.planilha.valor = r["valor"]
+        if r["data_emissao"]:
+            par.planilha.extras["data_emissao"] = r["data_emissao"]
+        elif "data_emissao" in par.planilha.extras:
+            del par.planilha.extras["data_emissao"]
+        for k in ("numero_nf", "cnpj", "fornecedor"):
+            par.planilha.extras[k] = r[k]
+
+        # Re-tenta match com Domínio + atualiza tudo
+        self._filtrar_conciliados_por_dominio()
+        self._gerar_lancamentos_contabeis()
+        self._render_aba_planilha()      # planilha mudou
+        self._render_conciliados()        # par mudou de valores
+        self._comparar_com_dominio()      # re-renderiza Comparação + Conciliados × Domínio
+
+        # Feedback claro pro usuário
+        if par.dominio is not None:
+            messagebox.showinfo(
+                "Match!",
+                "Após edição o par agora bate com o Domínio. Foi movido "
+                "para a aba 'Conciliados × Domínio'.",
+            )
+        else:
+            messagebox.showinfo(
+                "Dados atualizados",
+                "Dados salvos, mas o par ainda não casa com o Domínio. "
+                "Verifique se Vencimento + Valor + Nº NF estão exatamente "
+                "iguais ao registro do Domínio.",
+            )
 
     def _lancar_manual(self) -> None:
         """Cria UM lançamento contábil avulso a partir do par amarelo
