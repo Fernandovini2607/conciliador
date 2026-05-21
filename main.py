@@ -483,6 +483,7 @@ class App(tk.Tk):
         self._monta_aba_conciliados()
         self._monta_aba_pendentes()
         self._monta_aba_sugestoes()
+        self._monta_aba_conciliados_dominio()
         self._monta_aba_dominio()
 
     # --------------- Filtros estilo Excel (popup ao clicar no cabeçalho) ---
@@ -814,12 +815,6 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
-        self.lbl_info_conciliados = ttk.Label(
-            aba, text="", foreground="#1f3a68",
-            font=("TkDefaultFont", 9, "italic"),
-        )
-        self.lbl_info_conciliados.pack(side="top", fill="x", padx=6, pady=(6, 0))
-
         cols = (
             "tipo", "data", "pagto", "valor", "emissao",
             "nf", "cnpj", "fornecedor", "memo_ofx", "diff",
@@ -969,6 +964,57 @@ class App(tk.Tk):
         ).pack(side="left", padx=6, pady=6)
 
         self.tree_sugestoes = tree
+
+    def _monta_aba_conciliados_dominio(self) -> None:
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Conciliados × Domínio (0)")
+        self._aba_conciliados_dominio = aba
+
+        instr = ttk.Label(
+            aba,
+            text=(
+                "Pares Planilha × OFX que TAMBÉM batem no Domínio "
+                "(data de vencimento + valor + Nº NF)."
+            ),
+            foreground="#1f3a68",
+            font=("TkDefaultFont", 9, "italic"),
+        )
+        instr.pack(side="top", fill="x", padx=6, pady=(6, 0))
+
+        cols = (
+            "tipo", "data", "pagto", "valor", "emissao",
+            "nf", "cnpj", "fornecedor", "memo_ofx", "status_dom",
+        )
+        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        tree.heading("tipo", text="Tipo")
+        tree.heading("data", text="Vencimento")
+        tree.heading("pagto", text="Pagamento")
+        tree.heading("valor", text="Valor")
+        tree.heading("emissao", text="Emissão")
+        tree.heading("nf", text="Nº NF")
+        tree.heading("cnpj", text="CNPJ")
+        tree.heading("fornecedor", text="Fornecedor")
+        tree.heading("memo_ofx", text="Memo OFX")
+        tree.heading("status_dom", text="Status (Domínio)")
+        tree.column("tipo", width=65, anchor="w")
+        tree.column("data", width=85, anchor="center")
+        tree.column("pagto", width=85, anchor="center")
+        tree.column("valor", width=95, anchor="e")
+        tree.column("emissao", width=85, anchor="center")
+        tree.column("nf", width=70, anchor="center")
+        tree.column("cnpj", width=130, anchor="w")
+        tree.column("fornecedor", width=170, anchor="w")
+        tree.column("memo_ofx", width=160, anchor="w")
+        tree.column("status_dom", width=110, anchor="center")
+        tree.tag_configure("paga", background="#d4edda")
+        tree.tag_configure("parcial", background="#fff3cd")
+        tree.tag_configure("aberto", background="#f8d7da")
+
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree_conciliados_dominio = tree
 
     def _monta_aba_dominio(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1188,7 +1234,7 @@ class App(tk.Tk):
             )
 
         self.notebook.tab(
-            6,
+            7,
             text=(
                 f"Comparação (ok {n_ok} | falta {n_falta_dom} | só dom {len(sobras_dominio)})"
             ),
@@ -1325,7 +1371,7 @@ class App(tk.Tk):
         self.lbl_resumo.config(text="")
         for item in self.tree_dominio.get_children():
             self.tree_dominio.delete(item)
-        self.notebook.tab(6, text="Comparação (0)")
+        self.notebook.tab(7, text="Comparação (0)")
         self._atualiza_botao_comparar()
 
     def _executar_conciliacao(self) -> None:
@@ -1463,6 +1509,7 @@ class App(tk.Tk):
         self._render_conciliados()
         self._render_pendentes()
         self._render_sugestoes()
+        self._render_aba_conciliados_dominio()
         self.notebook.tab(3, text=f"Conciliados ({len(self.pares_conciliados)})")
         self.notebook.tab(
             4, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
@@ -1473,16 +1520,7 @@ class App(tk.Tk):
         for item in self.tree_conciliados.get_children():
             self.tree_conciliados.delete(item)
         self.itens_pares.clear()
-
-        # Quando Domínio está carregado, mostra só triple-matched.
-        # Sem Domínio, mostra todos os pares P×O (fluxo parcial).
-        dominio_ativo = bool(self.transacoes_dominio)
-        if dominio_ativo:
-            pares_mostrar = [p for p in self.pares_conciliados if p.dominio is not None]
-        else:
-            pares_mostrar = list(self.pares_conciliados)
-
-        for par in pares_mostrar:
+        for par in self.pares_conciliados:
             diff_txt = ""
             if par.diff_dias or par.diff_valor:
                 diff_txt = f"Δ {par.diff_dias}d, R$ {par.diff_valor:.2f}"
@@ -1509,27 +1547,6 @@ class App(tk.Tk):
                 tags=(par.tipo,),
             )
             self.itens_pares[iid] = par
-
-        # Atualiza label informativa da aba se existir
-        if hasattr(self, "lbl_info_conciliados"):
-            total_po = len(self.pares_conciliados)
-            mostrando = len(pares_mostrar)
-            if dominio_ativo:
-                falta_dom = total_po - mostrando
-                self.lbl_info_conciliados.config(
-                    text=(
-                        f"Triple-match (Planilha × OFX × Domínio): {mostrando} "
-                        f"— {falta_dom} pares P×O não bateram com o Domínio "
-                        f"(ver aba Comparação)"
-                    ),
-                )
-            else:
-                self.lbl_info_conciliados.config(
-                    text=(
-                        f"{mostrando} pares Planilha × OFX. Carregue o "
-                        f"Domínio pra ver os conciliados finais."
-                    ),
-                )
 
     def _render_pendentes(self) -> None:
         for item in self.tree_pend_p.get_children():
@@ -1578,6 +1595,46 @@ class App(tk.Tk):
                 tags=("destaque",),
             )
             self.itens_sugestoes[iid] = par
+
+    def _render_aba_conciliados_dominio(self) -> None:
+        for item in self.tree_conciliados_dominio.get_children():
+            self.tree_conciliados_dominio.delete(item)
+        # Só mostra pares triple-matched
+        pares = [p for p in self.pares_conciliados if p.dominio is not None]
+        for par in pares:
+            tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
+            emissao = par.planilha.extras.get("data_emissao")
+            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
+            pagto = par.planilha.data_pagamento or par.ofx.data
+            pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
+
+            status = (par.dominio.extras.get("status", "") if par.dominio else "") or ""
+            tag = ""
+            sl = status.lower()
+            if sl.startswith("pag"):
+                tag = "paga"
+            elif sl.startswith("parc"):
+                tag = "parcial"
+            elif sl.startswith("ab"):
+                tag = "aberto"
+
+            self.tree_conciliados_dominio.insert(
+                "", "end",
+                values=(
+                    tipo_txt,
+                    par.planilha.data.strftime("%d/%m/%Y"),
+                    pagto_txt,
+                    f"{par.planilha.valor:.2f}",
+                    emissao_txt,
+                    par.planilha.extras.get("numero_nf", ""),
+                    par.planilha.extras.get("cnpj", ""),
+                    par.planilha.extras.get("fornecedor", ""),
+                    par.ofx.descricao,
+                    status,
+                ),
+                tags=(tag,) if tag else (),
+            )
+        self.notebook.tab(6, text=f"Conciliados × Domínio ({len(pares)})")
 
     # ---------------- Abas de dados crus (origem) ----------------
 
