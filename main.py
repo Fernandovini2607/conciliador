@@ -1132,15 +1132,15 @@ class App(tk.Tk):
         ttk.Button(
             botoes, text="Editar dados",
             command=self._editar_par_amarelo,
-        ).pack(side="left", padx=6, pady=6)
+        ).pack(side="top", anchor="w", padx=6, pady=(6, 2))
         ttk.Button(
             botoes, text="Lançar manualmente",
             command=self._lancar_manual,
-        ).pack(side="left", padx=6, pady=6)
+        ).pack(side="top", anchor="w", padx=6, pady=2)
         ttk.Button(
             botoes, text="Criar regra de fornecedor (do amarelo selecionado)",
             command=self._criar_regra_fornecedor,
-        ).pack(side="left", padx=6, pady=6)
+        ).pack(side="top", anchor="w", padx=6, pady=(2, 6))
 
     def _editar_par_amarelo(self) -> None:
         """Edita os dados do lado da planilha de um par amarelo (Conciliado,
