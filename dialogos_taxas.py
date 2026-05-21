@@ -139,6 +139,125 @@ class DialogoNovaRegra(tk.Toplevel):
         self.destroy()
 
 
+class DialogoLancamentoManual(tk.Toplevel):
+    """Diálogo simples para criar UM lançamento contábil avulso a partir de
+    um par P×OFX que falta no Domínio. Pede só conta + histórico — NÃO cria
+    regra. Devolve dict ``{"historico": ..., "conta": ...}`` em ``self.resultado``
+    ou ``None`` se cancelar.
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        par,                              # matcher.Par
+        plano_contas: list | None = None,
+        sugestao_historico: str = "",
+    ) -> None:
+        super().__init__(master)
+        self.title("Lançamento contábil manual")
+        self.transient(master)
+        self.grab_set()
+        self.resizable(False, False)
+
+        self.par = par
+        self.plano_contas = plano_contas or []
+        self.resultado: dict[str, str] | None = None
+        self._opcoes_conta = [
+            f"{c.codigo} - {c.descricao}" for c in self.plano_contas
+        ]
+        self._codigos_validos = {c.codigo for c in self.plano_contas}
+
+        # Resumo do par selecionado (read-only)
+        cab = ttk.LabelFrame(self, text="Par selecionado")
+        cab.grid(row=0, column=0, padx=10, pady=(10, 4), sticky="we")
+        vcto = par.planilha.data.strftime("%d/%m/%Y")
+        valor = f"R$ {par.planilha.valor:.2f}"
+        forn = par.planilha.extras.get("fornecedor", "") or ""
+        cnpj = par.planilha.extras.get("cnpj", "") or ""
+        nf = par.planilha.extras.get("numero_nf", "") or ""
+        memo = par.ofx.descricao or ""
+        for i, (rotulo, txt) in enumerate([
+            ("Vencimento", vcto),
+            ("Valor",     valor),
+            ("Nº NF",     nf),
+            ("Fornecedor", f"{forn} ({cnpj})" if cnpj else forn),
+            ("Memo OFX",  memo[:80]),
+        ]):
+            ttk.Label(cab, text=f"{rotulo}:", foreground="#555").grid(
+                row=i, column=0, padx=6, pady=1, sticky="e",
+            )
+            ttk.Label(cab, text=txt).grid(row=i, column=1, padx=6, pady=1, sticky="w")
+
+        ttk.Label(self, text="Histórico contábil:").grid(
+            row=1, column=0, padx=10, pady=(8, 2), sticky="w",
+        )
+        self.entry_historico = ttk.Entry(self, width=60)
+        self.entry_historico.grid(row=2, column=0, padx=10, pady=2, sticky="we")
+        if sugestao_historico:
+            self.entry_historico.insert(0, sugestao_historico)
+
+        rotulo_conta = (
+            "Conta contábil (digite parte do código ou descrição):"
+            if self.plano_contas
+            else "Conta contábil:"
+        )
+        ttk.Label(self, text=rotulo_conta).grid(
+            row=3, column=0, padx=10, pady=(8, 2), sticky="w",
+        )
+        if self.plano_contas:
+            self.entry_conta: ttk.Entry = ttk.Combobox(
+                self, width=60, values=self._opcoes_conta,
+            )
+            self.entry_conta.bind("<KeyRelease>", self._filtra_contas)
+        else:
+            self.entry_conta = ttk.Entry(self, width=60)
+        self.entry_conta.grid(row=4, column=0, padx=10, pady=2, sticky="we")
+
+        botoes = ttk.Frame(self)
+        botoes.grid(row=5, column=0, padx=10, pady=(12, 10), sticky="e")
+        ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
+        ttk.Button(botoes, text="Lançar", command=self._confirmar).pack(side="right", padx=4)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Return>", lambda _e: self._confirmar())
+        self.bind("<Escape>", lambda _e: self._cancelar())
+        self.entry_historico.focus_set()
+
+    def _filtra_contas(self, event) -> None:
+        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+            return
+        termo = self.entry_conta.get().strip().lower()
+        if not termo:
+            self.entry_conta["values"] = self._opcoes_conta
+        else:
+            self.entry_conta["values"] = [
+                o for o in self._opcoes_conta if termo in o.lower()
+            ]
+
+    def _confirmar(self) -> None:
+        historico = self.entry_historico.get().strip()
+        conta_raw = self.entry_conta.get().strip()
+        if self.plano_contas and " - " in conta_raw:
+            codigo_candidato = conta_raw.split(" - ", 1)[0].strip()
+            conta = (
+                codigo_candidato if codigo_candidato in self._codigos_validos
+                else conta_raw
+            )
+        else:
+            conta = conta_raw
+        if not historico:
+            messagebox.showwarning(
+                "Campo vazio", "Informe o histórico contábil.", parent=self,
+            )
+            return
+        self.resultado = {"historico": historico, "conta": conta}
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.resultado = None
+        self.destroy()
+
+
 class DialogoConfigurarTaxas(tk.Toplevel):
     """Listagem editável de regras de taxas/movimentações bancárias.
 

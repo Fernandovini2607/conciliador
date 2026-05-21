@@ -5,7 +5,11 @@ from tkinter import filedialog, messagebox, ttk
 import config
 import parser_dominio
 from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
-from dialogos_taxas import DialogoConfigurarTaxas, DialogoNovaRegra
+from dialogos_taxas import (
+    DialogoConfigurarTaxas,
+    DialogoLancamentoManual,
+    DialogoNovaRegra,
+)
 from lancamentos import LancamentoContabil, gerar_lancamentos_contabeis
 from matcher import (
     Par,
@@ -403,6 +407,8 @@ class App(tk.Tk):
         self.comparacao_dominio: list[tuple[str, Par | Transacao]] = []
         # ↑ status, registro (Par para casados; Transacao para faltantes)
         self.lancamentos_contabeis: list[LancamentoContabil] = []
+        # Lançamentos manuais (avulsos): persistem entre re-cálculos automáticos
+        self.lancamentos_manuais: list[LancamentoContabil] = []
         self.ids_pares_classificados: set[int] = set()
 
         self.cfg = config.carregar()
@@ -1123,9 +1129,62 @@ class App(tk.Tk):
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x")
         ttk.Button(
+            botoes, text="Lançar manualmente",
+            command=self._lancar_manual,
+        ).pack(side="left", padx=6, pady=6)
+        ttk.Button(
             botoes, text="Criar regra de fornecedor (do amarelo selecionado)",
             command=self._criar_regra_fornecedor,
         ).pack(side="left", padx=6, pady=6)
+
+    def _lancar_manual(self) -> None:
+        """Cria UM lançamento contábil avulso a partir do par amarelo
+        selecionado, sem criar regra. Útil pra lançamentos pontuais."""
+        sel = self.tree_dominio.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha amarela (Conciliado, falta no Domínio) "
+                "para lançar manualmente.",
+            )
+            return
+        par = self._itens_comparacao.get(sel[0])
+        if par is None or par.dominio is not None:
+            messagebox.showwarning(
+                "Linha inválida",
+                "O lançamento manual só faz sentido para linhas amarelas "
+                "(Conciliado, falta no Domínio).",
+            )
+            return
+        forn = par.planilha.extras.get("fornecedor", "") or ""
+        sugestao = f"Pagto. {forn}" if forn else ""
+        dlg = DialogoLancamentoManual(
+            self, par, plano_contas=self.plano_contas,
+            sugestao_historico=sugestao,
+        )
+        self.wait_window(dlg)
+        if not dlg.resultado:
+            return
+
+        # Cria o lançamento avulso
+        data = par.planilha.data_pagamento or par.ofx.data
+        lanc = LancamentoContabil(
+            data=data,
+            historico=dlg.resultado["historico"],
+            valor=par.planilha.valor,
+            banco=par.ofx.extras.get("banco", "") or "",
+            memo_original=par.ofx.descricao or "",
+            padrao_match="(manual)",
+            conta=dlg.resultado["conta"],
+            tipo_regra="manual",
+            fornecedor=forn,
+            cnpj=par.planilha.extras.get("cnpj", "") or "",
+            transacao_origem=par.ofx,
+            par_origem=par,
+        )
+        self.lancamentos_manuais.append(lanc)
+        self._gerar_lancamentos_contabeis()
+        self._comparar_com_dominio()  # remove o par da Comparação
 
     def _criar_regra_fornecedor(self) -> None:
         """Atalho: cria regra do tipo 'fornecedor' a partir do par amarelo
@@ -1684,6 +1743,8 @@ class App(tk.Tk):
         self.pendentes_ofx_brutos = []
         self.sugestoes = []
         self.lancamentos_contabeis = []
+        self.lancamentos_manuais = []
+        self.ids_pares_classificados = set()
         self._redesenha_abas()
         if hasattr(self, "tree_lancamentos"):
             self._render_aba_lancamentos()
@@ -2197,9 +2258,18 @@ class App(tk.Tk):
         pares_sem_dominio = [
             p for p in self.pares_conciliados if p.dominio is None
         ]
-        self.lancamentos_contabeis = gerar_lancamentos_contabeis(
+        automaticos = gerar_lancamentos_contabeis(
             self.pendentes_ofx_brutos, regras, pares_sem_dominio,
         )
+        # Lançamentos manuais persistem se o par ainda está sem Domínio.
+        # Se o par sumiu (ex.: usuário desfez conciliação), removemos o manual.
+        ids_pares_atuais = {id(p) for p in self.pares_conciliados}
+        self.lancamentos_manuais = [
+            l for l in self.lancamentos_manuais
+            if l.par_origem is None or id(l.par_origem) in ids_pares_atuais
+        ]
+        self.lancamentos_contabeis = automaticos + self.lancamentos_manuais
+
         # Deriva pendentes_ofx (visível) removendo os classificados por memo
         ids_trans_classificadas = {
             id(l.transacao_origem) for l in self.lancamentos_contabeis
@@ -2210,9 +2280,10 @@ class App(tk.Tk):
             if id(t) not in ids_trans_classificadas
         ]
         # Pares (sem Domínio) que viraram lançamento — pra ocultar em Comparação
-        self.ids_pares_classificados: set[int] = {
+        # (tanto por regra de fornecedor quanto por lançamento manual)
+        self.ids_pares_classificados = {
             id(l.par_origem) for l in self.lancamentos_contabeis
-            if l.tipo_regra == "fornecedor" and l.par_origem is not None
+            if l.tipo_regra in ("fornecedor", "manual") and l.par_origem is not None
         }
         if hasattr(self, "tree_lancamentos"):
             self._render_aba_lancamentos()
