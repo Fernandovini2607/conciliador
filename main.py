@@ -1166,10 +1166,9 @@ class App(tk.Tk):
         if not dlg.resultado:
             return
 
-        # Cria o lançamento avulso
-        data = par.planilha.data_pagamento or par.ofx.data
+        # Cria o lançamento avulso — data de pagamento = compensação no OFX
         lanc = LancamentoContabil(
-            data=data,
+            data=par.ofx.data,
             historico=dlg.resultado["historico"],
             valor=par.planilha.valor,
             banco=par.ofx.extras.get("banco", "") or "",

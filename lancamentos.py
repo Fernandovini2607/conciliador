@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class LancamentoContabil:
-    data: date                                # data de pagamento (do OFX)
+    data: date                                # data de pagamento (sempre do OFX = data de compensação no banco)
     historico: str                            # vem da regra
     valor: Decimal                            # do OFX
     banco: str                                # do OFX
@@ -89,10 +89,10 @@ def _gerar_de_pares_sem_dominio(
             if not padrao:
                 continue
             if _matches(campo_busca, padrao):
-                # Data de pagamento: data_pagamento da planilha, fallback OFX
-                data = par.planilha.data_pagamento or par.ofx.data
+                # Data de pagamento: sempre a do OFX (data de compensação
+                # efetiva no banco, é o que vai no lançamento contábil).
                 lancamentos.append(LancamentoContabil(
-                    data=data,
+                    data=par.ofx.data,
                     historico=(regra.get("historico") or "").strip(),
                     valor=par.planilha.valor,
                     banco=par.ofx.extras.get("banco", "") or "",
