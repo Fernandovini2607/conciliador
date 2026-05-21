@@ -342,6 +342,36 @@ class App(tk.Tk):
         self._monta_aba_sugestoes()
         self._monta_aba_dominio()
 
+    @staticmethod
+    def _largura_filtro(pixels: int) -> int:
+        """Converte largura em pixels da coluna Treeview para chars do Entry,
+        com mínimos sensatos. Aproximação: ~7-8 px por char."""
+        return max(pixels // 8, 4)
+
+    def _monta_filtros_coluna(
+        self,
+        parent: tk.Misc,
+        col_defs: list[tuple[str, int]],
+        on_change,
+    ) -> dict[str, tk.StringVar]:
+        """Cria uma linha de Entries alinhada com as colunas do Treeview.
+
+        ``col_defs`` é lista de (col_id, largura_px).
+        ``on_change`` é a função chamada quando qualquer filtro muda.
+        Retorna dict {col_id: StringVar}.
+        """
+        frame = ttk.Frame(parent)
+        frame.pack(side="top", fill="x", padx=4, pady=(0, 2))
+        ttk.Label(frame, text="Por coluna:", foreground="#666").pack(side="left", padx=(0, 4))
+        filtros: dict[str, tk.StringVar] = {}
+        for col, w in col_defs:
+            var = tk.StringVar()
+            var.trace_add("write", lambda *_a, _f=on_change: _f())
+            entry = ttk.Entry(frame, textvariable=var, width=self._largura_filtro(w))
+            entry.pack(side="left", padx=1)
+            filtros[col] = var
+        return filtros
+
     def _monta_aba_planilha_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
         self.notebook.add(aba, text="Planilha (0)")
@@ -354,11 +384,20 @@ class App(tk.Tk):
         self.filtro_planilha = tk.StringVar()
         self.filtro_planilha.trace_add("write", lambda *_a: self._render_aba_planilha())
         ttk.Entry(topo, textvariable=self.filtro_planilha, width=40).pack(side="left")
-        ttk.Button(
-            topo, text="Limpar", command=lambda: self.filtro_planilha.set(""),
-        ).pack(side="left", padx=4)
+        ttk.Button(topo, text="Limpar", command=self._limpa_filtros_planilha).pack(
+            side="left", padx=4,
+        )
         self.lbl_filtro_planilha = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_planilha.pack(side="left", padx=8)
+
+        # Filtros por coluna
+        col_defs = [
+            ("linha", 55), ("venc", 90), ("emis", 90), ("valor", 100),
+            ("nf", 80), ("cnpj", 130), ("fornecedor", 260),
+        ]
+        self.filtros_planilha = self._monta_filtros_coluna(
+            aba, col_defs, self._render_aba_planilha,
+        )
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
@@ -382,6 +421,11 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
         self.tree_planilha = tree
 
+    def _limpa_filtros_planilha(self) -> None:
+        self.filtro_planilha.set("")
+        for v in self.filtros_planilha.values():
+            v.set("")
+
     def _monta_aba_ofx_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
         self.notebook.add(aba, text="OFX (0)")
@@ -394,11 +438,17 @@ class App(tk.Tk):
         self.filtro_ofx = tk.StringVar()
         self.filtro_ofx.trace_add("write", lambda *_a: self._render_aba_ofx())
         ttk.Entry(topo, textvariable=self.filtro_ofx, width=40).pack(side="left")
-        ttk.Button(topo, text="Limpar", command=lambda: self.filtro_ofx.set("")).pack(
+        ttk.Button(topo, text="Limpar", command=self._limpa_filtros_ofx).pack(
             side="left", padx=4,
         )
         self.lbl_filtro_ofx = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_ofx.pack(side="left", padx=8)
+
+        # Filtros por coluna
+        col_defs = [("data", 110), ("valor", 110), ("memo", 500)]
+        self.filtros_ofx = self._monta_filtros_coluna(
+            aba, col_defs, self._render_aba_ofx,
+        )
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
@@ -417,6 +467,11 @@ class App(tk.Tk):
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_ofx = tree
+
+    def _limpa_filtros_ofx(self) -> None:
+        self.filtro_ofx.set("")
+        for v in self.filtros_ofx.values():
+            v.set("")
 
     def _monta_aba_dominio_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -448,6 +503,15 @@ class App(tk.Tk):
         self.lbl_filtro_dominio = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_dominio.pack(side="left", padx=8)
 
+        # Filtros por coluna
+        col_defs = [
+            ("venc", 85), ("emis", 85), ("valor", 95), ("pago", 95),
+            ("status", 75), ("nf", 70), ("cnpj", 130), ("fornecedor", 240),
+        ]
+        self.filtros_dominio = self._monta_filtros_coluna(
+            aba, col_defs, self._render_aba_dominio_dados,
+        )
+
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
@@ -477,6 +541,9 @@ class App(tk.Tk):
     def _limpa_filtros_dominio(self) -> None:
         self.filtro_dominio.set("")
         self.filtro_dominio_status.set("Todos")
+        if hasattr(self, "filtros_dominio"):
+            for v in self.filtros_dominio.values():
+                v.set("")
 
     def _monta_aba_conciliados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1169,6 +1236,12 @@ class App(tk.Tk):
         for item in self.tree_planilha.get_children():
             self.tree_planilha.delete(item)
         termo = self.filtro_planilha.get().strip().lower() if hasattr(self, "filtro_planilha") else ""
+        cols_ordem = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+        filtros_col = (
+            {c: self.filtros_planilha[c].get().strip().lower() for c in cols_ordem}
+            if hasattr(self, "filtros_planilha") else {c: "" for c in cols_ordem}
+        )
+        tem_filtro_col = any(filtros_col.values())
         mostradas = 0
         for t in self.transacoes_planilha:
             row = (
@@ -1180,21 +1253,38 @@ class App(tk.Tk):
                 t.extras.get("cnpj", "") or "",
                 t.extras.get("fornecedor", "") or "",
             )
+            # Filtro global
             if termo and termo not in " ".join(row).lower():
+                continue
+            # Filtros por coluna (AND)
+            pula = False
+            for i, col in enumerate(cols_ordem):
+                f = filtros_col[col]
+                if f and f not in str(row[i]).lower():
+                    pula = True
+                    break
+            if pula:
                 continue
             self.tree_planilha.insert("", "end", values=row)
             mostradas += 1
         total = len(self.transacoes_planilha)
         self.notebook.tab(0, text=f"Planilha ({total})")
         if hasattr(self, "lbl_filtro_planilha"):
+            tem_filtro = termo or tem_filtro_col
             self.lbl_filtro_planilha.config(
-                text=f"Mostrando {mostradas} de {total}" if termo else f"{total} lançamentos",
+                text=f"Mostrando {mostradas} de {total}" if tem_filtro else f"{total} lançamentos",
             )
 
     def _render_aba_ofx(self) -> None:
         for item in self.tree_ofx.get_children():
             self.tree_ofx.delete(item)
         termo = self.filtro_ofx.get().strip().lower() if hasattr(self, "filtro_ofx") else ""
+        cols_ordem = ("data", "valor", "memo")
+        filtros_col = (
+            {c: self.filtros_ofx[c].get().strip().lower() for c in cols_ordem}
+            if hasattr(self, "filtros_ofx") else {c: "" for c in cols_ordem}
+        )
+        tem_filtro_col = any(filtros_col.values())
         mostradas = 0
         for t in self.transacoes_ofx:
             row = (
@@ -1204,13 +1294,22 @@ class App(tk.Tk):
             )
             if termo and termo not in " ".join(row).lower():
                 continue
+            pula = False
+            for i, col in enumerate(cols_ordem):
+                f = filtros_col[col]
+                if f and f not in str(row[i]).lower():
+                    pula = True
+                    break
+            if pula:
+                continue
             self.tree_ofx.insert("", "end", values=row)
             mostradas += 1
         total = len(self.transacoes_ofx)
         self.notebook.tab(1, text=f"OFX ({total})")
         if hasattr(self, "lbl_filtro_ofx"):
+            tem_filtro = termo or tem_filtro_col
             self.lbl_filtro_ofx.config(
-                text=f"Mostrando {mostradas} de {total}" if termo else f"{total} pagamentos",
+                text=f"Mostrando {mostradas} de {total}" if tem_filtro else f"{total} pagamentos",
             )
 
     def _render_aba_dominio_dados(self) -> None:
@@ -1218,6 +1317,12 @@ class App(tk.Tk):
             self.tree_dominio_dados.delete(item)
         termo = self.filtro_dominio.get().strip().lower() if hasattr(self, "filtro_dominio") else ""
         status_pedido = self.filtro_dominio_status.get() if hasattr(self, "filtro_dominio_status") else "Todos"
+        cols_ordem = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
+        filtros_col = (
+            {c: self.filtros_dominio[c].get().strip().lower() for c in cols_ordem}
+            if hasattr(self, "filtros_dominio") else {c: "" for c in cols_ordem}
+        )
+        tem_filtro_col = any(filtros_col.values())
         mostradas = 0
         for t in self.transacoes_dominio:
             status = t.extras.get("status", "") or ""
@@ -1231,7 +1336,7 @@ class App(tk.Tk):
                 tag = "parcial"
             elif sl.startswith("ab"):
                 tag = "aberto"
-            # Filtro de status
+            # Filtro de status (dropdown)
             if status_pedido != "Todos":
                 if status_pedido == "Aberto" and tag != "aberto":
                     continue
@@ -1251,6 +1356,15 @@ class App(tk.Tk):
             )
             if termo and termo not in " ".join(row).lower():
                 continue
+            # Filtros por coluna (AND)
+            pula = False
+            for i, col in enumerate(cols_ordem):
+                f = filtros_col[col]
+                if f and f not in str(row[i]).lower():
+                    pula = True
+                    break
+            if pula:
+                continue
             self.tree_dominio_dados.insert(
                 "", "end", values=row, tags=(tag,) if tag else (),
             )
@@ -1258,7 +1372,7 @@ class App(tk.Tk):
         total = len(self.transacoes_dominio)
         self.notebook.tab(2, text=f"Domínio dados ({total})")
         if hasattr(self, "lbl_filtro_dominio"):
-            tem_filtro = termo or status_pedido != "Todos"
+            tem_filtro = termo or status_pedido != "Todos" or tem_filtro_col
             self.lbl_filtro_dominio.config(
                 text=f"Mostrando {mostradas} de {total}" if tem_filtro else f"{total} parcelas",
             )
