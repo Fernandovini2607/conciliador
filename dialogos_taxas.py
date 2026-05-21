@@ -37,12 +37,20 @@ class DialogoNovaRegra(tk.Toplevel):
         self.entry_historico = ttk.Entry(self, width=50)
         self.entry_historico.grid(row=3, column=0, padx=10, pady=2, sticky="we")
 
+        ttk.Label(
+            self,
+            text="Conta contábil (código que vai no lançamento — opcional):",
+        ).grid(row=4, column=0, padx=10, pady=(10, 2), sticky="w")
+        self.entry_conta = ttk.Entry(self, width=50)
+        self.entry_conta.grid(row=5, column=0, padx=10, pady=2, sticky="we")
+
         if regra_atual:
             self.entry_padrao.insert(0, regra_atual.get("padrao", ""))
             self.entry_historico.insert(0, regra_atual.get("historico", ""))
+            self.entry_conta.insert(0, regra_atual.get("conta", ""))
 
         botoes = ttk.Frame(self)
-        botoes.grid(row=4, column=0, padx=10, pady=(12, 10), sticky="e")
+        botoes.grid(row=6, column=0, padx=10, pady=(12, 10), sticky="e")
         ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
         ttk.Button(botoes, text="OK", command=self._confirmar).pack(side="right", padx=4)
 
@@ -54,6 +62,7 @@ class DialogoNovaRegra(tk.Toplevel):
     def _confirmar(self) -> None:
         padrao = self.entry_padrao.get().strip()
         historico = self.entry_historico.get().strip()
+        conta = self.entry_conta.get().strip()
         if not padrao:
             messagebox.showwarning("Campo vazio", "Informe o padrão do memo.", parent=self)
             return
@@ -62,7 +71,7 @@ class DialogoNovaRegra(tk.Toplevel):
                 "Campo vazio", "Informe o histórico contábil.", parent=self,
             )
             return
-        self.regra = {"padrao": padrao, "historico": historico}
+        self.regra = {"padrao": padrao, "historico": historico, "conta": conta}
         self.destroy()
 
     def _cancelar(self) -> None:
@@ -115,12 +124,14 @@ class DialogoConfigurarTaxas(tk.Toplevel):
 
         corpo = ttk.Frame(self)
         corpo.pack(fill="both", expand=True, padx=10, pady=4)
-        cols = ("padrao", "historico")
+        cols = ("padrao", "historico", "conta")
         self.tree = ttk.Treeview(corpo, columns=cols, show="headings", selectmode="browse")
         self.tree.heading("padrao", text="Padrão (memo)")
         self.tree.heading("historico", text="Histórico contábil")
-        self.tree.column("padrao", width=220, anchor="w")
-        self.tree.column("historico", width=410, anchor="w")
+        self.tree.heading("conta", text="Conta contábil")
+        self.tree.column("padrao", width=200, anchor="w")
+        self.tree.column("historico", width=300, anchor="w")
+        self.tree.column("conta", width=120, anchor="w")
         sb = ttk.Scrollbar(corpo, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -139,7 +150,11 @@ class DialogoConfigurarTaxas(tk.Toplevel):
         for r in self.regras:
             self.tree.insert(
                 "", "end",
-                values=(r.get("padrao", ""), r.get("historico", "")),
+                values=(
+                    r.get("padrao", ""),
+                    r.get("historico", ""),
+                    r.get("conta", ""),
+                ),
             )
         self.lbl_count.config(text=f"{len(self.regras)} regra(s)")
 

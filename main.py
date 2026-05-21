@@ -1122,15 +1122,16 @@ class App(tk.Tk):
         )
         self.lbl_lancamentos_empresa.pack(side="top", fill="x", padx=6, pady=(0, 4))
 
-        cols = ("data", "banco", "valor", "historico", "memo", "padrao")
+        cols = ("data", "banco", "valor", "conta", "historico", "memo", "padrao")
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         for c, t, w, a in [
             ("data", "Data pagto", 100, "center"),
-            ("banco", "Banco", 130, "w"),
+            ("banco", "Banco", 120, "w"),
             ("valor", "Valor", 100, "e"),
-            ("historico", "Histórico contábil", 230, "w"),
-            ("memo", "Memo (OFX)", 280, "w"),
-            ("padrao", "Regra", 130, "w"),
+            ("conta", "Conta", 100, "w"),
+            ("historico", "Histórico contábil", 220, "w"),
+            ("memo", "Memo (OFX)", 240, "w"),
+            ("padrao", "Regra", 120, "w"),
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
@@ -2004,6 +2005,7 @@ class App(tk.Tk):
                     l.data.strftime("%d/%m/%Y"),
                     l.banco,
                     f"{l.valor:.2f}",
+                    l.conta,
                     l.historico,
                     l.memo_original,
                     l.padrao_match,
