@@ -13,12 +13,13 @@ from parser_xlsx import Transacao
 
 @dataclass
 class LancamentoContabil:
-    data: date            # data de pagamento (vem do OFX)
-    historico: str        # texto do histórico contábil (vem da regra)
-    valor: Decimal        # valor do pagamento (do OFX)
-    banco: str            # banco identificado no OFX
-    memo_original: str    # memo bruto do OFX, pra referência
-    padrao_match: str     # qual padrão da regra casou
+    data: date                   # data de pagamento (vem do OFX)
+    historico: str               # texto do histórico contábil (vem da regra)
+    valor: Decimal               # valor do pagamento (do OFX)
+    banco: str                   # banco identificado no OFX
+    memo_original: str           # memo bruto do OFX, pra referência
+    padrao_match: str            # qual padrão da regra casou
+    transacao_origem: Transacao | None = None  # ref à Transacao do OFX original
 
 
 def _matches(memo: str, padrao: str) -> bool:
@@ -53,6 +54,7 @@ def gerar_lancamentos_contabeis(
                     banco=t.extras.get("banco", "") or "",
                     memo_original=memo,
                     padrao_match=padrao,
+                    transacao_origem=t,
                 ))
                 break  # primeira regra que casa "ganha"
     return lancamentos

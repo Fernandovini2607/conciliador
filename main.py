@@ -387,6 +387,9 @@ class App(tk.Tk):
         self.pares_conciliados: list[Par] = []          # auto + manual + sugestões aceitas
         self.pendentes_planilha: list[Transacao] = []
         self.pendentes_ofx: list[Transacao] = []
+        # "brutos": pendentes OFX sem desconto dos que viraram lançamentos
+        # contábeis. self.pendentes_ofx (visível) = brutos - classificados.
+        self.pendentes_ofx_brutos: list[Transacao] = []
         self.sugestoes: list[Par] = []
         self.itens_pares: dict[str, Par] = {}            # iid → Par (aba conciliados)
         self.itens_pendentes_p: dict[str, Transacao] = {}
@@ -1445,8 +1448,12 @@ class App(tk.Tk):
         self.pares_conciliados = []
         self.pendentes_planilha = []
         self.pendentes_ofx = []
+        self.pendentes_ofx_brutos = []
         self.sugestoes = []
+        self.lancamentos_contabeis = []
         self._redesenha_abas()
+        if hasattr(self, "tree_lancamentos"):
+            self._render_aba_lancamentos()
         self.lbl_resumo.config(text="")
         for item in self.tree_dominio.get_children():
             self.tree_dominio.delete(item)
@@ -1459,12 +1466,15 @@ class App(tk.Tk):
         )
         self.pares_conciliados = pares
         self.pendentes_planilha = pend_p
-        self.pendentes_ofx = pend_o
-        self._recalcula_sugestoes()
-        # Segunda fase: se Domínio carregado, filtra Conciliados pra triple-match
-        self._filtrar_conciliados_por_dominio()
-        # Gera lançamentos contábeis automáticos a partir dos pendentes OFX
+        # Brutos são a fonte da verdade; visível é derivado depois.
+        self.pendentes_ofx_brutos = list(pend_o)
+        self.pendentes_ofx = list(pend_o)
+        # Primeiro classifica taxas (remove de pendentes_ofx visível)
         self._gerar_lancamentos_contabeis()
+        # Sugestões usam pendentes_ofx visível (sem os classificados)
+        self._recalcula_sugestoes()
+        # Segunda fase: triple-match com Domínio
+        self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
         self._atualiza_botao_comparar()
@@ -1555,13 +1565,13 @@ class App(tk.Tk):
         self.pares_conciliados.append(novo)
         if t_p in self.pendentes_planilha:
             self.pendentes_planilha.remove(t_p)
-        if t_o in self.pendentes_ofx:
-            self.pendentes_ofx.remove(t_o)
-        self._recalcula_sugestoes()
-        # Refiltra contra o Domínio (o novo par pode ou não bater)
-        self._filtrar_conciliados_por_dominio()
-        # Pendentes OFX mudou — recomputa lançamentos contábeis
+        # Remove o pendente OFX da fonte (brutos) e da visível
+        if t_o in self.pendentes_ofx_brutos:
+            self.pendentes_ofx_brutos.remove(t_o)
+        # _gerar_lancamentos_contabeis recalcula pendentes_ofx a partir de brutos
         self._gerar_lancamentos_contabeis()
+        self._recalcula_sugestoes()
+        self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
 
@@ -1579,12 +1589,13 @@ class App(tk.Tk):
                 return
         self.pares_conciliados.remove(par)
         self.pendentes_planilha.append(par.planilha)
-        self.pendentes_ofx.append(par.ofx)
+        # Devolve o OFX à fonte (brutos); visível será recalculado
+        self.pendentes_ofx_brutos.append(par.ofx)
         self.pendentes_planilha.sort(key=lambda t: (t.data, t.valor))
-        self.pendentes_ofx.sort(key=lambda t: (t.data, t.valor))
+        self.pendentes_ofx_brutos.sort(key=lambda t: (t.data, t.valor))
+        self._gerar_lancamentos_contabeis()  # re-deriva pendentes_ofx visível
         self._recalcula_sugestoes()
         self._filtrar_conciliados_por_dominio()
-        self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
         self._atualiza_resumo()
 
@@ -1853,10 +1864,19 @@ class App(tk.Tk):
         self.wait_window(dlg)
 
     def _gerar_lancamentos_contabeis(self) -> None:
+        """Classifica os pendentes OFX brutos contra as regras de taxas e
+        deriva ``pendentes_ofx`` (visível) removendo os classificados."""
         regras = self.cfg.get("regras_taxas", [])
         self.lancamentos_contabeis = gerar_lancamentos_contabeis(
-            self.pendentes_ofx, regras,
+            self.pendentes_ofx_brutos, regras,
         )
+        ids_classificados = {
+            id(l.transacao_origem) for l in self.lancamentos_contabeis
+            if l.transacao_origem is not None
+        }
+        self.pendentes_ofx = [
+            t for t in self.pendentes_ofx_brutos if id(t) not in ids_classificados
+        ]
         if hasattr(self, "tree_lancamentos"):
             self._render_aba_lancamentos()
 
