@@ -1560,27 +1560,11 @@ class App(tk.Tk):
             )
             self._itens_comparacao[iid] = par
 
-        for t in sobras_dominio:
-            self.tree_dominio.insert(
-                "", "end",
-                values=(
-                    "No Domínio, sem conciliação",
-                    t.data.strftime("%d/%m/%Y"),
-                    f"{t.valor:.2f}",
-                    _fmt_data(t.extras.get("data_emissao")),
-                    t.extras.get("numero_nf", ""),
-                    t.extras.get("cnpj", ""),
-                    t.extras.get("fornecedor", ""),
-                    "",
-                ),
-                tags=("falta_concil",),
-            )
-
+        # Pares só no Domínio (que ninguém conciliou) NÃO são mostrados aqui —
+        # foco da aba Comparação é nos pares P×O e se eles foram para o Domínio.
         self.notebook.tab(
             7,
-            text=(
-                f"Comparação (ok {n_ok} | falta {n_falta_dom} | só dom {len(sobras_dominio)})"
-            ),
+            text=f"Comparação (ok {n_ok} | falta no Domínio {n_falta_dom})",
         )
 
     # ------------------------------------------------------ Carregar dados
