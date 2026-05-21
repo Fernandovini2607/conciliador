@@ -5,6 +5,8 @@ from tkinter import filedialog, messagebox, ttk
 import config
 import parser_dominio
 from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
+from dialogos_taxas import DialogoConfigurarTaxas
+from lancamentos import LancamentoContabil, gerar_lancamentos_contabeis
 from matcher import (
     Par,
     Resultado,
@@ -396,6 +398,8 @@ class App(tk.Tk):
         self.transacoes_dominio: list[Transacao] = []
         self.comparacao_dominio: list[tuple[str, Par | Transacao]] = []
         # ↑ status, registro (Par para casados; Transacao para faltantes)
+        self.lancamentos_contabeis: list[LancamentoContabil] = []
+
         self.cfg = config.carregar()
         self._migrar_config_legado()
 
@@ -469,6 +473,9 @@ class App(tk.Tk):
             command=self._comparar_com_dominio, state="disabled",
         )
         self.btn_comparar_dominio.pack(side="left", padx=4)
+        ttk.Button(
+            acoes, text="Configurar taxas", command=self._abrir_config_taxas,
+        ).pack(side="left", padx=4)
         self.lbl_resumo = ttk.Label(acoes, text="")
         self.lbl_resumo.pack(side="left", padx=12)
 
@@ -485,6 +492,7 @@ class App(tk.Tk):
         self._monta_aba_sugestoes()
         self._monta_aba_conciliados_dominio()
         self._monta_aba_dominio()
+        self._monta_aba_lancamentos()
 
     # --------------- Filtros estilo Excel (popup ao clicar no cabeçalho) ---
 
@@ -1067,6 +1075,42 @@ class App(tk.Tk):
 
         self.tree_dominio = tree
 
+    def _monta_aba_lancamentos(self) -> None:
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Lançamentos contábeis (0)")
+        self._aba_lancamentos = aba
+
+        info = ttk.Label(
+            aba,
+            text=(
+                "Lançamentos contábeis gerados a partir dos pendentes do OFX "
+                "que casam com as regras de taxas configuradas. Use "
+                "'Configurar taxas' (linha de ações) para adicionar/remover."
+            ),
+            wraplength=1100,
+            foreground="#1f3a68",
+            font=("TkDefaultFont", 9, "italic"),
+        )
+        info.pack(side="top", fill="x", padx=6, pady=(6, 2))
+
+        cols = ("data", "banco", "valor", "historico", "memo", "padrao")
+        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("data", "Data pagto", 100, "center"),
+            ("banco", "Banco", 130, "w"),
+            ("valor", "Valor", 100, "e"),
+            ("historico", "Histórico contábil", 230, "w"),
+            ("memo", "Memo (OFX)", 280, "w"),
+            ("padrao", "Regra", 130, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree_lancamentos = tree
+
     # --------------------------------------------------------- Domínio
 
     def _conectar_dominio(self) -> None:
@@ -1419,6 +1463,8 @@ class App(tk.Tk):
         self._recalcula_sugestoes()
         # Segunda fase: se Domínio carregado, filtra Conciliados pra triple-match
         self._filtrar_conciliados_por_dominio()
+        # Gera lançamentos contábeis automáticos a partir dos pendentes OFX
+        self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
         self._atualiza_resumo()
         self._atualiza_botao_comparar()
@@ -1514,6 +1560,8 @@ class App(tk.Tk):
         self._recalcula_sugestoes()
         # Refiltra contra o Domínio (o novo par pode ou não bater)
         self._filtrar_conciliados_por_dominio()
+        # Pendentes OFX mudou — recomputa lançamentos contábeis
+        self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
         self._atualiza_resumo()
 
@@ -1535,6 +1583,8 @@ class App(tk.Tk):
         self.pendentes_planilha.sort(key=lambda t: (t.data, t.valor))
         self.pendentes_ofx.sort(key=lambda t: (t.data, t.valor))
         self._recalcula_sugestoes()
+        self._filtrar_conciliados_por_dominio()
+        self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
         self._atualiza_resumo()
 
@@ -1788,6 +1838,47 @@ class App(tk.Tk):
             self.lbl_filtro_dominio.config(
                 text=f"Mostrando {mostradas} de {total}" if tem_filtro else f"{total} parcelas",
             )
+
+    # ------------------------------------ Lançamentos contábeis ------------
+
+    def _abrir_config_taxas(self) -> None:
+        regras = list(self.cfg.get("regras_taxas", []))
+
+        def _on_change(novas: list[dict]) -> None:
+            self.cfg["regras_taxas"] = novas
+            config.salvar(self.cfg)
+            self._gerar_lancamentos_contabeis()
+
+        dlg = DialogoConfigurarTaxas(self, regras, _on_change)
+        self.wait_window(dlg)
+
+    def _gerar_lancamentos_contabeis(self) -> None:
+        regras = self.cfg.get("regras_taxas", [])
+        self.lancamentos_contabeis = gerar_lancamentos_contabeis(
+            self.pendentes_ofx, regras,
+        )
+        if hasattr(self, "tree_lancamentos"):
+            self._render_aba_lancamentos()
+
+    def _render_aba_lancamentos(self) -> None:
+        for item in self.tree_lancamentos.get_children():
+            self.tree_lancamentos.delete(item)
+        for l in self.lancamentos_contabeis:
+            self.tree_lancamentos.insert(
+                "", "end",
+                values=(
+                    l.data.strftime("%d/%m/%Y"),
+                    l.banco,
+                    f"{l.valor:.2f}",
+                    l.historico,
+                    l.memo_original,
+                    l.padrao_match,
+                ),
+            )
+        idx = self.notebook.index(self._aba_lancamentos)
+        self.notebook.tab(
+            idx, text=f"Lançamentos contábeis ({len(self.lancamentos_contabeis)})",
+        )
 
 
 if __name__ == "__main__":
