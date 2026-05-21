@@ -814,10 +814,14 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
-        cols = ("tipo", "data", "valor", "emissao", "nf", "cnpj", "fornecedor", "memo_ofx", "diff")
+        cols = (
+            "tipo", "data", "pagto", "valor", "emissao",
+            "nf", "cnpj", "fornecedor", "memo_ofx", "diff",
+        )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
         tree.heading("data", text="Vencimento")
+        tree.heading("pagto", text="Pagamento")
         tree.heading("valor", text="Valor")
         tree.heading("emissao", text="Emissão")
         tree.heading("nf", text="Nº NF")
@@ -827,12 +831,13 @@ class App(tk.Tk):
         tree.heading("diff", text="Diferenças")
         tree.column("tipo", width=65, anchor="w")
         tree.column("data", width=85, anchor="center")
+        tree.column("pagto", width=85, anchor="center")
         tree.column("valor", width=95, anchor="e")
         tree.column("emissao", width=85, anchor="center")
         tree.column("nf", width=70, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
-        tree.column("fornecedor", width=180, anchor="w")
-        tree.column("memo_ofx", width=200, anchor="w")
+        tree.column("fornecedor", width=170, anchor="w")
+        tree.column("memo_ofx", width=180, anchor="w")
         tree.column("diff", width=110, anchor="w")
         tree.tag_configure("auto", background="#d4edda")
         tree.tag_configure("manual", background="#cfe2ff")
@@ -1425,11 +1430,15 @@ class App(tk.Tk):
             tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
             emissao = par.planilha.extras.get("data_emissao")
             emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
+            # Pagamento: prioriza data_pagamento da planilha; fallback = data do OFX
+            pagto = par.planilha.data_pagamento or par.ofx.data
+            pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
             iid = self.tree_conciliados.insert(
                 "", "end",
                 values=(
                     tipo_txt,
                     par.planilha.data.strftime("%d/%m/%Y"),
+                    pagto_txt,
                     f"{par.planilha.valor:.2f}",
                     emissao_txt,
                     par.planilha.extras.get("numero_nf", ""),
