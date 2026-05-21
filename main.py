@@ -33,6 +33,137 @@ CAMPOS = [
 ]
 
 
+class DialogoFiltroColuna(tk.Toplevel):
+    """Dropdown estilo Excel ao clicar no cabeçalho de uma coluna.
+
+    Mostra checkbox por valor único da coluna + busca interna + marcar/
+    desmarcar tudo. Devolve em ``self.resultado`` o conjunto de valores
+    selecionados, ou ``None`` se TUDO está marcado (= sem filtro).
+    ``self.cancelado`` indica que o usuário desistiu.
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        titulo: str,
+        valores_unicos: list[str],
+        selecionados: set[str] | None,
+        x: int | None = None,
+        y: int | None = None,
+    ) -> None:
+        super().__init__(master)
+        self.title(titulo)
+        self.transient(master)
+        self.grab_set()
+        self.geometry(f"320x420{'+' + str(x) if x else ''}{'+' + str(y) if y else ''}")
+
+        self.valores_unicos = sorted(valores_unicos, key=lambda v: (v == "", v))
+        self.resultado: set[str] | None = None
+        self.cancelado = False
+        self.checkbuttons: dict[str, tuple[tk.BooleanVar, ttk.Checkbutton]] = {}
+
+        # Topo: marcar/desmarcar tudo
+        topo = ttk.Frame(self)
+        topo.pack(fill="x", padx=8, pady=(8, 2))
+        ttk.Button(topo, text="Marcar tudo", command=self._marcar_tudo).pack(side="left", padx=2)
+        ttk.Button(topo, text="Desmarcar tudo", command=self._desmarcar_tudo).pack(side="left", padx=2)
+
+        # Busca dentro do filtro
+        busca_frame = ttk.Frame(self)
+        busca_frame.pack(fill="x", padx=8, pady=2)
+        ttk.Label(busca_frame, text="Buscar:").pack(side="left")
+        self.busca_var = tk.StringVar()
+        self.busca_var.trace_add("write", lambda *_a: self._aplica_busca())
+        ttk.Entry(busca_frame, textvariable=self.busca_var).pack(
+            side="left", fill="x", expand=True, padx=4,
+        )
+
+        # Lista scrollable com checkboxes
+        lista_frame = ttk.Frame(self)
+        lista_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        canvas = tk.Canvas(lista_frame, highlightthickness=0)
+        sb = ttk.Scrollbar(lista_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.inner = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.inner.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        # Permite scroll do mouse
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self._canvas = canvas
+
+        marcados_iniciais = (
+            set(selecionados) if selecionados is not None
+            else set(self.valores_unicos)
+        )
+        for valor in self.valores_unicos:
+            var = tk.BooleanVar(value=(valor in marcados_iniciais))
+            label = str(valor) if valor != "" else "(em branco)"
+            cb = ttk.Checkbutton(self.inner, text=label, variable=var)
+            cb.pack(anchor="w", padx=4, pady=1)
+            self.checkbuttons[valor] = (var, cb)
+
+        # Botões finais
+        botoes = ttk.Frame(self)
+        botoes.pack(fill="x", padx=8, pady=8)
+        ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=2)
+        ttk.Button(botoes, text="OK", command=self._confirmar).pack(side="right", padx=2)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Return>", lambda _e: self._confirmar())
+        self.bind("<Escape>", lambda _e: self._cancelar())
+
+    def _aplica_busca(self) -> None:
+        termo = self.busca_var.get().strip().lower()
+        for valor, (_var, cb) in self.checkbuttons.items():
+            mostra = (not termo) or (termo in str(valor).lower())
+            if mostra:
+                cb.pack(anchor="w", padx=4, pady=1)
+            else:
+                cb.pack_forget()
+
+    def _marcar_tudo(self) -> None:
+        # Marca apenas o que está visível (respeita busca)
+        termo = self.busca_var.get().strip().lower()
+        for valor, (var, _cb) in self.checkbuttons.items():
+            if (not termo) or (termo in str(valor).lower()):
+                var.set(True)
+
+    def _desmarcar_tudo(self) -> None:
+        termo = self.busca_var.get().strip().lower()
+        for valor, (var, _cb) in self.checkbuttons.items():
+            if (not termo) or (termo in str(valor).lower()):
+                var.set(False)
+
+    def _confirmar(self) -> None:
+        marcados = {v for v, (var, _) in self.checkbuttons.items() if var.get()}
+        # Se TUDO marcado → sem filtro (None)
+        if marcados == set(self.valores_unicos):
+            self.resultado = None
+        else:
+            self.resultado = marcados
+        # Desfaz binding global do MouseWheel
+        try:
+            self._canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.cancelado = True
+        try:
+            self._canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+        self.destroy()
+
+
 class DialogoMapeamento(tk.Toplevel):
     """Modal para o usuário escolher quais colunas da planilha são Data/Valor/Descrição."""
 
@@ -342,35 +473,62 @@ class App(tk.Tk):
         self._monta_aba_sugestoes()
         self._monta_aba_dominio()
 
-    @staticmethod
-    def _largura_filtro(pixels: int) -> int:
-        """Converte largura em pixels da coluna Treeview para chars do Entry,
-        com mínimos sensatos. Aproximação: ~7-8 px por char."""
-        return max(pixels // 8, 4)
+    # --------------- Filtros estilo Excel (popup ao clicar no cabeçalho) ---
 
-    def _monta_filtros_coluna(
+    def _label_coluna_filtro(self, base: str, ativo: bool) -> str:
+        """Adiciona indicador visual no cabeçalho conforme estado do filtro."""
+        return f"{base}  ▼ ★" if ativo else f"{base}  ▾"
+
+    def _abrir_filtro_excel(
         self,
-        parent: tk.Misc,
-        col_defs: list[tuple[str, int]],
-        on_change,
-    ) -> dict[str, tk.StringVar]:
-        """Cria uma linha de Entries alinhada com as colunas do Treeview.
+        tree: ttk.Treeview,
+        col_ids: tuple[str, ...],
+        col_labels: dict[str, str],
+        filtros: dict[str, set[str] | None],
+        rows_iter,
+        event: tk.Event,
+        on_apply,
+    ) -> None:
+        """Detecta clique no cabeçalho e abre o DialogoFiltroColuna correspondente.
 
-        ``col_defs`` é lista de (col_id, largura_px).
-        ``on_change`` é a função chamada quando qualquer filtro muda.
-        Retorna dict {col_id: StringVar}.
+        - ``tree``: Treeview da aba
+        - ``col_ids``: tupla com os IDs das colunas (ordem)
+        - ``col_labels``: dict id → rótulo amigável
+        - ``filtros``: estado atual {col_id: set ou None}
+        - ``rows_iter``: callable que devolve as tuplas (uma por transação) na
+          ordem original (sem filtro aplicado)
+        - ``event``: evento de clique
+        - ``on_apply``: callable chamado após aplicar filtro
         """
-        frame = ttk.Frame(parent)
-        frame.pack(side="top", fill="x", padx=4, pady=(0, 2))
-        ttk.Label(frame, text="Por coluna:", foreground="#666").pack(side="left", padx=(0, 4))
-        filtros: dict[str, tk.StringVar] = {}
-        for col, w in col_defs:
-            var = tk.StringVar()
-            var.trace_add("write", lambda *_a, _f=on_change: _f())
-            entry = ttk.Entry(frame, textvariable=var, width=self._largura_filtro(w))
-            entry.pack(side="left", padx=1)
-            filtros[col] = var
-        return filtros
+        region = tree.identify_region(event.x, event.y)
+        if region != "heading":
+            return
+        col_str = tree.identify_column(event.x)
+        if not col_str or not col_str.startswith("#"):
+            return
+        idx = int(col_str.lstrip("#")) - 1
+        if idx < 0 or idx >= len(col_ids):
+            return
+        col_id = col_ids[idx]
+
+        valores_unicos = sorted({str(row[idx]) for row in rows_iter()})
+        if not valores_unicos:
+            return
+
+        x = event.x_root
+        y = event.y_root + 15
+        dlg = DialogoFiltroColuna(
+            self,
+            titulo=f"Filtrar: {col_labels[col_id]}",
+            valores_unicos=valores_unicos,
+            selecionados=filtros.get(col_id),
+            x=x, y=y,
+        )
+        self.wait_window(dlg)
+        if dlg.cancelado:
+            return
+        filtros[col_id] = dlg.resultado  # None = sem filtro, set = filtro ativo
+        on_apply()
 
     def _monta_aba_planilha_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -390,14 +548,8 @@ class App(tk.Tk):
         self.lbl_filtro_planilha = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_planilha.pack(side="left", padx=8)
 
-        # Filtros por coluna
-        col_defs = [
-            ("linha", 55), ("venc", 90), ("emis", 90), ("valor", 100),
-            ("nf", 80), ("cnpj", 130), ("fornecedor", 260),
-        ]
-        self.filtros_planilha = self._monta_filtros_coluna(
-            aba, col_defs, self._render_aba_planilha,
-        )
+        # Estado dos filtros por coluna (estilo Excel)
+        self.filtros_col_planilha: dict[str, set[str] | None] = {}
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
@@ -405,26 +557,62 @@ class App(tk.Tk):
         cols = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("linha", "Linha", 55, "center"),
-            ("venc", "Vencimento", 90, "center"),
-            ("emis", "Emissão", 90, "center"),
-            ("valor", "Valor", 100, "e"),
-            ("nf", "Nº NF", 80, "center"),
-            ("cnpj", "CNPJ", 130, "w"),
-            ("fornecedor", "Fornecedor", 260, "w"),
+            ("linha", "Linha", 60, "center"),
+            ("venc", "Vencimento", 110, "center"),
+            ("emis", "Emissão", 110, "center"),
+            ("valor", "Valor", 110, "e"),
+            ("nf", "Nº NF", 90, "center"),
+            ("cnpj", "CNPJ", 140, "w"),
+            ("fornecedor", "Fornecedor", 280, "w"),
         ]:
-            tree.heading(c, text=t)
+            tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_planilha = tree
+        tree.bind("<Button-1>", self._on_click_header_planilha)
+
+    def _row_planilha(self, t) -> tuple:
+        return (
+            str(t.linha) if t.linha is not None else "",
+            t.data.strftime("%d/%m/%Y"),
+            self._fmt_data(t.extras.get("data_emissao")),
+            f"{t.valor:.2f}",
+            t.extras.get("numero_nf", "") or "",
+            t.extras.get("cnpj", "") or "",
+            t.extras.get("fornecedor", "") or "",
+        )
+
+    COLS_PLANILHA = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+    LABELS_PLANILHA = {
+        "linha": "Linha", "venc": "Vencimento", "emis": "Emissão",
+        "valor": "Valor", "nf": "Nº NF", "cnpj": "CNPJ", "fornecedor": "Fornecedor",
+    }
+
+    def _on_click_header_planilha(self, event: tk.Event) -> None:
+        self._abrir_filtro_excel(
+            tree=self.tree_planilha,
+            col_ids=self.COLS_PLANILHA,
+            col_labels=self.LABELS_PLANILHA,
+            filtros=self.filtros_col_planilha,
+            rows_iter=lambda: (self._row_planilha(t) for t in self.transacoes_planilha),
+            event=event,
+            on_apply=lambda: (self._atualiza_headers_planilha(), self._render_aba_planilha()),
+        )
+
+    def _atualiza_headers_planilha(self) -> None:
+        for col in self.COLS_PLANILHA:
+            ativo = self.filtros_col_planilha.get(col) is not None
+            self.tree_planilha.heading(
+                col, text=self._label_coluna_filtro(self.LABELS_PLANILHA[col], ativo),
+            )
 
     def _limpa_filtros_planilha(self) -> None:
         self.filtro_planilha.set("")
-        for v in self.filtros_planilha.values():
-            v.set("")
+        self.filtros_col_planilha.clear()
+        self._atualiza_headers_planilha()
 
     def _monta_aba_ofx_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -444,11 +632,8 @@ class App(tk.Tk):
         self.lbl_filtro_ofx = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_ofx.pack(side="left", padx=8)
 
-        # Filtros por coluna
-        col_defs = [("data", 110), ("valor", 110), ("memo", 500)]
-        self.filtros_ofx = self._monta_filtros_coluna(
-            aba, col_defs, self._render_aba_ofx,
-        )
+        # Estado dos filtros por coluna (estilo Excel)
+        self.filtros_col_ofx: dict[str, set[str] | None] = {}
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
@@ -456,22 +641,51 @@ class App(tk.Tk):
         cols = ("data", "valor", "memo")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("data", "Data pagamento", 110, "center"),
-            ("valor", "Valor", 110, "e"),
-            ("memo", "Memo (banco)", 500, "w"),
+            ("data", "Data pagamento", 130, "center"),
+            ("valor", "Valor", 120, "e"),
+            ("memo", "Memo (banco)", 520, "w"),
         ]:
-            tree.heading(c, text=t)
+            tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_ofx = tree
+        tree.bind("<Button-1>", self._on_click_header_ofx)
+
+    def _row_ofx(self, t) -> tuple:
+        return (
+            t.data.strftime("%d/%m/%Y"),
+            f"{t.valor:.2f}",
+            t.descricao or "",
+        )
+
+    COLS_OFX = ("data", "valor", "memo")
+    LABELS_OFX = {"data": "Data pagamento", "valor": "Valor", "memo": "Memo (banco)"}
+
+    def _on_click_header_ofx(self, event: tk.Event) -> None:
+        self._abrir_filtro_excel(
+            tree=self.tree_ofx,
+            col_ids=self.COLS_OFX,
+            col_labels=self.LABELS_OFX,
+            filtros=self.filtros_col_ofx,
+            rows_iter=lambda: (self._row_ofx(t) for t in self.transacoes_ofx),
+            event=event,
+            on_apply=lambda: (self._atualiza_headers_ofx(), self._render_aba_ofx()),
+        )
+
+    def _atualiza_headers_ofx(self) -> None:
+        for col in self.COLS_OFX:
+            ativo = self.filtros_col_ofx.get(col) is not None
+            self.tree_ofx.heading(
+                col, text=self._label_coluna_filtro(self.LABELS_OFX[col], ativo),
+            )
 
     def _limpa_filtros_ofx(self) -> None:
         self.filtro_ofx.set("")
-        for v in self.filtros_ofx.values():
-            v.set("")
+        self.filtros_col_ofx.clear()
+        self._atualiza_headers_ofx()
 
     def _monta_aba_dominio_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -503,14 +717,8 @@ class App(tk.Tk):
         self.lbl_filtro_dominio = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_dominio.pack(side="left", padx=8)
 
-        # Filtros por coluna
-        col_defs = [
-            ("venc", 85), ("emis", 85), ("valor", 95), ("pago", 95),
-            ("status", 75), ("nf", 70), ("cnpj", 130), ("fornecedor", 240),
-        ]
-        self.filtros_dominio = self._monta_filtros_coluna(
-            aba, col_defs, self._render_aba_dominio_dados,
-        )
+        # Estado dos filtros por coluna (estilo Excel)
+        self.filtros_col_dominio: dict[str, set[str] | None] = {}
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
@@ -518,16 +726,16 @@ class App(tk.Tk):
         cols = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("venc", "Vencimento", 85, "center"),
-            ("emis", "Emissão", 85, "center"),
-            ("valor", "Valor parcela", 95, "e"),
-            ("pago", "Valor pago", 95, "e"),
-            ("status", "Status", 75, "center"),
-            ("nf", "Nº NF", 70, "center"),
-            ("cnpj", "CNPJ", 130, "w"),
-            ("fornecedor", "Fornecedor", 240, "w"),
+            ("venc", "Vencimento", 105, "center"),
+            ("emis", "Emissão", 105, "center"),
+            ("valor", "Valor parcela", 110, "e"),
+            ("pago", "Valor pago", 105, "e"),
+            ("status", "Status", 90, "center"),
+            ("nf", "Nº NF", 85, "center"),
+            ("cnpj", "CNPJ", 140, "w"),
+            ("fornecedor", "Fornecedor", 250, "w"),
         ]:
-            tree.heading(c, text=t)
+            tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
         tree.tag_configure("paga", background="#d4edda")
         tree.tag_configure("parcial", background="#fff3cd")
@@ -537,13 +745,54 @@ class App(tk.Tk):
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_dominio_dados = tree
+        tree.bind("<Button-1>", self._on_click_header_dominio)
+
+    def _row_dominio(self, t) -> tuple:
+        v_pago = t.extras.get("valor_pago")
+        pago_txt = f"{v_pago:.2f}" if v_pago is not None else ""
+        return (
+            t.data.strftime("%d/%m/%Y"),
+            self._fmt_data(t.extras.get("data_emissao")),
+            f"{t.valor:.2f}",
+            pago_txt,
+            t.extras.get("status", "") or "",
+            t.extras.get("numero_nf", "") or "",
+            t.extras.get("cnpj", "") or "",
+            t.extras.get("fornecedor", "") or "",
+        )
+
+    COLS_DOMINIO = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
+    LABELS_DOMINIO = {
+        "venc": "Vencimento", "emis": "Emissão", "valor": "Valor parcela",
+        "pago": "Valor pago", "status": "Status", "nf": "Nº NF",
+        "cnpj": "CNPJ", "fornecedor": "Fornecedor",
+    }
+
+    def _on_click_header_dominio(self, event: tk.Event) -> None:
+        self._abrir_filtro_excel(
+            tree=self.tree_dominio_dados,
+            col_ids=self.COLS_DOMINIO,
+            col_labels=self.LABELS_DOMINIO,
+            filtros=self.filtros_col_dominio,
+            rows_iter=lambda: (self._row_dominio(t) for t in self.transacoes_dominio),
+            event=event,
+            on_apply=lambda: (self._atualiza_headers_dominio(), self._render_aba_dominio_dados()),
+        )
+
+    def _atualiza_headers_dominio(self) -> None:
+        for col in self.COLS_DOMINIO:
+            ativo = self.filtros_col_dominio.get(col) is not None
+            self.tree_dominio_dados.heading(
+                col, text=self._label_coluna_filtro(self.LABELS_DOMINIO[col], ativo),
+            )
 
     def _limpa_filtros_dominio(self) -> None:
         self.filtro_dominio.set("")
         self.filtro_dominio_status.set("Todos")
-        if hasattr(self, "filtros_dominio"):
-            for v in self.filtros_dominio.values():
-                v.set("")
+        if hasattr(self, "filtros_col_dominio"):
+            self.filtros_col_dominio.clear()
+        if hasattr(self, "tree_dominio_dados"):
+            self._atualiza_headers_dominio()
 
     def _monta_aba_conciliados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1236,31 +1485,18 @@ class App(tk.Tk):
         for item in self.tree_planilha.get_children():
             self.tree_planilha.delete(item)
         termo = self.filtro_planilha.get().strip().lower() if hasattr(self, "filtro_planilha") else ""
-        cols_ordem = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
-        filtros_col = (
-            {c: self.filtros_planilha[c].get().strip().lower() for c in cols_ordem}
-            if hasattr(self, "filtros_planilha") else {c: "" for c in cols_ordem}
-        )
-        tem_filtro_col = any(filtros_col.values())
+        cols = self.COLS_PLANILHA
+        filtros = getattr(self, "filtros_col_planilha", {})
+        tem_filtro_col = any(v is not None for v in filtros.values())
         mostradas = 0
         for t in self.transacoes_planilha:
-            row = (
-                str(t.linha) if t.linha is not None else "",
-                t.data.strftime("%d/%m/%Y"),
-                self._fmt_data(t.extras.get("data_emissao")),
-                f"{t.valor:.2f}",
-                t.extras.get("numero_nf", "") or "",
-                t.extras.get("cnpj", "") or "",
-                t.extras.get("fornecedor", "") or "",
-            )
-            # Filtro global
+            row = self._row_planilha(t)
             if termo and termo not in " ".join(row).lower():
                 continue
-            # Filtros por coluna (AND)
             pula = False
-            for i, col in enumerate(cols_ordem):
-                f = filtros_col[col]
-                if f and f not in str(row[i]).lower():
+            for i, col in enumerate(cols):
+                permitidos = filtros.get(col)
+                if permitidos is not None and str(row[i]) not in permitidos:
                     pula = True
                     break
             if pula:
@@ -1279,25 +1515,18 @@ class App(tk.Tk):
         for item in self.tree_ofx.get_children():
             self.tree_ofx.delete(item)
         termo = self.filtro_ofx.get().strip().lower() if hasattr(self, "filtro_ofx") else ""
-        cols_ordem = ("data", "valor", "memo")
-        filtros_col = (
-            {c: self.filtros_ofx[c].get().strip().lower() for c in cols_ordem}
-            if hasattr(self, "filtros_ofx") else {c: "" for c in cols_ordem}
-        )
-        tem_filtro_col = any(filtros_col.values())
+        cols = self.COLS_OFX
+        filtros = getattr(self, "filtros_col_ofx", {})
+        tem_filtro_col = any(v is not None for v in filtros.values())
         mostradas = 0
         for t in self.transacoes_ofx:
-            row = (
-                t.data.strftime("%d/%m/%Y"),
-                f"{t.valor:.2f}",
-                t.descricao or "",
-            )
+            row = self._row_ofx(t)
             if termo and termo not in " ".join(row).lower():
                 continue
             pula = False
-            for i, col in enumerate(cols_ordem):
-                f = filtros_col[col]
-                if f and f not in str(row[i]).lower():
+            for i, col in enumerate(cols):
+                permitidos = filtros.get(col)
+                if permitidos is not None and str(row[i]) not in permitidos:
                     pula = True
                     break
             if pula:
@@ -1317,17 +1546,13 @@ class App(tk.Tk):
             self.tree_dominio_dados.delete(item)
         termo = self.filtro_dominio.get().strip().lower() if hasattr(self, "filtro_dominio") else ""
         status_pedido = self.filtro_dominio_status.get() if hasattr(self, "filtro_dominio_status") else "Todos"
-        cols_ordem = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
-        filtros_col = (
-            {c: self.filtros_dominio[c].get().strip().lower() for c in cols_ordem}
-            if hasattr(self, "filtros_dominio") else {c: "" for c in cols_ordem}
-        )
-        tem_filtro_col = any(filtros_col.values())
+        cols = self.COLS_DOMINIO
+        filtros = getattr(self, "filtros_col_dominio", {})
+        tem_filtro_col = any(v is not None for v in filtros.values())
         mostradas = 0
         for t in self.transacoes_dominio:
-            status = t.extras.get("status", "") or ""
-            v_pago = t.extras.get("valor_pago")
-            pago_txt = f"{v_pago:.2f}" if v_pago is not None else ""
+            row = self._row_dominio(t)
+            status = row[4]  # coluna "status"
             tag = ""
             sl = status.lower()
             if sl.startswith("pag"):
@@ -1344,23 +1569,14 @@ class App(tk.Tk):
                     continue
                 if status_pedido == "Paga" and tag != "paga":
                     continue
-            row = (
-                t.data.strftime("%d/%m/%Y"),
-                self._fmt_data(t.extras.get("data_emissao")),
-                f"{t.valor:.2f}",
-                pago_txt,
-                status,
-                t.extras.get("numero_nf", "") or "",
-                t.extras.get("cnpj", "") or "",
-                t.extras.get("fornecedor", "") or "",
-            )
+            # Filtro global (texto)
             if termo and termo not in " ".join(row).lower():
                 continue
-            # Filtros por coluna (AND)
+            # Filtros por coluna (estilo Excel — set de valores)
             pula = False
-            for i, col in enumerate(cols_ordem):
-                f = filtros_col[col]
-                if f and f not in str(row[i]).lower():
+            for i, col in enumerate(cols):
+                permitidos = filtros.get(col)
+                if permitidos is not None and str(row[i]) not in permitidos:
                     pula = True
                     break
             if pula:
