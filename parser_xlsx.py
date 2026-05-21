@@ -9,17 +9,19 @@ from openpyxl import load_workbook
 
 # Campos que enriquecem cada Transacao além da chave de match (data+valor).
 # Para planilha e Domínio são TODOS obrigatórios; para OFX nunca são preenchidos.
-CAMPOS_EXTRAS = ("data_emissao", "numero_nf", "cnpj", "fornecedor")
+# data_pagamento é exclusivo da planilha (Domínio não tem esse campo direto).
+CAMPOS_EXTRAS = ("data_emissao", "data_pagamento", "numero_nf", "cnpj", "fornecedor")
 
 
 @dataclass
 class Transacao:
-    data: date                           # data de vencimento (ou pagamento, conforme mapeado)
+    data: date                                 # vencimento (planilha/Domínio) ou data da transação (OFX)
     valor: Decimal
     descricao: str
     origem: str = "planilha"
     linha: int | None = None
     extras: dict[str, Any] = field(default_factory=dict)
+    data_pagamento: date | None = None         # só planilha — usada no match com OFX
 
 
 @dataclass
@@ -60,6 +62,12 @@ DATA_EMISSAO_ALIASES = {
     "data emissao", "data emissão", "emissao", "emissão",
     "data nf", "data da nota", "data documento", "dt emissao", "dt emissão",
 }
+DATA_PAGAMENTO_ALIASES = {
+    "data pagamento", "data pagto", "data pgto", "pagamento", "pago em",
+    "data de pagamento", "dt pgto", "dt pagto", "dt pagamento",
+    "data baixa", "data quitacao", "data quitação", "data liquidacao",
+    "data liquidação", "data compensacao", "data compensação",
+}
 NUMERO_NF_ALIASES = {
     "nf", "n nf", "n° nf", "nº nf", "numero nf", "número nf",
     "numero da nf", "número da nf", "num nf", "n nota", "nº nota",
@@ -80,13 +88,18 @@ ALIAS_MAP = {
     "data": DATA_ALIASES,
     "valor": VALOR_ALIASES,
     "data_emissao": DATA_EMISSAO_ALIASES,
+    "data_pagamento": DATA_PAGAMENTO_ALIASES,
     "numero_nf": NUMERO_NF_ALIASES,
     "cnpj": CNPJ_ALIASES,
     "fornecedor": FORNECEDOR_ALIASES,
 }
 
-# 6 campos obrigatórios para planilha/Domínio. OFX usa só (data, valor).
-CAMPOS_OBRIGATORIOS = ("data", "valor", "data_emissao", "numero_nf", "cnpj", "fornecedor")
+# 7 campos obrigatórios para a planilha. O Domínio valida só 6 (sem data_pagamento)
+# em parser_dominio.extrair_pagamentos. OFX usa só (data, valor).
+CAMPOS_OBRIGATORIOS = (
+    "data", "data_pagamento", "valor",
+    "data_emissao", "numero_nf", "cnpj", "fornecedor",
+)
 
 
 def _normaliza(texto: object) -> str:
@@ -168,7 +181,11 @@ def _mapeia_por_nome(cabecalho: list[str]) -> dict[str, int]:
     mapa: dict[str, int] = {}
     usados: set[int] = set()
     # Ordem importa: campos mais específicos antes dos genéricos
-    ordem = ("data_emissao", "numero_nf", "cnpj", "fornecedor", "data", "valor")
+    ordem = (
+        "data_pagamento", "data_emissao",
+        "numero_nf", "cnpj", "fornecedor",
+        "data", "valor",
+    )
     for campo in ordem:
         aliases = ALIAS_MAP[campo]
         for idx, cel in enumerate(cabecalho):
@@ -298,6 +315,7 @@ def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int])
             continue
 
         extras: dict[str, Any] = {}
+        data_pagamento: date | None = None
         for campo, idx in indices_extras.items():
             if idx >= len(linha):
                 continue
@@ -308,12 +326,18 @@ def extrair_transacoes(estrutura: EstruturaPlanilha, mapeamento: dict[str, int])
                 d = para_data(valor_celula)
                 if d is not None:
                     extras[campo] = d
+            elif campo == "data_pagamento":
+                d = para_data(valor_celula)
+                if d is not None:
+                    data_pagamento = d
+                    extras[campo] = d
             else:
                 extras[campo] = str(valor_celula).strip()
 
         transacoes.append(Transacao(
             data=data, valor=valor, descricao="",
             linha=base + offset, extras=extras,
+            data_pagamento=data_pagamento,
         ))
     return transacoes
 

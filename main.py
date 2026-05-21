@@ -25,6 +25,7 @@ from parser_xlsx import (
 
 CAMPOS = [
     ("data", "Data vencimento"),
+    ("data_pagamento", "Data pagamento"),
     ("data_emissao", "Data emissão"),
     ("valor", "Valor"),
     ("numero_nf", "Nº NF"),
@@ -214,24 +215,29 @@ class DialogoMapeamento(tk.Toplevel):
         preview_frame = ttk.Frame(self)
         preview_frame.grid(row=row_preview + 1, column=0, columnspan=2, padx=12, sticky="we")
 
-        cols = ("linha", "data", "data_emissao", "valor", "numero_nf", "cnpj", "fornecedor")
+        cols = (
+            "linha", "data", "data_pagamento", "data_emissao",
+            "valor", "numero_nf", "cnpj", "fornecedor",
+        )
         self.preview = ttk.Treeview(
             preview_frame, columns=cols, show="headings", height=self.PREVIEW_LINHAS,
         )
         self.preview.heading("linha", text="Linha")
         self.preview.heading("data", text="Vencimento")
+        self.preview.heading("data_pagamento", text="Pagamento")
         self.preview.heading("data_emissao", text="Emissão")
         self.preview.heading("valor", text="Valor")
         self.preview.heading("numero_nf", text="Nº NF")
         self.preview.heading("cnpj", text="CNPJ")
         self.preview.heading("fornecedor", text="Fornecedor")
         self.preview.column("linha", width=45, anchor="center")
-        self.preview.column("data", width=85, anchor="w")
-        self.preview.column("data_emissao", width=85, anchor="w")
-        self.preview.column("valor", width=90, anchor="e")
+        self.preview.column("data", width=80, anchor="w")
+        self.preview.column("data_pagamento", width=80, anchor="w")
+        self.preview.column("data_emissao", width=80, anchor="w")
+        self.preview.column("valor", width=85, anchor="e")
         self.preview.column("numero_nf", width=70, anchor="center")
-        self.preview.column("cnpj", width=130, anchor="w")
-        self.preview.column("fornecedor", width=200, anchor="w")
+        self.preview.column("cnpj", width=120, anchor="w")
+        self.preview.column("fornecedor", width=180, anchor="w")
         self.preview.tag_configure("erro", background="#f8d7da")
         self.preview.pack(side="left", fill="both", expand=True)
 
@@ -271,6 +277,7 @@ class DialogoMapeamento(tk.Toplevel):
                 return linha[i] if 0 <= i < len(linha) else None
 
             cel_data = _cel(idxs["data"])
+            cel_pgto = _cel(idxs["data_pagamento"])
             cel_emis = _cel(idxs["data_emissao"])
             cel_valor = _cel(idxs["valor"])
             cel_nf = _cel(idxs["numero_nf"])
@@ -278,11 +285,15 @@ class DialogoMapeamento(tk.Toplevel):
             cel_forn = _cel(idxs["fornecedor"])
 
             data_parsed = para_data(cel_data) if idxs["data"] >= 0 else None
+            pgto_parsed = para_data(cel_pgto) if idxs["data_pagamento"] >= 0 else None
             emis_parsed = para_data(cel_emis) if idxs["data_emissao"] >= 0 else None
             valor_parsed = para_decimal(cel_valor) if idxs["valor"] >= 0 else None
 
-            # Tag de erro: campo essencial (venc, valor) ou emissão não converteu
-            if data_parsed is None or valor_parsed is None or emis_parsed is None:
+            # Tag de erro: alguma das datas obrigatórias ou valor não converteu
+            if (
+                data_parsed is None or valor_parsed is None
+                or pgto_parsed is None or emis_parsed is None
+            ):
                 tag = "erro"
             else:
                 total_validas += 1
@@ -305,6 +316,7 @@ class DialogoMapeamento(tk.Toplevel):
                 values=(
                     base + offset,
                     _fmt_data_txt(data_parsed, cel_data),
+                    _fmt_data_txt(pgto_parsed, cel_pgto),
                     _fmt_data_txt(emis_parsed, cel_emis),
                     (
                         f"{valor_parsed:.2f}" if valor_parsed is not None
@@ -554,16 +566,17 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+        cols = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("linha", "Linha", 60, "center"),
-            ("venc", "Vencimento", 110, "center"),
-            ("emis", "Emissão", 110, "center"),
-            ("valor", "Valor", 110, "e"),
-            ("nf", "Nº NF", 90, "center"),
-            ("cnpj", "CNPJ", 140, "w"),
-            ("fornecedor", "Fornecedor", 280, "w"),
+            ("linha", "Linha", 55, "center"),
+            ("venc", "Vencimento", 100, "center"),
+            ("pagto", "Pagamento", 100, "center"),
+            ("emis", "Emissão", 100, "center"),
+            ("valor", "Valor", 105, "e"),
+            ("nf", "Nº NF", 85, "center"),
+            ("cnpj", "CNPJ", 130, "w"),
+            ("fornecedor", "Fornecedor", 250, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -578,6 +591,7 @@ class App(tk.Tk):
         return (
             str(t.linha) if t.linha is not None else "",
             t.data.strftime("%d/%m/%Y"),
+            self._fmt_data(t.data_pagamento),
             self._fmt_data(t.extras.get("data_emissao")),
             f"{t.valor:.2f}",
             t.extras.get("numero_nf", "") or "",
@@ -585,10 +599,11 @@ class App(tk.Tk):
             t.extras.get("fornecedor", "") or "",
         )
 
-    COLS_PLANILHA = ("linha", "venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+    COLS_PLANILHA = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor")
     LABELS_PLANILHA = {
-        "linha": "Linha", "venc": "Vencimento", "emis": "Emissão",
-        "valor": "Valor", "nf": "Nº NF", "cnpj": "CNPJ", "fornecedor": "Fornecedor",
+        "linha": "Linha", "venc": "Vencimento", "pagto": "Pagamento",
+        "emis": "Emissão", "valor": "Valor", "nf": "Nº NF",
+        "cnpj": "CNPJ", "fornecedor": "Fornecedor",
     }
 
     def _on_click_header_planilha(self, event: tk.Event) -> None:
