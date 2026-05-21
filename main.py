@@ -391,18 +391,23 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Domínio dados (0)")
         self._aba_dominio_dados = aba
 
-        cols = ("venc", "emis", "valor", "nf", "cnpj", "fornecedor")
+        cols = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         for c, t, w, a in [
-            ("venc", "Vencimento", 90, "center"),
-            ("emis", "Emissão", 90, "center"),
-            ("valor", "Valor", 100, "e"),
-            ("nf", "Nº NF", 80, "center"),
+            ("venc", "Vencimento", 85, "center"),
+            ("emis", "Emissão", 85, "center"),
+            ("valor", "Valor parcela", 95, "e"),
+            ("pago", "Valor pago", 95, "e"),
+            ("status", "Status", 75, "center"),
+            ("nf", "Nº NF", 70, "center"),
             ("cnpj", "CNPJ", 130, "w"),
-            ("fornecedor", "Fornecedor", 280, "w"),
+            ("fornecedor", "Fornecedor", 240, "w"),
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
+        tree.tag_configure("paga", background="#d4edda")
+        tree.tag_configure("parcial", background="#fff3cd")
+        tree.tag_configure("aberto", background="#f8d7da")
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
@@ -1132,16 +1137,29 @@ class App(tk.Tk):
         for item in self.tree_dominio_dados.get_children():
             self.tree_dominio_dados.delete(item)
         for t in self.transacoes_dominio:
+            status = t.extras.get("status", "")
+            v_pago = t.extras.get("valor_pago")
+            pago_txt = f"{v_pago:.2f}" if v_pago is not None else ""
+            tag = ""
+            if status.lower().startswith("pag"):
+                tag = "paga"
+            elif status.lower().startswith("parc"):
+                tag = "parcial"
+            elif status.lower().startswith("ab"):
+                tag = "aberto"
             self.tree_dominio_dados.insert(
                 "", "end",
                 values=(
                     t.data.strftime("%d/%m/%Y"),
                     self._fmt_data(t.extras.get("data_emissao")),
                     f"{t.valor:.2f}",
+                    pago_txt,
+                    status,
                     t.extras.get("numero_nf", ""),
                     t.extras.get("cnpj", ""),
                     t.extras.get("fornecedor", ""),
                 ),
+                tags=(tag,) if tag else (),
             )
         self.notebook.tab(2, text=f"Domínio dados ({len(self.transacoes_dominio)})")
 

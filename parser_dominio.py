@@ -307,6 +307,18 @@ def extrair_pagamentos(
         if col_nome in colunas
     }
 
+    # Detecta colunas opcionais de status e valor pago (vindas do SQL livre).
+    # Aceita variações de nome para facilitar.
+    def _achar(*nomes: str) -> int | None:
+        upper = [c.upper() for c in colunas]
+        for n in nomes:
+            if n.upper() in upper:
+                return upper.index(n.upper())
+        return None
+
+    i_status = _achar("status_parcela", "status")
+    i_pago = _achar("valor_pago", "vpago", "total_pago")
+
     transacoes: list[Transacao] = []
     for linha in linhas:
         data = para_data(linha[i_data])
@@ -325,6 +337,13 @@ def extrair_pagamentos(
                     extras[campo] = d
             else:
                 extras[campo] = str(celula).strip()
+
+        if i_status is not None and linha[i_status] not in (None, ""):
+            extras["status"] = str(linha[i_status]).strip()
+        if i_pago is not None and linha[i_pago] not in (None, ""):
+            v_pago = para_decimal(linha[i_pago])
+            if v_pago is not None:
+                extras["valor_pago"] = v_pago
 
         transacoes.append(Transacao(
             data=data, valor=abs(valor), descricao="",
