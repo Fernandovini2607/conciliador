@@ -2066,7 +2066,9 @@ class App(tk.Tk):
             self._gerar_lancamentos_contabeis()
             self._redesenha_abas()
 
-        dlg = DialogoConfigurarTaxas(self, regras, _on_change)
+        dlg = DialogoConfigurarTaxas(
+            self, regras, _on_change, plano_contas=self.plano_contas,
+        )
         dlg.title(
             f"Configurar regras — {emp['razao'][:60]} "
             f"(empresa {emp['codi_emp']})"
@@ -2099,7 +2101,9 @@ class App(tk.Tk):
         # Pré-preenche com o memo completo; o usuário pode editar para algo
         # mais geral (substring) que vá capturar variações em meses futuros.
         regra_inicial = {"padrao": memo, "historico": ""}
-        dlg = DialogoNovaRegra(self, regra_inicial)
+        dlg = DialogoNovaRegra(
+            self, regra_inicial, plano_contas=self.plano_contas,
+        )
         emp = self._empresa_selecionada()
         dlg.title(f"Criar regra — {emp['razao'][:60]} (empresa {emp['codi_emp']})")
         self.wait_window(dlg)

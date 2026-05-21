@@ -8,12 +8,15 @@ from typing import Any, Callable
 
 
 class DialogoNovaRegra(tk.Toplevel):
-    """Sub-diálogo simples: pede padrão (substring do memo) + histórico contábil."""
+    """Sub-diálogo simples: pede padrão (substring do memo) + histórico contábil
+    + conta contábil. Quando ``plano_contas`` é fornecido, a conta vira um
+    Combobox com filtro substring (digite parte do código ou descrição)."""
 
     def __init__(
         self,
         master: tk.Misc,
         regra_atual: dict[str, Any] | None = None,
+        plano_contas: list | None = None,
     ) -> None:
         super().__init__(master)
         self.title("Nova regra" if not regra_atual else "Editar regra")
@@ -22,32 +25,56 @@ class DialogoNovaRegra(tk.Toplevel):
         self.resizable(False, False)
 
         self.regra: dict[str, str] | None = None
+        self.plano_contas = plano_contas or []
+        # opções formatadas: "1.01.001 - CAIXA"
+        self._opcoes_conta: list[str] = [
+            f"{c.codigo} - {c.descricao}" for c in self.plano_contas
+        ]
+        # Map código → descrição (pra validar/buscar)
+        self._codigos_validos: set[str] = {c.codigo for c in self.plano_contas}
 
         ttk.Label(
             self,
             text="Padrão do memo (texto que aparece no OFX, sem distinguir maiúsculas):",
         ).grid(row=0, column=0, padx=10, pady=(10, 2), sticky="w")
-        self.entry_padrao = ttk.Entry(self, width=50)
+        self.entry_padrao = ttk.Entry(self, width=60)
         self.entry_padrao.grid(row=1, column=0, padx=10, pady=2, sticky="we")
 
         ttk.Label(
             self,
             text="Histórico contábil (texto que vai no lançamento):",
         ).grid(row=2, column=0, padx=10, pady=(10, 2), sticky="w")
-        self.entry_historico = ttk.Entry(self, width=50)
+        self.entry_historico = ttk.Entry(self, width=60)
         self.entry_historico.grid(row=3, column=0, padx=10, pady=2, sticky="we")
 
-        ttk.Label(
-            self,
-            text="Conta contábil (código que vai no lançamento — opcional):",
-        ).grid(row=4, column=0, padx=10, pady=(10, 2), sticky="w")
-        self.entry_conta = ttk.Entry(self, width=50)
+        rotulo_conta = (
+            "Conta contábil (digite parte do código ou descrição — selecione no dropdown):"
+            if self.plano_contas
+            else "Conta contábil (código que vai no lançamento — opcional):"
+        )
+        ttk.Label(self, text=rotulo_conta).grid(
+            row=4, column=0, padx=10, pady=(10, 2), sticky="w",
+        )
+        if self.plano_contas:
+            self.entry_conta: ttk.Entry = ttk.Combobox(
+                self, width=60, values=self._opcoes_conta,
+            )
+            self.entry_conta.bind("<KeyRelease>", self._filtra_contas)
+        else:
+            self.entry_conta = ttk.Entry(self, width=60)
         self.entry_conta.grid(row=5, column=0, padx=10, pady=2, sticky="we")
 
         if regra_atual:
             self.entry_padrao.insert(0, regra_atual.get("padrao", ""))
             self.entry_historico.insert(0, regra_atual.get("historico", ""))
-            self.entry_conta.insert(0, regra_atual.get("conta", ""))
+            conta_atual = regra_atual.get("conta", "")
+            if conta_atual:
+                # Tenta achar a descrição no plano pra mostrar formato completo
+                opt_completa = next(
+                    (o for o in self._opcoes_conta if o.startswith(f"{conta_atual} -")),
+                    conta_atual,
+                )
+                self.entry_conta.insert(0, opt_completa)
 
         botoes = ttk.Frame(self)
         botoes.grid(row=6, column=0, padx=10, pady=(12, 10), sticky="e")
@@ -59,10 +86,31 @@ class DialogoNovaRegra(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._cancelar())
         self.entry_padrao.focus_set()
 
+    def _filtra_contas(self, event) -> None:
+        """Filtra as opções do Combobox conforme o usuário digita."""
+        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+            return
+        termo = self.entry_conta.get().strip().lower()
+        if not termo:
+            self.entry_conta["values"] = self._opcoes_conta
+        else:
+            filtradas = [o for o in self._opcoes_conta if termo in o.lower()]
+            self.entry_conta["values"] = filtradas
+
     def _confirmar(self) -> None:
         padrao = self.entry_padrao.get().strip()
         historico = self.entry_historico.get().strip()
-        conta = self.entry_conta.get().strip()
+        conta_raw = self.entry_conta.get().strip()
+        # Quando há plano carregado e o usuário selecionou "código - descrição",
+        # extrai só o código pra salvar limpo.
+        if self.plano_contas and " - " in conta_raw:
+            codigo_candidato = conta_raw.split(" - ", 1)[0].strip()
+            if codigo_candidato in self._codigos_validos:
+                conta = codigo_candidato
+            else:
+                conta = conta_raw
+        else:
+            conta = conta_raw
         if not padrao:
             messagebox.showwarning("Campo vazio", "Informe o padrão do memo.", parent=self)
             return
@@ -91,6 +139,7 @@ class DialogoConfigurarTaxas(tk.Toplevel):
         master: tk.Misc,
         regras: list[dict[str, Any]],
         on_change: Callable[[list[dict[str, Any]]], None],
+        plano_contas: list | None = None,
     ) -> None:
         super().__init__(master)
         self.title("Configurar regras de taxas / movimentações")
@@ -101,6 +150,7 @@ class DialogoConfigurarTaxas(tk.Toplevel):
         # Cópia de trabalho — só persiste via on_change
         self.regras: list[dict[str, Any]] = [dict(r) for r in regras]
         self.on_change = on_change
+        self.plano_contas = plano_contas or []
 
         info = ttk.Label(
             self,
@@ -159,7 +209,7 @@ class DialogoConfigurarTaxas(tk.Toplevel):
         self.lbl_count.config(text=f"{len(self.regras)} regra(s)")
 
     def _adicionar(self) -> None:
-        dlg = DialogoNovaRegra(self)
+        dlg = DialogoNovaRegra(self, plano_contas=self.plano_contas)
         self.wait_window(dlg)
         if dlg.regra:
             self.regras.append(dlg.regra)
@@ -188,7 +238,9 @@ class DialogoConfigurarTaxas(tk.Toplevel):
             messagebox.showinfo("Sem seleção", "Selecione uma regra para editar.", parent=self)
             return
         idx = self.tree.index(sel[0])
-        dlg = DialogoNovaRegra(self, self.regras[idx])
+        dlg = DialogoNovaRegra(
+            self, self.regras[idx], plano_contas=self.plano_contas,
+        )
         self.wait_window(dlg)
         if dlg.regra:
             self.regras[idx] = dlg.regra
