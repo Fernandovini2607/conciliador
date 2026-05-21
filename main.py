@@ -399,6 +399,7 @@ class App(tk.Tk):
         # Domínio
         self.conn_dominio = None
         self.transacoes_dominio: list[Transacao] = []
+        self.plano_contas: list[parser_dominio.ContaContabil] = []
         self.comparacao_dominio: list[tuple[str, Par | Transacao]] = []
         # ↑ status, registro (Par para casados; Transacao para faltantes)
         self.lancamentos_contabeis: list[LancamentoContabil] = []
@@ -441,6 +442,14 @@ class App(tk.Tk):
                 por_emp[str(codi)] = regras_legacy
             precisa_salvar = True
 
+        # Migração 3: dominio_fonte (singular) → dominio_fonte_pagamentos
+        if "dominio_fonte" in self.cfg and "dominio_fonte_pagamentos" not in self.cfg:
+            self.cfg["dominio_fonte_pagamentos"] = self.cfg.pop("dominio_fonte")
+            precisa_salvar = True
+        elif "dominio_fonte" in self.cfg:
+            del self.cfg["dominio_fonte"]  # já tem o novo
+            precisa_salvar = True
+
         if precisa_salvar:
             config.salvar(self.cfg)
 
@@ -471,13 +480,23 @@ class App(tk.Tk):
         )
         self.btn_empresa.pack(side="left", padx=4)
         self.btn_fonte = ttk.Button(
-            topo3, text="Configurar fonte", command=self._configurar_fonte_dominio, state="disabled",
+            topo3, text="Fonte: pagamentos", command=self._configurar_fonte_dominio, state="disabled",
         )
         self.btn_fonte.pack(side="left", padx=4)
+        self.btn_fonte_plano = ttk.Button(
+            topo3, text="Fonte: plano contas",
+            command=self._configurar_fonte_plano_contas, state="disabled",
+        )
+        self.btn_fonte_plano.pack(side="left", padx=4)
         self.btn_carregar_dominio = ttk.Button(
             topo3, text="Carregar pagamentos", command=self._carregar_dominio, state="disabled",
         )
         self.btn_carregar_dominio.pack(side="left", padx=4)
+        self.btn_carregar_plano = ttk.Button(
+            topo3, text="Carregar plano contas",
+            command=self._carregar_plano_contas, state="disabled",
+        )
+        self.btn_carregar_plano.pack(side="left", padx=4)
         self.lbl_dominio = ttk.Label(topo3, text="(Domínio não conectado)")
         self.lbl_dominio.pack(side="left", padx=8)
 
@@ -512,6 +531,7 @@ class App(tk.Tk):
         self._monta_aba_conciliados_dominio()
         self._monta_aba_dominio()
         self._monta_aba_lancamentos()
+        self._monta_aba_plano_contas()
 
     # --------------- Filtros estilo Excel (popup ao clicar no cabeçalho) ---
 
@@ -1141,6 +1161,74 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
         self.tree_lancamentos = tree
 
+    def _monta_aba_plano_contas(self) -> None:
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Plano de contas (0)")
+        self._aba_plano_contas = aba
+
+        info = ttk.Label(
+            aba,
+            text=(
+                "Plano de contas carregado do Domínio para a empresa "
+                "selecionada. Configure a fonte em 'Fonte: plano contas' "
+                "(barra do Domínio) antes de carregar."
+            ),
+            foreground="#1f3a68",
+            font=("TkDefaultFont", 9, "italic"),
+        )
+        info.pack(side="top", fill="x", padx=6, pady=(6, 2))
+
+        # Filtro de busca
+        topo_f = ttk.Frame(aba)
+        topo_f.pack(side="top", fill="x", padx=6, pady=2)
+        ttk.Label(topo_f, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_plano = tk.StringVar()
+        self.filtro_plano.trace_add(
+            "write", lambda *_a: self._render_aba_plano_contas(),
+        )
+        ttk.Entry(topo_f, textvariable=self.filtro_plano, width=40).pack(side="left")
+        ttk.Button(
+            topo_f, text="Limpar", command=lambda: self.filtro_plano.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_plano = ttk.Label(topo_f, text="", foreground="#666")
+        self.lbl_filtro_plano.pack(side="left", padx=8)
+
+        cols = ("codigo", "descricao", "tipo")
+        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        tree.heading("codigo", text="Código")
+        tree.heading("descricao", text="Descrição")
+        tree.heading("tipo", text="Tipo")
+        tree.column("codigo", width=130, anchor="w")
+        tree.column("descricao", width=500, anchor="w")
+        tree.column("tipo", width=60, anchor="center")
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree_plano_contas = tree
+
+    def _render_aba_plano_contas(self) -> None:
+        for item in self.tree_plano_contas.get_children():
+            self.tree_plano_contas.delete(item)
+        termo = (
+            self.filtro_plano.get().strip().lower()
+            if hasattr(self, "filtro_plano") else ""
+        )
+        mostradas = 0
+        for c in self.plano_contas:
+            row = (c.codigo, c.descricao, c.tipo)
+            if termo and termo not in " ".join(str(x) for x in row).lower():
+                continue
+            self.tree_plano_contas.insert("", "end", values=row)
+            mostradas += 1
+        total = len(self.plano_contas)
+        idx = self.notebook.index(self._aba_plano_contas)
+        self.notebook.tab(idx, text=f"Plano de contas ({total})")
+        if hasattr(self, "lbl_filtro_plano"):
+            self.lbl_filtro_plano.config(
+                text=f"Mostrando {mostradas} de {total}" if termo else f"{total} contas",
+            )
+
     # --------------------------------------------------------- Domínio
 
     def _conectar_dominio(self) -> None:
@@ -1151,8 +1239,11 @@ class App(tk.Tk):
         self.conn_dominio = dlg.conn
         self.btn_empresa.config(state="normal")
         self.btn_fonte.config(state="normal")
-        if self.cfg.get("dominio_fonte", {}).get("mapeamento"):
+        self.btn_fonte_plano.config(state="normal")
+        if self.cfg.get("dominio_fonte_pagamentos", {}).get("mapeamento"):
             self.btn_carregar_dominio.config(state="normal")
+        if self.cfg.get("dominio_fonte_plano_contas", {}).get("mapeamento"):
+            self.btn_carregar_plano.config(state="normal")
         self._atualiza_label_dominio()
 
     def _selecionar_empresa(self) -> None:
@@ -1178,26 +1269,51 @@ class App(tk.Tk):
         if emp:
             partes.append(f"Empresa: {emp['codi_emp']} — {emp['razao'][:40]}")
         if self.transacoes_dominio:
-            partes.append(f"{len(self.transacoes_dominio)} pagamentos carregados")
+            partes.append(f"{len(self.transacoes_dominio)} pagamentos")
+        if self.plano_contas:
+            partes.append(f"{len(self.plano_contas)} contas no plano")
         self.lbl_dominio.config(text="  |  ".join(partes))
 
     def _configurar_fonte_dominio(self) -> None:
+        """Configura a fonte de pagamentos do Domínio (parcelas a pagar)."""
         if self.conn_dominio is None:
             return
-        fonte_atual = self.cfg.get("dominio_fonte", {})
+        fonte_atual = self.cfg.get("dominio_fonte_pagamentos", {})
         codi_emp = (self.cfg.get("dominio_empresa") or {}).get("codi_emp")
-        dlg = DialogoFonte(self, self.conn_dominio, fonte_atual, codi_emp=codi_emp)
+        dlg = DialogoFonte(
+            self, self.conn_dominio, fonte_atual, codi_emp=codi_emp,
+            titulo="Selecionar fonte de PAGAMENTOS no Domínio",
+        )
         self.wait_window(dlg)
         if dlg.fonte is None:
             return
-        self.cfg["dominio_fonte"] = dlg.fonte
+        self.cfg["dominio_fonte_pagamentos"] = dlg.fonte
         config.salvar(self.cfg)
         self.btn_carregar_dominio.config(state="normal")
+
+    def _configurar_fonte_plano_contas(self) -> None:
+        """Configura a fonte do plano de contas do Domínio."""
+        if self.conn_dominio is None:
+            return
+        fonte_atual = self.cfg.get("dominio_fonte_plano_contas", {})
+        codi_emp = (self.cfg.get("dominio_empresa") or {}).get("codi_emp")
+        dlg = DialogoFonte(
+            self, self.conn_dominio, fonte_atual, codi_emp=codi_emp,
+            campos=DialogoFonte.CAMPOS_PLANO_CONTAS,
+            titulo="Selecionar fonte do PLANO DE CONTAS no Domínio",
+            opcionais={"tipo"},
+        )
+        self.wait_window(dlg)
+        if dlg.fonte is None:
+            return
+        self.cfg["dominio_fonte_plano_contas"] = dlg.fonte
+        config.salvar(self.cfg)
+        self.btn_carregar_plano.config(state="normal")
 
     def _carregar_dominio(self) -> None:
         if self.conn_dominio is None:
             return
-        fonte = self.cfg.get("dominio_fonte", {})
+        fonte = self.cfg.get("dominio_fonte_pagamentos", {})
         if not fonte.get("mapeamento"):
             messagebox.showinfo(
                 "Sem fonte",
@@ -1229,6 +1345,28 @@ class App(tk.Tk):
             self._render_conciliados()
             self._redesenha_abas()
         self._atualiza_botao_comparar()
+
+    def _carregar_plano_contas(self) -> None:
+        if self.conn_dominio is None:
+            return
+        fonte = self.cfg.get("dominio_fonte_plano_contas", {})
+        if not fonte.get("mapeamento"):
+            messagebox.showinfo(
+                "Sem fonte",
+                "Configure a fonte do plano de contas primeiro.",
+            )
+            return
+        emp = self._empresa_selecionada() or {}
+        codi_emp = emp.get("codi_emp")
+        try:
+            self.plano_contas = parser_dominio.extrair_plano_contas(
+                self.conn_dominio, fonte, codi_emp=codi_emp,
+            )
+        except Exception as e:
+            messagebox.showerror("Erro ao ler plano de contas", str(e))
+            return
+        self._render_aba_plano_contas()
+        self._atualiza_label_dominio()
 
     def _atualiza_botao_comparar(self) -> None:
         pode = bool(self.pares_conciliados and self.transacoes_dominio)

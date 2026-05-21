@@ -20,12 +20,20 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
 import pyodbc
 
 from parser_xlsx import CAMPOS_EXTRAS, Transacao, para_data, para_decimal
+
+
+@dataclass
+class ContaContabil:
+    codigo: str           # código da conta (ex.: "1.01.001")
+    descricao: str        # descrição/nome
+    tipo: str = ""        # opcional: "A" analítica / "S" sintética
 
 DOMINIO_CONFIG_PATH = Path(__file__).parent / "data" / "dominio_config.json"
 SCHEMA_PADRAO = "bethadba"
@@ -350,3 +358,69 @@ def extrair_pagamentos(
             origem="dominio", extras=extras,
         ))
     return transacoes
+
+
+# ---------------------------------------------------- plano de contas
+
+def extrair_plano_contas(
+    conn: pyodbc.Connection,
+    fonte: dict[str, Any],
+    codi_emp: int | None = None,
+) -> list[ContaContabil]:
+    """Extrai o plano de contas do Domínio conforme a configuração da fonte.
+
+    ``fonte`` tem o mesmo modelo das outras fontes do app:
+    - ``{"modo": "tabela", "tabela": "bethadba.ctcontas",
+       "mapeamento": {codigo, descricao, tipo?}, "where": "...opcional"}``
+    - ``{"modo": "sql", "sql": "SELECT ...",
+       "mapeamento": {codigo, descricao, tipo?}}``
+    """
+    mapeamento: dict[str, str] = fonte["mapeamento"]
+    obrigatorios = ("codigo", "descricao")
+    faltando = [c for c in obrigatorios if not mapeamento.get(c)]
+    if faltando:
+        raise ValueError(
+            f"Mapeamento incompleto no plano de contas: {', '.join(faltando)}"
+        )
+
+    if fonte.get("modo") == "sql":
+        sql = fonte["sql"]
+        params: tuple[Any, ...] = (codi_emp,) if (codi_emp is not None and "?" in sql) else ()
+        colunas, linhas = executar_query(conn, sql, params)
+    else:
+        cols_pedidas = [mapeamento["codigo"], mapeamento["descricao"]]
+        if mapeamento.get("tipo"):
+            cols_pedidas.append(mapeamento["tipo"])
+        vistos: set[str] = set()
+        cols_unicas: list[str] = []
+        for c in cols_pedidas:
+            if c not in vistos:
+                cols_unicas.append(c)
+                vistos.add(c)
+        sql, params = _monta_select(
+            fonte["tabela"], cols_unicas, fonte.get("where", ""), codi_emp=codi_emp,
+        )
+        colunas, linhas = executar_query(conn, sql, params)
+
+    try:
+        i_cod = colunas.index(mapeamento["codigo"])
+        i_desc = colunas.index(mapeamento["descricao"])
+    except ValueError as e:
+        raise ValueError(
+            f"Coluna do mapeamento não encontrada no resultado: {e}"
+        )
+    i_tipo = None
+    if mapeamento.get("tipo") and mapeamento["tipo"] in colunas:
+        i_tipo = colunas.index(mapeamento["tipo"])
+
+    contas: list[ContaContabil] = []
+    for linha in linhas:
+        cod = str(linha[i_cod] or "").strip() if linha[i_cod] is not None else ""
+        desc = str(linha[i_desc] or "").strip() if linha[i_desc] is not None else ""
+        tipo = (
+            str(linha[i_tipo] or "").strip()
+            if i_tipo is not None and linha[i_tipo] is not None else ""
+        )
+        if cod:
+            contas.append(ContaContabil(codigo=cod, descricao=desc, tipo=tipo))
+    return contas

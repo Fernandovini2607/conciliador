@@ -206,13 +206,18 @@ class DialogoFonte(tk.Toplevel):
     """
 
     PREVIEW_LINHAS = 100
-    CAMPOS = [
+    CAMPOS_PAGAMENTOS = [
         ("data", "Data vencimento"),
         ("data_emissao", "Data emissão"),
         ("valor", "Valor"),
         ("numero_nf", "Nº NF"),
         ("cnpj", "CNPJ fornecedor"),
         ("fornecedor", "Fornecedor"),
+    ]
+    CAMPOS_PLANO_CONTAS = [
+        ("codigo", "Código"),
+        ("descricao", "Descrição"),
+        ("tipo", "Tipo (opc.)"),
     ]
 
     def __init__(
@@ -221,15 +226,21 @@ class DialogoFonte(tk.Toplevel):
         conn: pyodbc.Connection,
         fonte_atual: dict[str, Any],
         codi_emp: int | None = None,
+        campos: list[tuple[str, str]] | None = None,
+        titulo: str | None = None,
+        opcionais: set[str] | None = None,
     ) -> None:
         super().__init__(master)
-        self.title("Selecionar fonte de pagamentos no Domínio")
+        self.title(titulo or "Selecionar fonte de pagamentos no Domínio")
         self.transient(master)
         self.grab_set()
         self.geometry("960x680")
 
         self.conn = conn
         self.codi_emp = codi_emp
+        self.CAMPOS = campos or self.CAMPOS_PAGAMENTOS
+        # Campos cujo mapeamento é opcional (deixar em branco é aceito)
+        self.opcionais: set[str] = opcionais or set()
         self.fonte: dict[str, Any] | None = None
         self.colunas_atuais: list[str] = []
         self.tabelas: list[str] = []
@@ -424,6 +435,8 @@ class DialogoFonte(tk.Toplevel):
         for campo, rotulo in self.CAMPOS:
             valor = self.combos[campo].get().strip()
             if not valor:
+                if campo in self.opcionais:
+                    continue  # opcional pode ficar vazio
                 messagebox.showwarning(
                     "Mapeamento incompleto",
                     f"Escolha a coluna correspondente a '{rotulo}'.",
