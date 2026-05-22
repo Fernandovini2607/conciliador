@@ -36,7 +36,7 @@ class DialogoNovaRegra(tk.Toplevel):
 
         if self.tipo == "fornecedor":
             self.title("Regra por fornecedor" if not regra_atual else "Editar regra por fornecedor")
-            label_padrao = "Padrão (CNPJ ou parte do nome do fornecedor):"
+            label_padrao = "Padrão (CNPJ, parte do nome do fornecedor OU texto do histórico):"
         else:
             self.title("Regra por memo" if not regra_atual else "Editar regra por memo")
             label_padrao = "Padrão (texto que aparece no memo OU documento do OFX):"
@@ -71,6 +71,19 @@ class DialogoNovaRegra(tk.Toplevel):
             self.entry_conta = ttk.Entry(self, width=60)
         self.entry_conta.grid(row=5, column=0, padx=10, pady=2, sticky="we")
 
+        # Banco — só faz sentido para regras tipo "memo" (que rodam em OFX).
+        # Opcional: se preenchido, exige que o nome do banco bata pra regra
+        # ser aplicada (case-insensitive, substring).
+        self.entry_banco: ttk.Entry | None = None
+        if self.tipo == "memo":
+            ttk.Label(
+                self,
+                text="Banco (opcional — se preenchido, regra só vale pra esse banco):",
+                foreground="#555",
+            ).grid(row=6, column=0, padx=10, pady=(10, 2), sticky="w")
+            self.entry_banco = ttk.Entry(self, width=60)
+            self.entry_banco.grid(row=7, column=0, padx=10, pady=2, sticky="we")
+
         if regra_atual:
             self.entry_padrao.insert(0, regra_atual.get("padrao", ""))
             self.entry_historico.insert(0, regra_atual.get("historico", ""))
@@ -82,9 +95,13 @@ class DialogoNovaRegra(tk.Toplevel):
                     conta_atual,
                 )
                 self.entry_conta.insert(0, opt_completa)
+            if self.entry_banco is not None:
+                self.entry_banco.insert(0, regra_atual.get("banco", ""))
 
         botoes = ttk.Frame(self)
-        botoes.grid(row=6, column=0, padx=10, pady=(12, 10), sticky="e")
+        # Linha dos botões depende se tem campo banco ou não
+        linha_botoes = 8 if self.tipo == "memo" else 6
+        botoes.grid(row=linha_botoes, column=0, padx=10, pady=(12, 10), sticky="e")
         ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
         ttk.Button(botoes, text="OK", command=self._confirmar).pack(side="right", padx=4)
 
@@ -132,6 +149,8 @@ class DialogoNovaRegra(tk.Toplevel):
             "historico": historico,
             "conta": conta,
         }
+        if self.entry_banco is not None:
+            self.regra["banco"] = self.entry_banco.get().strip()
         self.destroy()
 
     def _cancelar(self) -> None:
@@ -258,6 +277,305 @@ class DialogoLancamentoManual(tk.Toplevel):
         self.destroy()
 
 
+class DialogoLancamentoManualAvulso(tk.Toplevel):
+    """Diálogo para criar UM lançamento contábil avulso a partir de UMA
+    transação solta — pode ser pendente da planilha ou pendente do OFX.
+    Pede só conta + histórico — NÃO cria regra. Devolve dict
+    ``{"historico": ..., "conta": ...}`` em ``self.resultado`` ou ``None``."""
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        transacao,                        # parser_xlsx.Transacao
+        origem: str,                      # "planilha" ou "ofx"
+        plano_contas: list | None = None,
+        sugestao_historico: str = "",
+    ) -> None:
+        super().__init__(master)
+        self.title("Lançamento contábil manual")
+        self.transient(master)
+        self.grab_set()
+        self.resizable(False, False)
+
+        self.transacao = transacao
+        self.origem = origem
+        self.plano_contas = plano_contas or []
+        self.resultado: dict[str, str] | None = None
+        self._opcoes_conta = [
+            f"{c.codigo} - {c.descricao}" for c in self.plano_contas
+        ]
+        self._codigos_validos = {c.codigo for c in self.plano_contas}
+
+        # Resumo da transação (read-only)
+        titulo = "Pendente da planilha" if origem == "planilha" else "Pendente do OFX"
+        cab = ttk.LabelFrame(self, text=titulo)
+        cab.grid(row=0, column=0, padx=10, pady=(10, 4), sticky="we")
+        data = transacao.data.strftime("%d/%m/%Y")
+        valor = f"R$ {transacao.valor:.2f}"
+        if origem == "planilha":
+            forn = transacao.extras.get("fornecedor", "") or ""
+            cnpj = transacao.extras.get("cnpj", "") or ""
+            nf = transacao.extras.get("numero_nf", "") or ""
+            linhas = [
+                ("Vencimento", data),
+                ("Valor", valor),
+                ("Nº NF", nf),
+                ("Fornecedor", f"{forn} ({cnpj})" if cnpj else forn),
+            ]
+        else:
+            doc = transacao.extras.get("documento", "") or ""
+            banco = transacao.extras.get("banco", "") or ""
+            memo = transacao.descricao or ""
+            linhas = [
+                ("Data pagamento", data),
+                ("Valor", valor),
+                ("Documento", doc),
+                ("Banco", banco),
+                ("Memo OFX", memo[:80]),
+            ]
+        for i, (rotulo, txt) in enumerate(linhas):
+            ttk.Label(cab, text=f"{rotulo}:", foreground="#555").grid(
+                row=i, column=0, padx=6, pady=1, sticky="e",
+            )
+            ttk.Label(cab, text=txt).grid(row=i, column=1, padx=6, pady=1, sticky="w")
+
+        ttk.Label(self, text="Histórico contábil:").grid(
+            row=1, column=0, padx=10, pady=(8, 2), sticky="w",
+        )
+        self.entry_historico = ttk.Entry(self, width=60)
+        self.entry_historico.grid(row=2, column=0, padx=10, pady=2, sticky="we")
+        if sugestao_historico:
+            self.entry_historico.insert(0, sugestao_historico)
+
+        rotulo_conta = (
+            "Conta contábil (digite parte do código ou descrição):"
+            if self.plano_contas
+            else "Conta contábil:"
+        )
+        ttk.Label(self, text=rotulo_conta).grid(
+            row=3, column=0, padx=10, pady=(8, 2), sticky="w",
+        )
+        if self.plano_contas:
+            self.entry_conta: ttk.Entry = ttk.Combobox(
+                self, width=60, values=self._opcoes_conta,
+            )
+            self.entry_conta.bind("<KeyRelease>", self._filtra_contas)
+        else:
+            self.entry_conta = ttk.Entry(self, width=60)
+        self.entry_conta.grid(row=4, column=0, padx=10, pady=2, sticky="we")
+
+        botoes = ttk.Frame(self)
+        botoes.grid(row=5, column=0, padx=10, pady=(12, 10), sticky="e")
+        ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
+        ttk.Button(botoes, text="Lançar", command=self._confirmar).pack(side="right", padx=4)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Return>", lambda _e: self._confirmar())
+        self.bind("<Escape>", lambda _e: self._cancelar())
+        self.entry_historico.focus_set()
+
+    def _filtra_contas(self, event) -> None:
+        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+            return
+        termo = self.entry_conta.get().strip().lower()
+        if not termo:
+            self.entry_conta["values"] = self._opcoes_conta
+        else:
+            self.entry_conta["values"] = [
+                o for o in self._opcoes_conta if termo in o.lower()
+            ]
+
+    def _confirmar(self) -> None:
+        historico = self.entry_historico.get().strip()
+        conta_raw = self.entry_conta.get().strip()
+        if self.plano_contas and " - " in conta_raw:
+            codigo_candidato = conta_raw.split(" - ", 1)[0].strip()
+            conta = (
+                codigo_candidato if codigo_candidato in self._codigos_validos
+                else conta_raw
+            )
+        else:
+            conta = conta_raw
+        if not historico:
+            messagebox.showwarning(
+                "Campo vazio", "Informe o histórico contábil.", parent=self,
+            )
+            return
+        self.resultado = {"historico": historico, "conta": conta}
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.resultado = None
+        self.destroy()
+
+
+class DialogoEditarLancamento(tk.Toplevel):
+    """Edita um lançamento contábil já gerado. Permite alterar data,
+    valor, banco, conta e histórico. Origem (memo/regra) é read-only.
+
+    Devolve dict ``{"data", "valor", "banco", "conta", "historico"}`` em
+    ``self.resultado`` ou ``None`` se cancelar.
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        lancamento,                       # lancamentos.LancamentoContabil
+        plano_contas: list | None = None,
+    ) -> None:
+        super().__init__(master)
+        self.title("Editar lançamento contábil")
+        self.transient(master)
+        self.grab_set()
+        self.resizable(False, False)
+
+        self.lancamento = lancamento
+        self.plano_contas = plano_contas or []
+        self.resultado: dict | None = None
+        self._opcoes_conta = [
+            f"{c.codigo} - {c.descricao}" for c in self.plano_contas
+        ]
+        self._codigos_validos = {c.codigo for c in self.plano_contas}
+
+        # Cabeçalho com info read-only sobre origem
+        ro = ttk.LabelFrame(self, text="Origem (não editável)")
+        ro.grid(row=0, column=0, padx=10, pady=(10, 4), sticky="we", columnspan=2)
+        tipo_legivel = {
+            "memo": "Regra por memo (OFX)",
+            "fornecedor": "Regra por fornecedor (par P×OFX)",
+            "fornecedor_planilha": "Regra por fornecedor (pendente da planilha)",
+            "manual": "Manual (par P×OFX)",
+            "manual_ofx": "Manual (pendente OFX)",
+            "manual_planilha": "Manual (pendente planilha)",
+        }.get(lancamento.tipo_regra, lancamento.tipo_regra)
+        for i, (rotulo, valor) in enumerate([
+            ("Tipo", tipo_legivel),
+            ("Regra/Padrão", lancamento.padrao_match),
+            ("Memo OFX", (lancamento.memo_original or "(sem OFX)")[:80]),
+        ]):
+            ttk.Label(ro, text=f"{rotulo}:", foreground="#555").grid(
+                row=i, column=0, padx=6, pady=1, sticky="e",
+            )
+            ttk.Label(ro, text=valor or "—").grid(
+                row=i, column=1, padx=6, pady=1, sticky="w",
+            )
+
+        # Campos editáveis
+        ttk.Label(self, text="Data (dd/mm/aaaa):").grid(
+            row=1, column=0, padx=10, pady=(8, 2), sticky="e",
+        )
+        self.entry_data = ttk.Entry(self, width=15)
+        self.entry_data.grid(row=1, column=1, padx=(0, 10), pady=(8, 2), sticky="w")
+        self.entry_data.insert(0, lancamento.data.strftime("%d/%m/%Y"))
+
+        ttk.Label(self, text="Valor:").grid(
+            row=2, column=0, padx=10, pady=2, sticky="e",
+        )
+        self.entry_valor = ttk.Entry(self, width=15)
+        self.entry_valor.grid(row=2, column=1, padx=(0, 10), pady=2, sticky="w")
+        self.entry_valor.insert(0, f"{lancamento.valor:.2f}")
+
+        ttk.Label(self, text="Banco:").grid(
+            row=3, column=0, padx=10, pady=2, sticky="e",
+        )
+        self.entry_banco = ttk.Entry(self, width=50)
+        self.entry_banco.grid(row=3, column=1, padx=(0, 10), pady=2, sticky="we")
+        self.entry_banco.insert(0, lancamento.banco)
+
+        ttk.Label(self, text="Conta contábil:").grid(
+            row=4, column=0, padx=10, pady=2, sticky="e",
+        )
+        if self.plano_contas:
+            self.entry_conta: ttk.Entry = ttk.Combobox(
+                self, width=50, values=self._opcoes_conta,
+            )
+            self.entry_conta.bind("<KeyRelease>", self._filtra_contas)
+        else:
+            self.entry_conta = ttk.Entry(self, width=50)
+        self.entry_conta.grid(row=4, column=1, padx=(0, 10), pady=2, sticky="we")
+        if lancamento.conta:
+            opt = next(
+                (o for o in self._opcoes_conta if o.startswith(f"{lancamento.conta} -")),
+                lancamento.conta,
+            )
+            self.entry_conta.insert(0, opt)
+
+        ttk.Label(self, text="Histórico contábil:").grid(
+            row=5, column=0, padx=10, pady=2, sticky="e",
+        )
+        self.entry_hist = ttk.Entry(self, width=50)
+        self.entry_hist.grid(row=5, column=1, padx=(0, 10), pady=2, sticky="we")
+        self.entry_hist.insert(0, lancamento.historico)
+
+        botoes = ttk.Frame(self)
+        botoes.grid(row=6, column=0, columnspan=2, pady=(12, 10), padx=10, sticky="e")
+        ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
+        ttk.Button(botoes, text="Salvar", command=self._confirmar).pack(side="right", padx=4)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Return>", lambda _e: self._confirmar())
+        self.bind("<Escape>", lambda _e: self._cancelar())
+        self.entry_data.focus_set()
+
+    def _filtra_contas(self, event) -> None:
+        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+            return
+        termo = self.entry_conta.get().strip().lower()
+        if not termo:
+            self.entry_conta["values"] = self._opcoes_conta
+        else:
+            self.entry_conta["values"] = [
+                o for o in self._opcoes_conta if termo in o.lower()
+            ]
+
+    def _confirmar(self) -> None:
+        from datetime import datetime
+        from decimal import Decimal, InvalidOperation
+        # Data
+        try:
+            data = datetime.strptime(self.entry_data.get().strip(), "%d/%m/%Y").date()
+        except ValueError:
+            messagebox.showwarning(
+                "Data inválida", "Use o formato dd/mm/aaaa.", parent=self,
+            )
+            return
+        # Valor
+        try:
+            v_txt = self.entry_valor.get().strip().replace(",", ".").replace("R$", "")
+            valor = Decimal(v_txt)
+        except (InvalidOperation, ValueError):
+            messagebox.showwarning(
+                "Valor inválido", "Informe um valor numérico (ex: 123.45).",
+                parent=self,
+            )
+            return
+        # Conta — se há plano e formato "código - descrição", extrai código
+        conta_raw = self.entry_conta.get().strip()
+        if self.plano_contas and " - " in conta_raw:
+            cod = conta_raw.split(" - ", 1)[0].strip()
+            conta = cod if cod in self._codigos_validos else conta_raw
+        else:
+            conta = conta_raw
+        historico = self.entry_hist.get().strip()
+        if not historico:
+            messagebox.showwarning(
+                "Campo vazio", "Informe o histórico contábil.", parent=self,
+            )
+            return
+        self.resultado = {
+            "data": data,
+            "valor": valor,
+            "banco": self.entry_banco.get().strip(),
+            "conta": conta,
+            "historico": historico,
+        }
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.resultado = None
+        self.destroy()
+
+
 class DialogoEditarPar(tk.Toplevel):
     """Edita os 6 dados do lado da planilha de um par P×OFX. Útil quando
     o motivo do par não ter casado com o Domínio é dado preenchido errado
@@ -361,6 +679,152 @@ class DialogoEditarPar(tk.Toplevel):
             "numero_nf": v["numero_nf"],
             "cnpj": v["cnpj"],
             "fornecedor": v["fornecedor"],
+        }
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.resultado = None
+        self.destroy()
+
+
+class DialogoEditarTransacao(tk.Toplevel):
+    """Edita os 8 campos de uma Transacao da planilha (vencimento, pagamento,
+    emissão, valor, NF, CNPJ, fornecedor, histórico). Vencimento e valor são
+    obrigatórios; os outros podem ficar em branco.
+
+    Devolve dict com os novos valores em ``self.resultado``, ou ``None``
+    se cancelar.
+    """
+
+    def __init__(self, master: tk.Misc, transacao) -> None:
+        super().__init__(master)
+        self.title("Editar lançamento da planilha")
+        self.transient(master)
+        self.grab_set()
+        self.resizable(False, False)
+
+        self.transacao = transacao
+        self.resultado: dict[str, Any] | None = None
+
+        t = transacao
+        venc = t.data.strftime("%d/%m/%Y") if t.data else ""
+        pgto = t.data_pagamento.strftime("%d/%m/%Y") if t.data_pagamento else ""
+        emiss = t.extras.get("data_emissao")
+        emiss_txt = emiss.strftime("%d/%m/%Y") if emiss else ""
+
+        ttk.Label(
+            self,
+            text=(
+                "Edite os dados do lançamento. Após salvar, o app limpa o "
+                "resultado da conciliação — você precisa re-executar para "
+                "refletir as mudanças no match com o OFX e Domínio."
+            ),
+            wraplength=480,
+            foreground="#555",
+            font=("TkDefaultFont", 9, "italic"),
+        ).grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 6), sticky="w")
+
+        if t.linha is not None:
+            ttk.Label(
+                self, text=f"Linha original da planilha: {t.linha}",
+                foreground="#888",
+            ).grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 4), sticky="w")
+
+        # (rotulo, valor_inicial, key, opcional)
+        campos = [
+            ("Vencimento (dd/mm/aaaa):", venc, "data", False),
+            ("Pagamento (dd/mm/aaaa):", pgto, "data_pagamento", True),
+            ("Emissão (dd/mm/aaaa):", emiss_txt, "data_emissao", True),
+            ("Valor:", f"{t.valor:.2f}", "valor", False),
+            ("Nº NF:", t.extras.get("numero_nf", "") or "", "numero_nf", True),
+            ("CNPJ:", t.extras.get("cnpj", "") or "", "cnpj", True),
+            ("Fornecedor:", t.extras.get("fornecedor", "") or "", "fornecedor", True),
+            ("Histórico:", t.extras.get("historico", "") or "", "historico", True),
+        ]
+
+        self.entries: dict[str, ttk.Entry] = {}
+        for i, (label, valor, key, opcional) in enumerate(campos):
+            sufixo = " (opcional)" if opcional else ""
+            cor = "#555" if opcional else "black"
+            ttk.Label(self, text=label + sufixo, foreground=cor).grid(
+                row=2 + i, column=0, padx=10, pady=3, sticky="e",
+            )
+            entry = ttk.Entry(self, width=50)
+            entry.grid(row=2 + i, column=1, padx=(0, 10), pady=3, sticky="we")
+            entry.insert(0, str(valor))
+            self.entries[key] = entry
+
+        botoes = ttk.Frame(self)
+        botoes.grid(
+            row=2 + len(campos), column=0, columnspan=2, padx=10, pady=(12, 10),
+            sticky="e",
+        )
+        ttk.Button(botoes, text="Cancelar", command=self._cancelar).pack(side="right", padx=4)
+        ttk.Button(botoes, text="Salvar", command=self._confirmar).pack(side="right", padx=4)
+
+        self.protocol("WM_DELETE_WINDOW", self._cancelar)
+        self.bind("<Escape>", lambda _e: self._cancelar())
+        self.entries["data"].focus_set()
+
+    def _confirmar(self) -> None:
+        # Import local pra evitar dep circular no topo do arquivo
+        from parser_xlsx import para_data, para_decimal
+
+        v = {k: e.get().strip() for k, e in self.entries.items()}
+
+        # Vencimento — obrigatório
+        data = para_data(v["data"])
+        if data is None:
+            messagebox.showwarning(
+                "Vencimento inválido",
+                "Informe a data de vencimento no formato dd/mm/aaaa.",
+                parent=self,
+            )
+            return
+
+        # Pagamento — opcional
+        data_pagamento = None
+        if v["data_pagamento"]:
+            data_pagamento = para_data(v["data_pagamento"])
+            if data_pagamento is None:
+                messagebox.showwarning(
+                    "Pagamento inválido",
+                    "Data de pagamento em dd/mm/aaaa ou em branco.",
+                    parent=self,
+                )
+                return
+
+        # Emissão — opcional
+        data_emissao = None
+        if v["data_emissao"]:
+            data_emissao = para_data(v["data_emissao"])
+            if data_emissao is None:
+                messagebox.showwarning(
+                    "Emissão inválida",
+                    "Data de emissão em dd/mm/aaaa ou em branco.",
+                    parent=self,
+                )
+                return
+
+        # Valor — obrigatório
+        valor = para_decimal(v["valor"])
+        if valor is None:
+            messagebox.showwarning(
+                "Valor inválido",
+                "Valor numérico obrigatório (use ponto ou vírgula).",
+                parent=self,
+            )
+            return
+
+        self.resultado = {
+            "data": data,
+            "data_pagamento": data_pagamento,
+            "data_emissao": data_emissao,
+            "valor": valor,
+            "numero_nf": v["numero_nf"],
+            "cnpj": v["cnpj"],
+            "fornecedor": v["fornecedor"],
+            "historico": v["historico"],
         }
         self.destroy()
 

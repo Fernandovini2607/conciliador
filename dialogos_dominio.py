@@ -217,7 +217,10 @@ class DialogoFonte(tk.Toplevel):
     CAMPOS_PLANO_CONTAS = [
         ("codigo", "Código"),
         ("descricao", "Descrição"),
-        ("tipo", "Tipo (opc.)"),
+        # Se mapeada, FILTRA o plano para trazer só contas com tipo = "A"
+        # (analítica). Use a coluna do Domínio que distingue
+        # analítica/sintética (ex.: TIPO_CTA, CTRG_CTA, dependendo da versão).
+        ("tipo", "Tipo Analítica/Sintética (opc., filtra analíticas)"),
     ]
 
     def __init__(

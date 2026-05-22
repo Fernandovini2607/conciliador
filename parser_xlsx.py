@@ -10,7 +10,10 @@ from openpyxl import load_workbook
 # Campos que enriquecem cada Transacao além da chave de match (data+valor).
 # Para planilha e Domínio são TODOS obrigatórios; para OFX nunca são preenchidos.
 # data_pagamento é exclusivo da planilha (Domínio não tem esse campo direto).
-CAMPOS_EXTRAS = ("data_emissao", "data_pagamento", "numero_nf", "cnpj", "fornecedor")
+CAMPOS_EXTRAS = (
+    "data_emissao", "data_pagamento",
+    "numero_nf", "cnpj", "fornecedor", "historico",
+)
 
 
 @dataclass
@@ -83,6 +86,11 @@ FORNECEDOR_ALIASES = {
     "razão social", "razao", "razão", "beneficiario", "beneficiário",
     "favorecido", "credor", "pagamento a", "para", "destinatario", "destinatário",
 }
+HISTORICO_ALIASES = {
+    "historico", "histórico", "hist", "historico contabil", "histórico contábil",
+    "descricao", "descrição", "complemento", "obs", "observacao", "observação",
+    "detalhes", "detalhe", "narrativa",
+}
 
 ALIAS_MAP = {
     "data": DATA_ALIASES,
@@ -92,14 +100,13 @@ ALIAS_MAP = {
     "numero_nf": NUMERO_NF_ALIASES,
     "cnpj": CNPJ_ALIASES,
     "fornecedor": FORNECEDOR_ALIASES,
+    "historico": HISTORICO_ALIASES,
 }
 
-# 7 campos obrigatórios para a planilha. O Domínio valida só 6 (sem data_pagamento)
-# em parser_dominio.extrair_pagamentos. OFX usa só (data, valor).
-CAMPOS_OBRIGATORIOS = (
-    "data", "data_pagamento", "valor",
-    "data_emissao", "numero_nf", "cnpj", "fornecedor",
-)
+# Apenas data (vencimento) e valor são chave de match — restante é opcional.
+# Planilhas reais variam muito: algumas têm só vencimento+valor; outras
+# trazem NF, CNPJ, fornecedor, histórico, etc.
+CAMPOS_OBRIGATORIOS = ("data", "valor")
 
 
 def _normaliza(texto: object) -> str:
@@ -181,9 +188,10 @@ def _mapeia_por_nome(cabecalho: list[str]) -> dict[str, int]:
     mapa: dict[str, int] = {}
     usados: set[int] = set()
     # Ordem importa: campos mais específicos antes dos genéricos
+    # (histórico antes de fornecedor pra ele pegar "descricao"/"obs" se houver)
     ordem = (
         "data_pagamento", "data_emissao",
-        "numero_nf", "cnpj", "fornecedor",
+        "numero_nf", "cnpj", "historico", "fornecedor",
         "data", "valor",
     )
     for campo in ordem:

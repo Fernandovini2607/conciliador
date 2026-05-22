@@ -7,8 +7,11 @@ import parser_dominio
 from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
 from dialogos_taxas import (
     DialogoConfigurarTaxas,
+    DialogoEditarLancamento,
     DialogoEditarPar,
+    DialogoEditarTransacao,
     DialogoLancamentoManual,
+    DialogoLancamentoManualAvulso,
     DialogoNovaRegra,
 )
 from lancamentos import LancamentoContabil, gerar_lancamentos_contabeis
@@ -38,7 +41,14 @@ CAMPOS = [
     ("numero_nf", "Nº NF"),
     ("cnpj", "CNPJ fornecedor"),
     ("fornecedor", "Fornecedor"),
+    ("historico", "Histórico"),
 ]
+# Apenas data (vencimento) e valor são chave de match — os demais podem
+# ser deixados em branco se a planilha não tiver a coluna.
+CAMPOS_OPCIONAIS = {
+    "data_pagamento", "data_emissao",
+    "numero_nf", "cnpj", "fornecedor", "historico",
+}
 
 
 class DialogoFiltroColuna(tk.Toplevel):
@@ -191,26 +201,37 @@ class DialogoMapeamento(tk.Toplevel):
             self,
             text=(
                 f"Cabeçalho detectado na linha {estrutura.linha_cabecalho}. "
-                "Escolha qual coluna corresponde a cada campo — o preview embaixo "
-                "mostra como cada linha será lida. Vermelho = não pôde ser convertido."
+                "Escolha qual coluna corresponde a cada campo. Campos opcionais "
+                "podem ficar como '(deixar vazia)' se a planilha não tiver "
+                "essa coluna. Apenas Vencimento e Valor são obrigatórios."
             ),
             wraplength=720,
         )
         info.grid(row=0, column=0, columnspan=2, padx=12, pady=(12, 8), sticky="w")
 
-        self.opcoes = [
+        # Primeira opção do dropdown = "deixar vazia". As demais são as
+        # colunas da planilha. Como o índice 0 é a opção vazia, na hora
+        # de resolver o idx real fazemos current() - 1.
+        self.SENTINELA_VAZIO = "(deixar vazia)"
+        self.opcoes = [self.SENTINELA_VAZIO] + [
             f"{idx + 1}. {nome if nome else '(sem nome)'}"
             for idx, nome in enumerate(estrutura.cabecalho)
         ]
         self.combos: dict[str, ttk.Combobox] = {}
 
         for i, (campo, rotulo) in enumerate(CAMPOS, start=1):
-            ttk.Label(self, text=f"{rotulo}:").grid(row=i, column=0, padx=12, pady=4, sticky="e")
+            sufixo = " (opcional)" if campo in CAMPOS_OPCIONAIS else ""
+            cor = "#555" if campo in CAMPOS_OPCIONAIS else "black"
+            ttk.Label(self, text=f"{rotulo}{sufixo}:", foreground=cor).grid(
+                row=i, column=0, padx=12, pady=4, sticky="e",
+            )
             cb = ttk.Combobox(self, values=self.opcoes, state="readonly", width=48)
             cb.grid(row=i, column=1, padx=(0, 12), pady=4, sticky="w")
             idx = estrutura.sugestao.get(campo)
-            if idx is not None and idx < len(self.opcoes):
-                cb.current(idx)
+            if idx is not None and 0 <= idx < len(estrutura.cabecalho):
+                cb.current(idx + 1)  # +1 por causa do sentinela "(deixar vazia)"
+            else:
+                cb.current(0)  # padrão = vazia (será obrigado a escolher se obrigatório)
             cb.bind("<<ComboboxSelected>>", lambda _e: self._atualiza_preview())
             self.combos[campo] = cb
 
@@ -224,7 +245,7 @@ class DialogoMapeamento(tk.Toplevel):
 
         cols = (
             "linha", "data", "data_pagamento", "data_emissao",
-            "valor", "numero_nf", "cnpj", "fornecedor",
+            "valor", "numero_nf", "cnpj", "fornecedor", "historico",
         )
         self.preview = ttk.Treeview(
             preview_frame, columns=cols, show="headings", height=self.PREVIEW_LINHAS,
@@ -237,6 +258,7 @@ class DialogoMapeamento(tk.Toplevel):
         self.preview.heading("numero_nf", text="Nº NF")
         self.preview.heading("cnpj", text="CNPJ")
         self.preview.heading("fornecedor", text="Fornecedor")
+        self.preview.heading("historico", text="Histórico")
         self.preview.column("linha", width=45, anchor="center")
         self.preview.column("data", width=80, anchor="w")
         self.preview.column("data_pagamento", width=80, anchor="w")
@@ -245,6 +267,7 @@ class DialogoMapeamento(tk.Toplevel):
         self.preview.column("numero_nf", width=70, anchor="center")
         self.preview.column("cnpj", width=120, anchor="w")
         self.preview.column("fornecedor", width=180, anchor="w")
+        self.preview.column("historico", width=200, anchor="w")
         self.preview.tag_configure("erro", background="#f8d7da")
         self.preview.pack(side="left", fill="both", expand=True)
 
@@ -268,7 +291,9 @@ class DialogoMapeamento(tk.Toplevel):
         for item in self.preview.get_children():
             self.preview.delete(item)
 
-        idxs = {campo: self.combos[campo].current() for campo, _ in CAMPOS}
+        # Resolve idx real: current() - 1 (porque opção 0 é "(deixar vazia)").
+        # Vazia → -1 (mesmo significado de "não selecionado" do código antigo).
+        idxs = {campo: self.combos[campo].current() - 1 for campo, _ in CAMPOS}
         base = self.estrutura.linha_cabecalho + 1
 
         total_validas = 0
@@ -290,6 +315,7 @@ class DialogoMapeamento(tk.Toplevel):
             cel_nf = _cel(idxs["numero_nf"])
             cel_cnpj = _cel(idxs["cnpj"])
             cel_forn = _cel(idxs["fornecedor"])
+            cel_hist = _cel(idxs["historico"])
 
             data_parsed = para_data(cel_data) if idxs["data"] >= 0 else None
             pgto_parsed = para_data(cel_pgto) if idxs["data_pagamento"] >= 0 else None
@@ -332,6 +358,7 @@ class DialogoMapeamento(tk.Toplevel):
                     _fmt_str(cel_nf),
                     _fmt_str(cel_cnpj),
                     _fmt_str(cel_forn),
+                    _fmt_str(cel_hist),
                 ),
                 tags=(tag,) if tag else (),
             )
@@ -350,16 +377,21 @@ class DialogoMapeamento(tk.Toplevel):
     def _confirmar(self) -> None:
         mapa: dict[str, int] = {}
         for campo, rotulo in CAMPOS:
-            sel = self.combos[campo].current()
+            # current() = 0 → "(deixar vazia)"; 1..N → coluna (idx = current-1)
+            sel_raw = self.combos[campo].current()
+            sel = sel_raw - 1
             if sel < 0:
+                if campo in CAMPOS_OPCIONAIS:
+                    continue  # campo opcional sem mapeamento — segue ok
                 messagebox.showwarning(
                     "Mapeamento incompleto",
-                    f"Selecione a coluna para '{rotulo}'.",
+                    f"Selecione a coluna para '{rotulo}' "
+                    "(esse campo é obrigatório).",
                     parent=self,
                 )
                 return
             mapa[campo] = sel
-        if len(set(mapa.values())) < len(CAMPOS):
+        if len(set(mapa.values())) < len(mapa):
             messagebox.showwarning(
                 "Colunas duplicadas",
                 "Cada campo precisa apontar para uma coluna diferente da planilha.",
@@ -391,6 +423,15 @@ class App(tk.Tk):
         # Estado de conciliação
         self.pares_conciliados: list[Par] = []          # auto + manual + sugestões aceitas
         self.pendentes_planilha: list[Transacao] = []
+        # Mesma lógica de "brutos" da OFX: pendentes da planilha sem desconto
+        # dos que viraram lançamento contábil (regra fornecedor ou manual).
+        self.pendentes_planilha_brutos: list[Transacao] = []
+        # Match no Domínio dos pendentes da planilha (sem OFX = Caixa geral):
+        # id(t_planilha) → {dominio: Transacao | None, diff_dias, diff_valor}
+        self.pendentes_planilha_dominio: dict[int, dict] = {}
+        # IDs de transacao_origem cuja regra automática deve ser IGNORADA
+        # (usuário excluiu/editou o lançamento contábil).
+        self.lancamentos_ignorados: set[int] = set()
         self.pendentes_ofx: list[Transacao] = []
         # "brutos": pendentes OFX sem desconto dos que viraram lançamentos
         # contábeis. self.pendentes_ofx (visível) = brutos - classificados.
@@ -464,49 +505,60 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ UI
 
     def _monta_ui(self) -> None:
-        topo = ttk.Frame(self, padding=10)
+        # --- Linha 1: Domínio (sistema contábil) ---
+        topo_dom = ttk.Frame(self, padding=(10, 10, 10, 4))
+        topo_dom.pack(fill="x")
+        ttk.Button(topo_dom, text="Conectar Domínio", command=self._conectar_dominio).pack(side="left", padx=4)
+        self.btn_empresa = ttk.Button(
+            topo_dom, text="Selecionar empresa", command=self._selecionar_empresa, state="disabled",
+        )
+        self.btn_empresa.pack(side="left", padx=4)
+        self.btn_fonte = ttk.Button(
+            topo_dom, text="Fonte: pagamentos", command=self._configurar_fonte_dominio, state="disabled",
+        )
+        self.btn_fonte.pack(side="left", padx=4)
+        self.btn_fonte_plano = ttk.Button(
+            topo_dom, text="Fonte: plano contas",
+            command=self._configurar_fonte_plano_contas, state="disabled",
+        )
+        self.btn_fonte_plano.pack(side="left", padx=4)
+        self.btn_carregar_dominio = ttk.Button(
+            topo_dom, text="Carregar pagamentos", command=self._carregar_dominio, state="disabled",
+        )
+        self.btn_carregar_dominio.pack(side="left", padx=4)
+        self.btn_carregar_plano = ttk.Button(
+            topo_dom, text="Carregar plano contas",
+            command=self._carregar_plano_contas, state="disabled",
+        )
+        self.btn_carregar_plano.pack(side="left", padx=4)
+        self.lbl_dominio = ttk.Label(topo_dom, text="(Domínio não conectado)")
+        self.lbl_dominio.pack(side="left", padx=8)
+
+        # --- Linha 2: Planilha ---
+        topo = ttk.Frame(self, padding=(10, 0, 10, 4))
         topo.pack(fill="x")
         ttk.Button(topo, text="Abrir planilha (.xlsx)", command=self._abrir_planilha).pack(side="left", padx=4)
         self.btn_editar_colunas = ttk.Button(
             topo, text="Editar colunas", command=self._editar_colunas, state="disabled",
         )
         self.btn_editar_colunas.pack(side="left", padx=4)
+        self.btn_limpar_planilha = ttk.Button(
+            topo, text="Limpar planilha", command=self._limpar_planilha, state="disabled",
+        )
+        self.btn_limpar_planilha.pack(side="left", padx=4)
         self.lbl_planilha = ttk.Label(topo, text="(nenhuma planilha carregada)")
         self.lbl_planilha.pack(side="left", padx=8)
 
-        topo2 = ttk.Frame(self, padding=(10, 0, 10, 10))
+        # --- Linha 3: OFX ---
+        topo2 = ttk.Frame(self, padding=(10, 0, 10, 6))
         topo2.pack(fill="x")
         ttk.Button(topo2, text="Importar OFX", command=self._abrir_ofx).pack(side="left", padx=4)
+        self.btn_limpar_ofx = ttk.Button(
+            topo2, text="Limpar OFX", command=self._limpar_ofx, state="disabled",
+        )
+        self.btn_limpar_ofx.pack(side="left", padx=4)
         self.lbl_ofx = ttk.Label(topo2, text="(nenhum OFX carregado)")
         self.lbl_ofx.pack(side="left", padx=8)
-
-        topo3 = ttk.Frame(self, padding=(10, 0, 10, 6))
-        topo3.pack(fill="x")
-        ttk.Button(topo3, text="Conectar Domínio", command=self._conectar_dominio).pack(side="left", padx=4)
-        self.btn_empresa = ttk.Button(
-            topo3, text="Selecionar empresa", command=self._selecionar_empresa, state="disabled",
-        )
-        self.btn_empresa.pack(side="left", padx=4)
-        self.btn_fonte = ttk.Button(
-            topo3, text="Fonte: pagamentos", command=self._configurar_fonte_dominio, state="disabled",
-        )
-        self.btn_fonte.pack(side="left", padx=4)
-        self.btn_fonte_plano = ttk.Button(
-            topo3, text="Fonte: plano contas",
-            command=self._configurar_fonte_plano_contas, state="disabled",
-        )
-        self.btn_fonte_plano.pack(side="left", padx=4)
-        self.btn_carregar_dominio = ttk.Button(
-            topo3, text="Carregar pagamentos", command=self._carregar_dominio, state="disabled",
-        )
-        self.btn_carregar_dominio.pack(side="left", padx=4)
-        self.btn_carregar_plano = ttk.Button(
-            topo3, text="Carregar plano contas",
-            command=self._carregar_plano_contas, state="disabled",
-        )
-        self.btn_carregar_plano.pack(side="left", padx=4)
-        self.lbl_dominio = ttk.Label(topo3, text="(Domínio não conectado)")
-        self.lbl_dominio.pack(side="left", padx=8)
 
         acoes = ttk.Frame(self, padding=(10, 0, 10, 8))
         acoes.pack(fill="x")
@@ -613,16 +665,22 @@ class App(tk.Tk):
         ttk.Button(topo, text="Limpar", command=self._limpa_filtros_planilha).pack(
             side="left", padx=4,
         )
+        ttk.Button(
+            topo, text="Editar lançamento selecionado",
+            command=self._editar_lancamento_planilha,
+        ).pack(side="left", padx=4)
         self.lbl_filtro_planilha = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_planilha.pack(side="left", padx=8)
 
         # Estado dos filtros por coluna (estilo Excel)
         self.filtros_col_planilha: dict[str, set[str] | None] = {}
+        # iid → Transacao (para resolver seleção do botão Editar)
+        self.itens_tree_planilha: dict[str, Transacao] = {}
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor")
+        cols = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor", "historico")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("linha", "Linha", 55, "center"),
@@ -633,6 +691,7 @@ class App(tk.Tk):
             ("nf", "Nº NF", 85, "center"),
             ("cnpj", "CNPJ", 130, "w"),
             ("fornecedor", "Fornecedor", 250, "w"),
+            ("historico", "Histórico", 250, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -653,13 +712,17 @@ class App(tk.Tk):
             t.extras.get("numero_nf", "") or "",
             t.extras.get("cnpj", "") or "",
             t.extras.get("fornecedor", "") or "",
+            t.extras.get("historico", "") or "",
         )
 
-    COLS_PLANILHA = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor")
+    COLS_PLANILHA = (
+        "linha", "venc", "pagto", "emis", "valor",
+        "nf", "cnpj", "fornecedor", "historico",
+    )
     LABELS_PLANILHA = {
         "linha": "Linha", "venc": "Vencimento", "pagto": "Pagamento",
         "emis": "Emissão", "valor": "Valor", "nf": "Nº NF",
-        "cnpj": "CNPJ", "fornecedor": "Fornecedor",
+        "cnpj": "CNPJ", "fornecedor": "Fornecedor", "historico": "Histórico",
     }
 
     def _on_click_header_planilha(self, event: tk.Event) -> None:
@@ -684,6 +747,57 @@ class App(tk.Tk):
         self.filtro_planilha.set("")
         self.filtros_col_planilha.clear()
         self._atualiza_headers_planilha()
+
+    def _editar_lancamento_planilha(self) -> None:
+        """Edita o lançamento da planilha selecionado. Como mudar dados de
+        entrada invalida pares e pendentes já calculados, limpamos os
+        resultados — o usuário re-executa a conciliação depois."""
+        sel = self.tree_planilha.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha na aba Planilha para editar.",
+            )
+            return
+        t = self.itens_tree_planilha.get(sel[0])
+        if t is None:
+            return
+
+        dlg = DialogoEditarTransacao(self, t)
+        self.wait_window(dlg)
+        if not dlg.resultado:
+            return
+        r = dlg.resultado
+
+        # Aplica no objeto Transacao (in-place — referências em
+        # transacoes_planilha continuam apontando pro mesmo objeto)
+        t.data = r["data"]
+        t.data_pagamento = r["data_pagamento"]
+        t.valor = r["valor"]
+        # extras: setar/remover conforme valor preenchido
+        if r["data_emissao"]:
+            t.extras["data_emissao"] = r["data_emissao"]
+        elif "data_emissao" in t.extras:
+            del t.extras["data_emissao"]
+        # data_pagamento também espelhado em extras (compat com outros lugares)
+        if r["data_pagamento"]:
+            t.extras["data_pagamento"] = r["data_pagamento"]
+        elif "data_pagamento" in t.extras:
+            del t.extras["data_pagamento"]
+        for k in ("numero_nf", "cnpj", "fornecedor", "historico"):
+            if r[k]:
+                t.extras[k] = r[k]
+            elif k in t.extras:
+                del t.extras[k]
+
+        self._render_aba_planilha()
+        # Invalida conciliação/resultados — usuário precisa rodar de novo
+        self._limpa_resultados()
+        messagebox.showinfo(
+            "Lançamento atualizado",
+            "Dados salvos. Os resultados anteriores de conciliação foram "
+            "limpos — clique em 'Conciliar' para refazer com os novos dados.",
+        )
 
     def _monta_aba_ofx_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -879,11 +993,12 @@ class App(tk.Tk):
         self._aba_conciliados = aba
 
         cols = (
-            "tipo", "data", "pagto", "valor", "emissao",
+            "tipo", "origem", "data", "pagto", "valor", "emissao",
             "nf", "cnpj", "fornecedor", "memo_ofx", "diff",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
+        tree.heading("origem", text="Origem")
         tree.heading("data", text="Vencimento")
         tree.heading("pagto", text="Pagamento")
         tree.heading("valor", text="Valor")
@@ -893,7 +1008,8 @@ class App(tk.Tk):
         tree.heading("fornecedor", text="Fornecedor")
         tree.heading("memo_ofx", text="Memo OFX")
         tree.heading("diff", text="Diferenças")
-        tree.column("tipo", width=65, anchor="w")
+        tree.column("tipo", width=60, anchor="w")
+        tree.column("origem", width=130, anchor="w")
         tree.column("data", width=85, anchor="center")
         tree.column("pagto", width=85, anchor="center")
         tree.column("valor", width=95, anchor="e")
@@ -934,59 +1050,89 @@ class App(tk.Tk):
         )
         instr.pack(anchor="w", padx=6, pady=(6, 4))
 
-        corpo = ttk.Frame(aba)
-        corpo.pack(fill="both", expand=True)
+        # IMPORTANTE: o rodapé é packado ANTES dos blocos com expand=True,
+        # pra ficar ancorado embaixo mesmo se a janela encolher (caso contrário
+        # ele sai da tela porque os blocos expandidos roubam o espaço).
+        rodape = ttk.Frame(aba)
+        rodape.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            rodape, text="Conciliar selecionadas (escolha 1 linha em cada bloco) →",
+            command=self._conciliar_selecionadas,
+        ).pack(side="left", padx=4, pady=2)
 
-        lado_p = ttk.LabelFrame(corpo, text="Só na planilha")
-        lado_p.pack(side="left", fill="both", expand=True, padx=(6, 3), pady=(0, 4))
+        # ----- Bloco PLANILHA (em cima): tabela + ações da planilha
+        lado_p = ttk.LabelFrame(aba, text="Só na planilha")
+        lado_p.pack(side="top", fill="both", expand=True, padx=6, pady=(0, 3))
 
-        cols_p = ("data", "valor", "nf", "fornecedor")
+        # Botões da planilha — packados PRIMEIRO no fundo do LabelFrame pra
+        # ficarem grudados embaixo da tabela mesmo com a tabela expandindo.
+        acoes_p = ttk.Frame(lado_p)
+        acoes_p.pack(side="bottom", fill="x", padx=4, pady=(2, 4))
+        ttk.Button(
+            acoes_p, text="Lançamento manual",
+            command=self._lancamento_manual_pend_planilha,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            acoes_p, text="Criar regra (fornecedor)",
+            command=self._criar_lancamento_padrao_planilha,
+        ).pack(side="left", padx=2)
+
+        # Tabela planilha
+        tabela_p = ttk.Frame(lado_p)
+        tabela_p.pack(side="top", fill="both", expand=True)
+        cols_p = ("data", "pagto", "valor", "nf", "fornecedor", "historico")
         self.tree_pend_p = ttk.Treeview(
-            lado_p, columns=cols_p, show="headings", selectmode="browse",
+            tabela_p, columns=cols_p, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
-            ("data", "Vencimento", 90, "center"),
-            ("valor", "Valor", 95, "e"),
-            ("nf", "Nº NF", 70, "center"),
-            ("fornecedor", "Fornecedor", 220, "w"),
+            ("data", "Vencimento", 95, "center"),
+            ("pagto", "Pagamento", 95, "center"),
+            ("valor", "Valor", 105, "e"),
+            ("nf", "Nº NF", 75, "center"),
+            ("fornecedor", "Fornecedor", 280, "w"),
+            ("historico", "Histórico", 280, "w"),
         ]:
             self.tree_pend_p.heading(c, text=t)
             self.tree_pend_p.column(c, width=w, anchor=a)
-        sb_p = ttk.Scrollbar(lado_p, orient="vertical", command=self.tree_pend_p.yview)
+        sb_p = ttk.Scrollbar(tabela_p, orient="vertical", command=self.tree_pend_p.yview)
         self.tree_pend_p.configure(yscrollcommand=sb_p.set)
         self.tree_pend_p.pack(side="left", fill="both", expand=True)
         sb_p.pack(side="right", fill="y")
 
-        lado_o = ttk.LabelFrame(corpo, text="Só no OFX")
-        lado_o.pack(side="left", fill="both", expand=True, padx=(3, 6), pady=(0, 4))
+        # ----- Bloco OFX (embaixo): tabela + ações do OFX
+        lado_o = ttk.LabelFrame(aba, text="Só no OFX")
+        lado_o.pack(side="top", fill="both", expand=True, padx=6, pady=(3, 4))
 
-        cols_o = ("data", "documento", "valor", "descricao")
+        acoes_o = ttk.Frame(lado_o)
+        acoes_o.pack(side="bottom", fill="x", padx=4, pady=(2, 4))
+        ttk.Button(
+            acoes_o, text="Lançamento manual",
+            command=self._lancamento_manual_pend_ofx,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            acoes_o, text="Criar regra (memo)",
+            command=self._criar_lancamento_padrao,
+        ).pack(side="left", padx=2)
+
+        tabela_o = ttk.Frame(lado_o)
+        tabela_o.pack(side="top", fill="both", expand=True)
+        cols_o = ("data", "banco", "documento", "valor", "descricao")
         self.tree_pend_o = ttk.Treeview(
-            lado_o, columns=cols_o, show="headings", selectmode="browse",
+            tabela_o, columns=cols_o, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
-            ("data", "Data pagamento", 90, "center"),
-            ("documento", "Documento", 100, "w"),
+            ("data", "Data pagamento", 105, "center"),
+            ("banco", "Banco", 150, "w"),
+            ("documento", "Documento", 110, "w"),
             ("valor", "Valor", 105, "e"),
-            ("descricao", "Memo OFX", 240, "w"),
+            ("descricao", "Memo OFX", 420, "w"),
         ]:
             self.tree_pend_o.heading(c, text=t)
             self.tree_pend_o.column(c, width=w, anchor=a)
-        sb_o = ttk.Scrollbar(lado_o, orient="vertical", command=self.tree_pend_o.yview)
+        sb_o = ttk.Scrollbar(tabela_o, orient="vertical", command=self.tree_pend_o.yview)
         self.tree_pend_o.configure(yscrollcommand=sb_o.set)
         self.tree_pend_o.pack(side="left", fill="both", expand=True)
         sb_o.pack(side="right", fill="y")
-
-        botoes = ttk.Frame(aba)
-        botoes.pack(side="bottom", fill="x")
-        ttk.Button(
-            botoes, text="Conciliar selecionadas →",
-            command=self._conciliar_selecionadas,
-        ).pack(side="left", padx=6, pady=6)
-        ttk.Button(
-            botoes, text="Criar lançamento padrão (do OFX selecionado)",
-            command=self._criar_lancamento_padrao,
-        ).pack(side="left", padx=6, pady=6)
 
     def _monta_aba_sugestoes(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1049,8 +1195,9 @@ class App(tk.Tk):
         instr = ttk.Label(
             aba,
             text=(
-                "Pares Planilha × OFX que TAMBÉM batem no Domínio "
-                "(data de vencimento + valor + Nº NF)."
+                "Lançamentos que batem no Domínio (data + valor + NF). "
+                "Inclui pares Planilha × OFX e também pendentes da planilha "
+                "do Caixa geral (sem OFX) que casaram com o Domínio."
             ),
             foreground="#1f3a68",
             font=("TkDefaultFont", 9, "italic"),
@@ -1058,11 +1205,12 @@ class App(tk.Tk):
         instr.pack(side="top", fill="x", padx=6, pady=(6, 0))
 
         cols = (
-            "tipo", "data", "pagto", "valor", "emissao",
+            "tipo", "origem", "data", "pagto", "valor", "emissao",
             "nf", "cnpj", "fornecedor", "memo_ofx", "diff_dom", "status_dom",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
+        tree.heading("origem", text="Origem")
         tree.heading("data", text="Vencimento")
         tree.heading("pagto", text="Pagamento")
         tree.heading("valor", text="Valor")
@@ -1073,16 +1221,17 @@ class App(tk.Tk):
         tree.heading("memo_ofx", text="Memo OFX")
         tree.heading("diff_dom", text="Δ Domínio")
         tree.heading("status_dom", text="Status (Domínio)")
-        tree.column("tipo", width=60, anchor="w")
+        tree.column("tipo", width=55, anchor="w")
+        tree.column("origem", width=120, anchor="w")
         tree.column("data", width=85, anchor="center")
         tree.column("pagto", width=85, anchor="center")
         tree.column("valor", width=90, anchor="e")
         tree.column("emissao", width=85, anchor="center")
         tree.column("nf", width=70, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
-        tree.column("fornecedor", width=160, anchor="w")
-        tree.column("memo_ofx", width=140, anchor="w")
-        tree.column("diff_dom", width=115, anchor="center")
+        tree.column("fornecedor", width=140, anchor="w")
+        tree.column("memo_ofx", width=130, anchor="w")
+        tree.column("diff_dom", width=110, anchor="center")
         tree.column("status_dom", width=110, anchor="center")
         tree.tag_configure("aberto", background="#d4edda")    # verde
         tree.tag_configure("parcial", background="#cfe2ff")   # azul claro
@@ -1132,6 +1281,9 @@ class App(tk.Tk):
         tree.tag_configure("ok", background="#d4edda")
         tree.tag_configure("falta_dominio", background="#fff3cd")
         tree.tag_configure("falta_concil", background="#f8d7da")
+        # Pendentes da planilha (Caixa geral, sem OFX)
+        tree.tag_configure("caixa_ok", background="#cce5ff")          # azul claro
+        tree.tag_configure("caixa_falta", background="#e2e3e5")       # cinza claro
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
@@ -1139,7 +1291,8 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
 
         self.tree_dominio = tree
-        self._itens_comparacao: dict[str, Par] = {}  # iid → Par (pra atalho)
+        # iid → Par (para linhas P×OFX) OU Transacao (para Caixa geral)
+        self._itens_comparacao: dict[str, Par | Transacao] = {}
 
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x")
@@ -1168,8 +1321,17 @@ class App(tk.Tk):
                 "para editar.",
             )
             return
-        par = self._itens_comparacao.get(sel[0])
-        if par is None or par.dominio is not None:
+        item = self._itens_comparacao.get(sel[0])
+        if not isinstance(item, Par):
+            messagebox.showwarning(
+                "Linha inválida",
+                "Edição via diálogo só está disponível para linhas amarelas "
+                "(pares Planilha×OFX). Para editar lançamentos de Caixa geral, "
+                "use a aba 'Planilha'.",
+            )
+            return
+        par = item
+        if par.dominio is not None:
             messagebox.showwarning(
                 "Linha inválida",
                 "Edição só faz sentido para linhas amarelas (Conciliado, "
@@ -1216,83 +1378,145 @@ class App(tk.Tk):
             )
 
     def _lancar_manual(self) -> None:
-        """Cria UM lançamento contábil avulso a partir do par amarelo
-        selecionado, sem criar regra. Útil pra lançamentos pontuais."""
+        """Cria UM lançamento contábil avulso a partir da linha selecionada.
+        Funciona em:
+        - Linha amarela (Par P×OFX sem Domínio): banco vem do OFX
+        - Linha cinza (Caixa geral, pendente planilha sem Domínio):
+          banco='Caixa geral'
+        """
         sel = self.tree_dominio.selection()
         if not sel:
             messagebox.showinfo(
                 "Sem seleção",
-                "Selecione uma linha amarela (Conciliado, falta no Domínio) "
-                "para lançar manualmente.",
+                "Selecione uma linha (amarela ou cinza) sem match no Domínio.",
             )
             return
-        par = self._itens_comparacao.get(sel[0])
-        if par is None or par.dominio is not None:
-            messagebox.showwarning(
-                "Linha inválida",
-                "O lançamento manual só faz sentido para linhas amarelas "
-                "(Conciliado, falta no Domínio).",
-            )
-            return
-        forn = par.planilha.extras.get("fornecedor", "") or ""
-        sugestao = f"Pagto. {forn}" if forn else ""
-        dlg = DialogoLancamentoManual(
-            self, par, plano_contas=self.plano_contas,
-            sugestao_historico=sugestao,
-        )
-        self.wait_window(dlg)
-        if not dlg.resultado:
+        item = self._itens_comparacao.get(sel[0])
+        if item is None:
             return
 
-        # Cria o lançamento avulso — data de pagamento = compensação no OFX
-        lanc = LancamentoContabil(
-            data=par.ofx.data,
-            historico=dlg.resultado["historico"],
-            valor=par.planilha.valor,
-            banco=par.ofx.extras.get("banco", "") or "",
-            memo_original=par.ofx.descricao or "",
-            padrao_match="(manual)",
-            conta=dlg.resultado["conta"],
-            tipo_regra="manual",
-            fornecedor=forn,
-            cnpj=par.planilha.extras.get("cnpj", "") or "",
-            transacao_origem=par.ofx,
-            par_origem=par,
-        )
+        if isinstance(item, Par):
+            par = item
+            if par.dominio is not None:
+                messagebox.showwarning(
+                    "Linha inválida",
+                    "O lançamento manual só faz sentido para linhas SEM "
+                    "match no Domínio.",
+                )
+                return
+            forn = par.planilha.extras.get("fornecedor", "") or ""
+            sugestao = f"Pagto. {forn}" if forn else ""
+            dlg = DialogoLancamentoManual(
+                self, par, plano_contas=self.plano_contas,
+                sugestao_historico=sugestao,
+            )
+            self.wait_window(dlg)
+            if not dlg.resultado:
+                return
+            lanc = LancamentoContabil(
+                data=par.ofx.data,
+                historico=dlg.resultado["historico"],
+                valor=par.planilha.valor,
+                banco=par.ofx.extras.get("banco", "") or "",
+                memo_original=par.ofx.descricao or "",
+                padrao_match="(manual)",
+                conta=dlg.resultado["conta"],
+                tipo_regra="manual",
+                fornecedor=forn,
+                cnpj=par.planilha.extras.get("cnpj", "") or "",
+                transacao_origem=par.ofx,
+                par_origem=par,
+            )
+        else:
+            # Pendente da planilha (Caixa geral, sem OFX)
+            t = item
+            # Bloqueia se já tem match no Domínio
+            match = self.pendentes_planilha_dominio.get(id(t))
+            if match and match.get("dominio") is not None:
+                messagebox.showwarning(
+                    "Linha inválida",
+                    "Esse lançamento já tem match no Domínio (linha azul). "
+                    "Não precisa lançar manualmente.",
+                )
+                return
+            forn = t.extras.get("fornecedor", "") or ""
+            hist_plan = t.extras.get("historico", "") or ""
+            sugestao = f"Pagto. {forn}" if forn else hist_plan
+            dlg = DialogoLancamentoManualAvulso(
+                self, t, origem="planilha",
+                plano_contas=self.plano_contas,
+                sugestao_historico=sugestao,
+            )
+            self.wait_window(dlg)
+            if not dlg.resultado:
+                return
+            lanc = LancamentoContabil(
+                data=t.data_pagamento or t.data,
+                historico=dlg.resultado["historico"],
+                valor=t.valor,
+                banco="Caixa geral",
+                memo_original="",
+                padrao_match="(manual planilha)",
+                conta=dlg.resultado["conta"],
+                tipo_regra="manual_planilha",
+                fornecedor=forn,
+                cnpj=t.extras.get("cnpj", "") or "",
+                transacao_origem=t,
+                par_origem=None,
+            )
+
         self.lancamentos_manuais.append(lanc)
         self._gerar_lancamentos_contabeis()
-        self._comparar_com_dominio()  # remove o par da Comparação
+        self._comparar_com_dominio()  # remove a linha da Comparação
 
     def _criar_regra_fornecedor(self) -> None:
-        """Atalho: cria regra do tipo 'fornecedor' a partir do par amarelo
-        (conciliado mas falta no Domínio) selecionado na aba Comparação."""
+        """Atalho: cria regra do tipo 'fornecedor' a partir da linha
+        selecionada na aba Comparação. Funciona tanto em par amarelo
+        (P×OFX sem Domínio) quanto em pendente Caixa geral (cinza)."""
         if not self._exigir_empresa("criar regras"):
             return
         sel = self.tree_dominio.selection()
         if not sel:
             messagebox.showinfo(
                 "Sem seleção",
-                "Selecione uma linha amarela (Conciliado, falta no Domínio) "
-                "para criar uma regra de fornecedor.",
+                "Selecione uma linha (amarela ou cinza) sem match no "
+                "Domínio para criar uma regra de fornecedor.",
             )
             return
-        par = self._itens_comparacao.get(sel[0])
-        if par is None or par.dominio is not None:
-            messagebox.showwarning(
-                "Linha inválida",
-                "A regra de fornecedor só faz sentido para linhas amarelas "
-                "(Conciliado, falta no Domínio).",
-            )
+        item = self._itens_comparacao.get(sel[0])
+        if item is None:
             return
-        cnpj = par.planilha.extras.get("cnpj", "") or ""
-        fornecedor = par.planilha.extras.get("fornecedor", "") or ""
-        # Pré-popular com CNPJ se houver, senão nome
-        sugestao = cnpj if cnpj else fornecedor
-        if not sugestao.strip():
+
+        # Extrai dados da planilha (tanto Par quanto Transacao têm extras)
+        if isinstance(item, Par):
+            par = item
+            if par.dominio is not None:
+                messagebox.showwarning(
+                    "Linha inválida",
+                    "Regra só faz sentido para linhas SEM match no Domínio.",
+                )
+                return
+            t_planilha = par.planilha
+        else:
+            t_planilha = item
+            match = self.pendentes_planilha_dominio.get(id(t_planilha))
+            if match and match.get("dominio") is not None:
+                messagebox.showwarning(
+                    "Linha inválida",
+                    "Esse lançamento já tem match no Domínio. Não precisa "
+                    "criar regra.",
+                )
+                return
+        cnpj = t_planilha.extras.get("cnpj", "") or ""
+        fornecedor = t_planilha.extras.get("fornecedor", "") or ""
+        historico = t_planilha.extras.get("historico", "") or ""
+        # Prioridade: CNPJ → fornecedor → histórico
+        sugestao = cnpj.strip() or fornecedor.strip() or historico.strip()
+        if not sugestao:
             messagebox.showwarning(
-                "Sem dados do fornecedor",
-                "O par selecionado não tem CNPJ nem nome de fornecedor "
-                "preenchidos.",
+                "Sem dados",
+                "A linha selecionada não tem CNPJ, fornecedor nem "
+                "histórico preenchidos.",
             )
             return
         dlg = DialogoNovaRegra(
@@ -1336,8 +1560,22 @@ class App(tk.Tk):
         )
         self.lbl_lancamentos_empresa.pack(side="top", fill="x", padx=6, pady=(0, 4))
 
+        # Rodapé com botões — packado antes do corpo pra ficar ancorado embaixo
+        rodape_lanc = ttk.Frame(aba)
+        rodape_lanc.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            rodape_lanc, text="Editar lançamento",
+            command=self._editar_lancamento_contabil,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            rodape_lanc, text="Excluir lançamento",
+            command=self._excluir_lancamento_contabil,
+        ).pack(side="left", padx=2)
+
+        corpo_lanc = ttk.Frame(aba)
+        corpo_lanc.pack(side="top", fill="both", expand=True)
         cols = ("data", "banco", "valor", "conta", "historico", "memo", "padrao")
-        tree = ttk.Treeview(aba, columns=cols, show="headings")
+        tree = ttk.Treeview(corpo_lanc, columns=cols, show="headings")
         for c, t, w, a in [
             ("data", "Data pagto", 100, "center"),
             ("banco", "Banco", 120, "w"),
@@ -1349,11 +1587,13 @@ class App(tk.Tk):
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
-        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        sb = ttk.Scrollbar(corpo_lanc, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_lancamentos = tree
+        # iid → LancamentoContabil (para resolver seleção no botão)
+        self.itens_lancamentos: dict[str, LancamentoContabil] = {}
 
     def _monta_aba_plano_contas(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1443,18 +1683,79 @@ class App(tk.Tk):
     def _selecionar_empresa(self) -> None:
         if self.conn_dominio is None:
             return
+        emp_anterior = self.cfg.get("dominio_empresa") or {}
         dlg = DialogoSelecionarEmpresa(
-            self, self.conn_dominio, self.cfg.get("dominio_empresa"),
+            self, self.conn_dominio, emp_anterior or None,
         )
         self.wait_window(dlg)
         if dlg.empresa is None:
             return
+
+        # Detecta TROCA de empresa (não primeira seleção, ID diferente)
+        codi_ant = emp_anterior.get("codi_emp") if emp_anterior else None
+        codi_nov = dlg.empresa.get("codi_emp")
+        trocou = codi_ant is not None and codi_ant != codi_nov
+
+        if trocou:
+            # Tem algo importado da empresa anterior? Confirma antes de descartar.
+            tem_dados = bool(
+                self.transacoes_planilha or self.transacoes_ofx
+                or self.transacoes_dominio or self.plano_contas
+            )
+            if tem_dados:
+                if not messagebox.askyesno(
+                    "Trocar empresa",
+                    f"Trocar de '{emp_anterior.get('razao', codi_ant)}' "
+                    f"para '{dlg.empresa.get('razao', codi_nov)}'?\n\n"
+                    "Os dados de Planilha, OFX, Domínio e Plano de contas "
+                    "carregados serão DESCARTADOS (são específicos da "
+                    "empresa atual). Você terá que importar novamente os "
+                    "dados da nova empresa.",
+                ):
+                    return
+
+            # Limpa tudo que é específico da empresa antiga
+            self._limpar_dados_empresa()
+
         self.cfg["dominio_empresa"] = dlg.empresa
         config.salvar(self.cfg)
         self._atualiza_label_dominio()
         # Regras de taxas mudam com a empresa — recalcula lançamentos
         self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
+
+    def _limpar_dados_empresa(self) -> None:
+        """Limpa planilha, OFX, Domínio e plano de contas — invocado ao
+        trocar de empresa. As regras de taxas continuam salvas por empresa
+        no config.json (não são apagadas)."""
+        # Planilha
+        self.transacoes_planilha = []
+        self.caminho_planilha = None
+        self.estrutura_planilha = None
+        self.mapeamento_planilha = None
+        self.lbl_planilha.config(text="(nenhuma planilha carregada)")
+        self.btn_editar_colunas.config(state="disabled")
+        self.btn_limpar_planilha.config(state="disabled")
+        # OFX
+        self.transacoes_ofx = []
+        self.caminhos_ofx = []
+        self.lbl_ofx.config(text="(nenhum OFX carregado)")
+        self.btn_limpar_ofx.config(state="disabled")
+        # Domínio (pagamentos da empresa antiga)
+        self.transacoes_dominio = []
+        # Plano de contas (da empresa antiga)
+        self.plano_contas = []
+        # Re-renderiza abas de origem agora vazias + zera resultados
+        self._render_aba_planilha()
+        self._render_aba_ofx()
+        if hasattr(self, "tree_dominio_dados"):
+            for item in self.tree_dominio_dados.get_children():
+                self.tree_dominio_dados.delete(item)
+        if hasattr(self, "tree_plano_contas"):
+            for item in self.tree_plano_contas.get_children():
+                self.tree_plano_contas.delete(item)
+        self._atualiza_botao()
+        self._limpa_resultados()
 
     def _atualiza_label_dominio(self) -> None:
         cred = parser_dominio.load_odbc_config()
@@ -1569,13 +1870,13 @@ class App(tk.Tk):
 
     def _comparar_com_dominio(self) -> None:
         # Valida pré-condições com mensagens claras
-        if not self.pares_conciliados:
+        if not self.pares_conciliados and not self.pendentes_planilha_brutos:
             messagebox.showwarning(
-                "Sem conciliação",
+                "Sem dados",
                 "Antes de comparar com o Domínio, é preciso:\n"
                 "1. Abrir a planilha (.xlsx)\n"
-                "2. Importar o OFX\n"
-                "3. Clicar em 'Conciliar' (gera os pares Planilha × OFX)",
+                "2. (Opcional) Importar o OFX\n"
+                "3. Clicar em 'Conciliar' (gera pares e pendentes da planilha)",
             )
             return
         if not self.transacoes_dominio:
@@ -1588,35 +1889,87 @@ class App(tk.Tk):
                 "4. Clicar em 'Carregar pagamentos'",
             )
             return
-        # Refiltra conciliados pela regra triple
+        # Refiltra conciliados E pendentes pela regra triple
         self._filtrar_conciliados_por_dominio()
         # Regenera lançamentos: pares sem Domínio podem virar lançamento
         self._gerar_lancamentos_contabeis()
         self._render_conciliados()
         self._redesenha_abas()
+        self._recalcular_comparacao()
+        self.notebook.select(self._aba_dominio)
 
-        # Monta a aba Comparação detalhada (verde/amarelo/vermelho).
-        # Pares "sem Domínio" que viraram lançamento contábil são ocultados.
-        resultados: list[tuple[str, Par, Transacao | None]] = []
+    def _recalcular_comparacao(self) -> None:
+        """Recalcula e re-renderiza a aba Comparação. Diferente de
+        _comparar_com_dominio: NÃO mostra mensagens de erro nem força
+        foco na aba. Pode ser chamado de qualquer ponto que mude o
+        estado (lançamento manual, criação de regra, etc)."""
+        if not self.transacoes_dominio:
+            # Nada a fazer — aba Comparação só existe com Domínio carregado
+            return
+        # Refiltra (caso pendentes_planilha_brutos tenha mudado)
+        # — não chama _filtrar_conciliados_por_dominio aqui pra evitar loop
+        # com _gerar_lancamentos_contabeis. O filtro já foi feito antes.
+        self._renderizar_comparacao()
+
+    def _renderizar_comparacao(self) -> None:
+        """Monta a lista de resultados e chama _render_aba_dominio.
+        Reutilizada por _comparar_com_dominio e _recalcular_comparacao."""
+        # Monta a aba Comparação detalhada.
+        # Linhas com regra/manual já aplicada são ocultadas.
+        # Cada item: (status, planilha, ofx_ou_None, dominio_ou_None,
+        #             diff_dias_dominio, diff_valor_dominio)
+        from decimal import Decimal
+        resultados: list[tuple] = []
         usados: set[int] = set()
+
+        # 1) Pares P×OFX
         for par in self.pares_conciliados:
             if par.dominio is not None:
-                resultados.append(("ok", par, par.dominio))
+                resultados.append((
+                    "ok", par.planilha, par.ofx, par.dominio,
+                    par.diff_dias_dominio, par.diff_valor_dominio, par,
+                ))
                 usados.add(id(par.dominio))
             else:
                 if id(par) in self.ids_pares_classificados:
-                    continue  # já tem regra de fornecedor — virou lançamento
-                resultados.append(("falta_dominio", par, None))
+                    continue  # já virou lançamento (regra/manual)
+                resultados.append((
+                    "falta_dominio", par.planilha, par.ofx, None,
+                    0, Decimal("0"), par,
+                ))
+
+        # 2) Pendentes da planilha (Caixa geral, sem OFX)
+        # Esconde os que já viraram lançamento contábil (regra fornecedor
+        # ou lançamento manual avulso da planilha)
+        ids_p_classificadas = {
+            id(l.transacao_origem) for l in self.lancamentos_contabeis
+            if l.tipo_regra in ("manual_planilha", "fornecedor_planilha")
+            and l.transacao_origem is not None
+        }
+        for t_p in self.pendentes_planilha_brutos:
+            if id(t_p) in ids_p_classificadas:
+                continue
+            match = self.pendentes_planilha_dominio.get(id(t_p))
+            if match and match.get("dominio") is not None:
+                resultados.append((
+                    "caixa_ok", t_p, None, match["dominio"],
+                    match["diff_dias"], match["diff_valor"], None,
+                ))
+                usados.add(id(match["dominio"]))
+            else:
+                resultados.append((
+                    "caixa_falta", t_p, None, None,
+                    0, Decimal("0"), None,
+                ))
 
         # Pagamentos no Domínio que ninguém casou
         sobras_dominio = [t for t in self.transacoes_dominio if id(t) not in usados]
 
         self._render_aba_dominio(resultados, sobras_dominio)
-        self.notebook.select(self._aba_dominio)
 
     def _render_aba_dominio(
         self,
-        resultados: list[tuple[str, Par, Transacao | None]],
+        resultados: list[tuple],
         sobras_dominio: list[Transacao],
     ) -> None:
         for item in self.tree_dominio.get_children():
@@ -1626,44 +1979,57 @@ class App(tk.Tk):
         def _fmt_data(d) -> str:
             return d.strftime("%d/%m/%Y") if d else ""
 
-        n_ok = n_falta_dom = 0
-        for status, par, t_dom in resultados:
-            ok = status == "ok"
-            if ok:
+        rotulos = {
+            "ok": "Conciliado P×OFX e no Domínio",
+            "falta_dominio": "Conciliado P×OFX, falta no Domínio",
+            "caixa_ok": "Caixa geral (no Domínio)",
+            "caixa_falta": "Caixa geral (falta no Domínio)",
+        }
+        n_ok = n_falta_dom = n_caixa_ok = n_caixa_falta = 0
+        for status, t_planilha, t_ofx, t_dom, _diff_d, _diff_v, par in resultados:
+            if status == "ok":
                 n_ok += 1
-                rotulo = "Conciliado e no Domínio"
-            else:
+            elif status == "falta_dominio":
                 n_falta_dom += 1
-                rotulo = "Conciliado, falta no Domínio"
+            elif status == "caixa_ok":
+                n_caixa_ok += 1
+            else:
+                n_caixa_falta += 1
+            rotulo = rotulos.get(status, status)
             # Extras: prioriza Domínio se houver, depois planilha
-            origem_extras = t_dom.extras if t_dom else par.planilha.extras
-            extras_fallback = par.planilha.extras
+            origem_extras = t_dom.extras if t_dom else t_planilha.extras
+            extras_fallback = t_planilha.extras
             emissao = origem_extras.get("data_emissao") or extras_fallback.get("data_emissao")
             nf = origem_extras.get("numero_nf") or extras_fallback.get("numero_nf", "")
             cnpj = origem_extras.get("cnpj") or extras_fallback.get("cnpj", "")
             fornecedor = origem_extras.get("fornecedor") or extras_fallback.get("fornecedor", "")
+            memo = t_ofx.descricao if t_ofx else "(Caixa geral — sem OFX)"
 
             iid = self.tree_dominio.insert(
                 "", "end",
                 values=(
                     rotulo,
-                    par.planilha.data.strftime("%d/%m/%Y"),
-                    f"{par.planilha.valor:.2f}",
+                    t_planilha.data.strftime("%d/%m/%Y"),
+                    f"{t_planilha.valor:.2f}",
                     _fmt_data(emissao),
                     nf,
                     cnpj,
                     fornecedor,
-                    par.ofx.descricao,
+                    memo,
                 ),
-                tags=("ok" if ok else "falta_dominio",),
+                tags=(status,),
             )
-            self._itens_comparacao[iid] = par
+            # Pares vão pro dict; pendentes da planilha (sem par) também
+            # entram, mas com a Transacao da planilha — handlers fazem isinstance
+            self._itens_comparacao[iid] = par if par is not None else t_planilha
 
-        # Pares só no Domínio (que ninguém conciliou) NÃO são mostrados aqui —
-        # foco da aba Comparação é nos pares P×O e se eles foram para o Domínio.
+        # Pares só no Domínio (que ninguém conciliou) NÃO são mostrados aqui.
         self.notebook.tab(
             7,
-            text=f"Comparação (ok {n_ok} | falta no Domínio {n_falta_dom})",
+            text=(
+                f"Comparação (ok {n_ok} | falta dom {n_falta_dom} | "
+                f"caixa ok {n_caixa_ok} | caixa falta {n_caixa_falta})"
+            ),
         )
 
     # ------------------------------------------------------ Carregar dados
@@ -1684,13 +2050,29 @@ class App(tk.Tk):
             messagebox.showerror("Planilha vazia", "A planilha não contém dados.")
             return
 
-        dlg = DialogoMapeamento(self, estrutura)
-        self.wait_window(dlg)
-        if dlg.mapeamento is None:
-            return
+        # Tenta aplicar o mapeamento salvo da empresa atual. Se todos os
+        # campos casarem pelo nome da coluna, pula o diálogo e usa direto.
+        # Se faltar algum, abre o diálogo com os campos resolvidos
+        # pré-preenchidos para o usuário completar.
+        mapa_resolvido, faltando = self._resolver_mapeamento_salvo(estrutura.cabecalho)
+        usou_salvo_direto = False
+        mapeamento_final: dict[str, int] | None = None
+
+        if mapa_resolvido and not faltando:
+            mapeamento_final = mapa_resolvido
+            usou_salvo_direto = True
+        else:
+            # Pré-preenche a sugestão da estrutura com o que conseguimos resolver
+            if mapa_resolvido:
+                estrutura.sugestao = {**estrutura.sugestao, **mapa_resolvido}
+            dlg = DialogoMapeamento(self, estrutura)
+            self.wait_window(dlg)
+            if dlg.mapeamento is None:
+                return
+            mapeamento_final = dlg.mapeamento
 
         try:
-            transacoes = extrair_transacoes(estrutura, dlg.mapeamento)
+            transacoes = extrair_transacoes(estrutura, mapeamento_final)
         except Exception as e:
             messagebox.showerror("Erro ao extrair dados", str(e))
             return
@@ -1704,13 +2086,26 @@ class App(tk.Tk):
 
         self.caminho_planilha = Path(caminho)
         self.estrutura_planilha = estrutura
-        self.mapeamento_planilha = dlg.mapeamento
+        self.mapeamento_planilha = mapeamento_final
         self.transacoes_planilha = transacoes
+        # Persiste o mapeamento da empresa (regrava sempre — re-sincroniza
+        # nomes caso a planilha tenha mudado os rótulos)
+        self._set_mapeamento_empresa(mapeamento_final, estrutura.cabecalho)
         self._atualiza_label_planilha()
         self.btn_editar_colunas.config(state="normal")
+        self.btn_limpar_planilha.config(state="normal")
         self._atualiza_botao()
         self._render_aba_planilha()
         self._limpa_resultados()
+
+        if usou_salvo_direto:
+            emp = self._empresa_selecionada() or {}
+            messagebox.showinfo(
+                "Mapeamento aplicado",
+                "Mapeamento salvo da empresa "
+                f"'{emp.get('nome', emp.get('codi_emp', ''))}' aplicado "
+                "automaticamente. Use 'Editar colunas' para revisar/alterar.",
+            )
 
     def _editar_colunas(self) -> None:
         if not self.estrutura_planilha:
@@ -1735,6 +2130,8 @@ class App(tk.Tk):
             )
         self.transacoes_planilha = transacoes
         self.mapeamento_planilha = dlg.mapeamento
+        # Re-salva o mapeamento da empresa com a versão editada
+        self._set_mapeamento_empresa(dlg.mapeamento, estrutura.cabecalho)
         self._atualiza_label_planilha()
         self._atualiza_botao()
         self._render_aba_planilha()
@@ -1748,6 +2145,8 @@ class App(tk.Tk):
         for campo, rotulo in CAMPOS:
             idx = self.mapeamento_planilha.get(campo)
             if idx is None:
+                if campo in CAMPOS_OPCIONAIS:
+                    continue  # opcional ausente — nem mostra
                 nome = "?"
             elif idx < len(cab) and cab[idx]:
                 nome = cab[idx]
@@ -1808,6 +2207,50 @@ class App(tk.Tk):
         self.lbl_ofx.config(
             text=f"{prefixo} — {len(self.transacoes_ofx)} pagamentos{extra_ign}"
         )
+        self.btn_limpar_ofx.config(state="normal")
+        self._atualiza_botao()
+        self._render_aba_ofx()
+        self._limpa_resultados()
+
+    def _limpar_planilha(self) -> None:
+        """Remove a planilha importada e tudo que dependa dela (pares,
+        pendentes, sugestões). OFX e Domínio permanecem carregados."""
+        if not self.transacoes_planilha and not self.caminho_planilha:
+            return
+        if not messagebox.askyesno(
+            "Confirmar",
+            "Limpar a planilha importada?\n\n"
+            "Os resultados de conciliação serão descartados. O OFX e o "
+            "Domínio carregados continuam.",
+        ):
+            return
+        self.transacoes_planilha = []
+        self.caminho_planilha = None
+        self.estrutura_planilha = None
+        self.mapeamento_planilha = None
+        self.lbl_planilha.config(text="(nenhuma planilha carregada)")
+        self.btn_editar_colunas.config(state="disabled")
+        self.btn_limpar_planilha.config(state="disabled")
+        self._atualiza_botao()
+        self._render_aba_planilha()
+        self._limpa_resultados()
+
+    def _limpar_ofx(self) -> None:
+        """Remove o(s) OFX importado(s) e tudo que dependa deles. Planilha
+        e Domínio permanecem carregados."""
+        if not self.transacoes_ofx and not self.caminhos_ofx:
+            return
+        if not messagebox.askyesno(
+            "Confirmar",
+            "Limpar o(s) OFX importado(s)?\n\n"
+            "Os resultados de conciliação serão descartados. A planilha "
+            "e o Domínio carregados continuam.",
+        ):
+            return
+        self.transacoes_ofx = []
+        self.caminhos_ofx = []
+        self.lbl_ofx.config(text="(nenhum OFX carregado)")
+        self.btn_limpar_ofx.config(state="disabled")
         self._atualiza_botao()
         self._render_aba_ofx()
         self._limpa_resultados()
@@ -1821,6 +2264,9 @@ class App(tk.Tk):
     def _limpa_resultados(self) -> None:
         self.pares_conciliados = []
         self.pendentes_planilha = []
+        self.pendentes_planilha_brutos = []
+        self.pendentes_planilha_dominio = {}
+        self.lancamentos_ignorados = set()
         self.pendentes_ofx = []
         self.pendentes_ofx_brutos = []
         self.sugestoes = []
@@ -1841,8 +2287,9 @@ class App(tk.Tk):
             self.transacoes_planilha, self.transacoes_ofx,
         )
         self.pares_conciliados = pares
-        self.pendentes_planilha = pend_p
         # Brutos são a fonte da verdade; visível é derivado depois.
+        self.pendentes_planilha_brutos = list(pend_p)
+        self.pendentes_planilha = list(pend_p)
         self.pendentes_ofx_brutos = list(pend_o)
         self.pendentes_ofx = list(pend_o)
         # Primeiro classifica taxas (remove de pendentes_ofx visível)
@@ -1868,26 +2315,30 @@ class App(tk.Tk):
         return "".join(c for c in str(v or "") if c.isdigit())
 
     def _filtrar_conciliados_por_dominio(self) -> None:
-        """Para cada par P×O em pares_conciliados, busca match no Domínio:
+        """Match com Domínio em DUAS fases, aplicado a:
+        - pares_conciliados (Planilha×OFX) — atualiza par.dominio
+        - pendentes_planilha_brutos (sem OFX = Caixa geral) — atualiza
+          self.pendentes_planilha_dominio[id(t)]
 
         FASE 1 (exato): data_vencimento + valor + NF iguais.
         FASE 2 (aproximado): pelo menos 2 de 3 critérios (CNPJ, data_venc,
-        valor) iguais. O critério restante pode ter diferença — registrada
-        em par.diff_dias_dominio / par.diff_valor_dominio.
+        valor) iguais. O critério restante pode ter diferença.
 
-        Cada Transacao do Domínio só pode casar com 1 par.
+        Cada Transacao do Domínio só pode casar com 1 item (pares têm
+        prioridade sobre pendentes).
         """
+        from collections import defaultdict
+        from decimal import Decimal
+
         # Limpa associações anteriores
         for par in self.pares_conciliados:
             par.dominio = None
             par.diff_dias_dominio = 0
             par.diff_valor_dominio = Decimal("0")
+        self.pendentes_planilha_dominio = {}
 
         if not self.transacoes_dominio:
             return
-
-        from collections import defaultdict
-        from decimal import Decimal
 
         def _quant(v: Decimal) -> Decimal:
             return v.quantize(Decimal("0.01"))
@@ -1903,6 +2354,8 @@ class App(tk.Tk):
             indice[chave].append(t)
 
         usados: set[int] = set()
+
+        # Pares têm prioridade na FASE 1
         pares_sem_match: list[Par] = []
         for par in self.pares_conciliados:
             chave = (
@@ -1917,27 +2370,44 @@ class App(tk.Tk):
             else:
                 pares_sem_match.append(par)
 
+        # Pendentes da planilha (Caixa geral) — FASE 1 nos restantes
+        pendentes_sem_match: list[Transacao] = []
+        for t_p in self.pendentes_planilha_brutos:
+            chave = (
+                t_p.data,
+                _quant(t_p.valor),
+                self._normaliza_nf(t_p.extras.get("numero_nf", "")),
+            )
+            candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
+            if candidatos:
+                self.pendentes_planilha_dominio[id(t_p)] = {
+                    "dominio": candidatos[0],
+                    "diff_dias": 0,
+                    "diff_valor": Decimal("0"),
+                }
+                usados.add(id(candidatos[0]))
+            else:
+                pendentes_sem_match.append(t_p)
+
         # ---------- FASE 2: match aproximado (2 de 3 — CNPJ, data, valor)
         dominio_disponivel = [
             t for t in self.transacoes_dominio if id(t) not in usados
         ]
-        for par in pares_sem_match:
-            cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
-            data_p = par.planilha.data
-            valor_p = _quant(par.planilha.valor)
 
+        def _melhor_match_dominio(
+            cnpj_p_norm: str, data_p, valor_p,
+        ) -> tuple[int | None, int, Decimal]:
+            """Procura na lista dominio_disponivel o melhor match 2-de-3.
+            Devolve (idx ou None, diff_dias, diff_valor)."""
             melhor_idx: int | None = None
-            # Score: (-matches, diff_dias, diff_valor) — minimizar
             melhor_score: tuple | None = None
-            melhor_diff_dias = 0
-            melhor_diff_valor = Decimal("0")
-
+            melhor_d = 0
+            melhor_v = Decimal("0")
             for i, t in enumerate(dominio_disponivel):
                 cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
                 valor_d = _quant(t.valor)
-
                 matches = 0
-                if cnpj_p and cnpj_p == cnpj_d:
+                if cnpj_p_norm and cnpj_p_norm == cnpj_d:
                     matches += 1
                 if data_p == t.data:
                     matches += 1
@@ -1945,21 +2415,42 @@ class App(tk.Tk):
                     matches += 1
                 if matches < 2:
                     continue
-
-                diff_dias = abs((data_p - t.data).days)
-                diff_valor = abs(valor_p - valor_d)
-                score = (-matches, diff_dias, diff_valor)
+                dd = abs((data_p - t.data).days)
+                dv = abs(valor_p - valor_d)
+                score = (-matches, dd, dv)
                 if melhor_score is None or score < melhor_score:
                     melhor_score = score
                     melhor_idx = i
-                    melhor_diff_dias = diff_dias
-                    melhor_diff_valor = diff_valor
+                    melhor_d = dd
+                    melhor_v = dv
+            return melhor_idx, melhor_d, melhor_v
 
-            if melhor_idx is not None:
-                t_dom = dominio_disponivel.pop(melhor_idx)
+        # Pares têm prioridade na FASE 2 também
+        for par in pares_sem_match:
+            cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
+            idx, dd, dv = _melhor_match_dominio(
+                cnpj_p, par.planilha.data, _quant(par.planilha.valor),
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
                 par.dominio = t_dom
-                par.diff_dias_dominio = melhor_diff_dias
-                par.diff_valor_dominio = melhor_diff_valor
+                par.diff_dias_dominio = dd
+                par.diff_valor_dominio = dv
+                usados.add(id(t_dom))
+
+        # Pendentes da planilha (Caixa geral) — FASE 2 no que sobrou
+        for t_p in pendentes_sem_match:
+            cnpj_p = self._normaliza_cnpj(t_p.extras.get("cnpj", ""))
+            idx, dd, dv = _melhor_match_dominio(
+                cnpj_p, t_p.data, _quant(t_p.valor),
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                self.pendentes_planilha_dominio[id(t_p)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
                 usados.add(id(t_dom))
 
     def _atualiza_resumo(self) -> None:
@@ -2042,6 +2533,9 @@ class App(tk.Tk):
             diff_dias=d_dias, diff_valor=d_valor,
         )
         self.pares_conciliados.append(novo)
+        # Remove o pendente planilha da fonte (brutos); visível derivado depois
+        if t_p in self.pendentes_planilha_brutos:
+            self.pendentes_planilha_brutos.remove(t_p)
         if t_p in self.pendentes_planilha:
             self.pendentes_planilha.remove(t_p)
         # Remove o pendente OFX da fonte (brutos) e da visível
@@ -2067,10 +2561,10 @@ class App(tk.Tk):
             ):
                 return
         self.pares_conciliados.remove(par)
-        self.pendentes_planilha.append(par.planilha)
-        # Devolve o OFX à fonte (brutos); visível será recalculado
+        # Devolve os pendentes às fontes (brutos); visíveis serão recalculados
+        self.pendentes_planilha_brutos.append(par.planilha)
         self.pendentes_ofx_brutos.append(par.ofx)
-        self.pendentes_planilha.sort(key=lambda t: (t.data, t.valor))
+        self.pendentes_planilha_brutos.sort(key=lambda t: (t.data, t.valor))
         self.pendentes_ofx_brutos.sort(key=lambda t: (t.data, t.valor))
         self._gerar_lancamentos_contabeis()  # re-deriva pendentes_ofx visível
         self._recalcula_sugestoes()
@@ -2085,6 +2579,8 @@ class App(tk.Tk):
         self._render_pendentes()
         self._render_sugestoes()
         self._render_aba_conciliados_dominio()
+        # Atualiza Comparação também (no-op se Domínio não carregado)
+        self._recalcular_comparacao()
         self.notebook.tab(3, text=f"Conciliados ({len(self.pares_conciliados)})")
         self.notebook.tab(
             4, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
@@ -2105,10 +2601,12 @@ class App(tk.Tk):
             # Pagamento: prioriza data_pagamento da planilha; fallback = data do OFX
             pagto = par.planilha.data_pagamento or par.ofx.data
             pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
+            origem = par.ofx.extras.get("banco", "") or "OFX"
             iid = self.tree_conciliados.insert(
                 "", "end",
                 values=(
                     tipo_txt,
+                    origem,
                     par.planilha.data.strftime("%d/%m/%Y"),
                     pagto_txt,
                     f"{par.planilha.valor:.2f}",
@@ -2132,9 +2630,11 @@ class App(tk.Tk):
                 "", "end",
                 values=(
                     t.data.strftime("%d/%m/%Y"),
+                    self._fmt_data(t.data_pagamento),
                     f"{t.valor:.2f}",
                     t.extras.get("numero_nf", ""),
                     t.extras.get("fornecedor", ""),
+                    t.extras.get("historico", "") or "",
                 ),
             )
             self.itens_pendentes_p[iid] = t
@@ -2147,6 +2647,7 @@ class App(tk.Tk):
                 "", "end",
                 values=(
                     t.data.strftime("%d/%m/%Y"),
+                    t.extras.get("banco", "") or "",
                     t.extras.get("documento", "") or "",
                     f"{t.valor:.2f}",
                     t.descricao,
@@ -2179,24 +2680,28 @@ class App(tk.Tk):
     def _render_aba_conciliados_dominio(self) -> None:
         for item in self.tree_conciliados_dominio.get_children():
             self.tree_conciliados_dominio.delete(item)
-        # Só mostra pares triple-matched
+
+        def _tag_status(status: str) -> str:
+            sl = (status or "").lower()
+            if sl.startswith("pag"):
+                return "paga"
+            if sl.startswith("parc"):
+                return "parcial"
+            if sl.startswith("ab"):
+                return "aberto"
+            return ""
+
+        # 1) Pares P×OFX triple-matched
         pares = [p for p in self.pares_conciliados if p.dominio is not None]
         for par in pares:
             tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
+            origem = par.ofx.extras.get("banco", "") or "OFX"
             emissao = par.planilha.extras.get("data_emissao")
             emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
             pagto = par.planilha.data_pagamento or par.ofx.data
             pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
 
             status = (par.dominio.extras.get("status", "") if par.dominio else "") or ""
-            tag = ""
-            sl = status.lower()
-            if sl.startswith("pag"):
-                tag = "paga"
-            elif sl.startswith("parc"):
-                tag = "parcial"
-            elif sl.startswith("ab"):
-                tag = "aberto"
 
             # Diferenças com o Domínio (fase 2 — match aproximado)
             diff_dom = ""
@@ -2208,6 +2713,7 @@ class App(tk.Tk):
                 "", "end",
                 values=(
                     tipo_txt,
+                    origem,
                     par.planilha.data.strftime("%d/%m/%Y"),
                     pagto_txt,
                     f"{par.planilha.valor:.2f}",
@@ -2219,9 +2725,58 @@ class App(tk.Tk):
                     diff_dom,
                     status,
                 ),
-                tags=(tag,) if tag else (),
+                tags=(_tag_status(status),) if _tag_status(status) else (),
             )
-        self.notebook.tab(6, text=f"Conciliados × Domínio ({len(pares)})")
+
+        # 2) Pendentes da planilha (Caixa geral) que casaram com Domínio
+        caixa_dominio = [
+            t for t in self.pendentes_planilha_brutos
+            if (m := self.pendentes_planilha_dominio.get(id(t)))
+            and m.get("dominio") is not None
+        ]
+        for t_p in caixa_dominio:
+            match = self.pendentes_planilha_dominio[id(t_p)]
+            t_dom = match["dominio"]
+            d_d = match.get("diff_dias", 0)
+            d_v = match.get("diff_valor", 0)
+
+            emissao = t_p.extras.get("data_emissao")
+            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
+            pagto = t_p.data_pagamento or t_p.data
+            pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
+
+            status = (t_dom.extras.get("status", "") if t_dom else "") or ""
+
+            diff_dom = ""
+            if d_d or d_v:
+                diff_dom = f"Δ {d_d}d, R$ {d_v:.2f}"
+
+            memo_txt = (
+                f"Histórico: {t_p.extras.get('historico', '')}"
+                if t_p.extras.get("historico") else "(sem OFX)"
+            )
+
+            self.tree_conciliados_dominio.insert(
+                "", "end",
+                values=(
+                    "Caixa",                              # Tipo
+                    "Caixa geral",                        # Origem
+                    t_p.data.strftime("%d/%m/%Y"),
+                    pagto_txt,
+                    f"{t_p.valor:.2f}",
+                    emissao_txt,
+                    t_p.extras.get("numero_nf", ""),
+                    t_p.extras.get("cnpj", ""),
+                    t_p.extras.get("fornecedor", ""),
+                    memo_txt,
+                    diff_dom,
+                    status,
+                ),
+                tags=(_tag_status(status),) if _tag_status(status) else (),
+            )
+
+        total = len(pares) + len(caixa_dominio)
+        self.notebook.tab(6, text=f"Conciliados × Domínio ({total})")
 
     # ---------------- Abas de dados crus (origem) ----------------
 
@@ -2232,6 +2787,8 @@ class App(tk.Tk):
     def _render_aba_planilha(self) -> None:
         for item in self.tree_planilha.get_children():
             self.tree_planilha.delete(item)
+        if hasattr(self, "itens_tree_planilha"):
+            self.itens_tree_planilha.clear()
         termo = self.filtro_planilha.get().strip().lower() if hasattr(self, "filtro_planilha") else ""
         cols = self.COLS_PLANILHA
         filtros = getattr(self, "filtros_col_planilha", {})
@@ -2249,7 +2806,9 @@ class App(tk.Tk):
                     break
             if pula:
                 continue
-            self.tree_planilha.insert("", "end", values=row)
+            iid = self.tree_planilha.insert("", "end", values=row)
+            if hasattr(self, "itens_tree_planilha"):
+                self.itens_tree_planilha[iid] = t
             mostradas += 1
         total = len(self.transacoes_planilha)
         self.notebook.tab(0, text=f"Planilha ({total})")
@@ -2378,6 +2937,84 @@ class App(tk.Tk):
         )
         return False
 
+    # ----- Mapeamento da planilha persistido por empresa -----
+    # Salvo POR NOME DE COLUNA pra resistir a reordenação. Cada empresa tem
+    # o seu próprio dict {campo: nome_da_coluna}. Sem empresa selecionada,
+    # nada é salvo — usuário precisa mapear manualmente.
+
+    @staticmethod
+    def _normaliza_nome_coluna(nome: object) -> str:
+        if nome is None:
+            return ""
+        return str(nome).strip().casefold()
+
+    def _get_mapeamento_empresa(self) -> dict[str, str]:
+        """Devolve o mapeamento salvo (campo → nome de coluna) da empresa
+        atual. Dict vazio quando não há empresa ou não há mapeamento salvo."""
+        emp = self._empresa_selecionada()
+        if not emp:
+            return {}
+        chave = str(emp["codi_emp"])
+        salvo = self.cfg.get("mapeamentos_planilha_por_empresa", {}).get(chave)
+        return dict(salvo) if isinstance(salvo, dict) else {}
+
+    def _set_mapeamento_empresa(
+        self, mapa_idx: dict[str, int], cabecalho: list,
+    ) -> None:
+        """Salva o mapeamento da empresa atual convertendo idx → nome da
+        coluna. Sem empresa selecionada, vira no-op (não persiste)."""
+        emp = self._empresa_selecionada()
+        if not emp:
+            return
+        chave = str(emp["codi_emp"])
+        por_nome: dict[str, str] = {}
+        for campo, idx in mapa_idx.items():
+            if 0 <= idx < len(cabecalho):
+                nome = cabecalho[idx]
+                if nome:
+                    por_nome[campo] = str(nome).strip()
+        if not por_nome:
+            return
+        self.cfg.setdefault("mapeamentos_planilha_por_empresa", {})[chave] = por_nome
+        config.salvar(self.cfg)
+
+    def _resolver_mapeamento_salvo(
+        self, cabecalho: list,
+    ) -> tuple[dict[str, int], list[str]]:
+        """Traduz o mapeamento salvo (nome → idx) usando o cabeçalho atual.
+        Devolve (mapa_idx_resolvido, campos_faltando). Campos cujo nome não
+        bate exatamente ficam fora do dict e entram na lista de faltando."""
+        salvo = self._get_mapeamento_empresa()
+        if not salvo:
+            # Sem mapeamento salvo, todos os obrigatórios "faltam"
+            return {}, [c for c, _ in CAMPOS if c not in CAMPOS_OPCIONAIS]
+        # Índice: nome normalizado → idx (primeira ocorrência ganha)
+        idx_por_nome: dict[str, int] = {}
+        for i, nome in enumerate(cabecalho):
+            chave = self._normaliza_nome_coluna(nome)
+            if chave and chave not in idx_por_nome:
+                idx_por_nome[chave] = i
+        resolvido: dict[str, int] = {}
+        faltando: list[str] = []
+        usados: set[int] = set()
+        for campo, _ in CAMPOS:
+            nome_salvo = salvo.get(campo)
+            if not nome_salvo:
+                # Opcional sem mapeamento salvo é OK — não conta como faltando
+                if campo not in CAMPOS_OPCIONAIS:
+                    faltando.append(campo)
+                continue
+            idx = idx_por_nome.get(self._normaliza_nome_coluna(nome_salvo))
+            if idx is None or idx in usados:
+                # Opcional que estava salvo mas não bate com cabeçalho atual:
+                # ignora silenciosamente (planilha pode não ter mais essa col)
+                if campo not in CAMPOS_OPCIONAIS:
+                    faltando.append(campo)
+                continue
+            resolvido[campo] = idx
+            usados.add(idx)
+        return resolvido, faltando
+
     def _abrir_config_taxas(self) -> None:
         if not self._exigir_empresa("configurar regras de taxas"):
             return
@@ -2397,6 +3034,153 @@ class App(tk.Tk):
             f"(empresa {emp['codi_emp']})"
         )
         self.wait_window(dlg)
+
+    def _lancamento_manual_pend_planilha(self) -> None:
+        """Lança um lançamento contábil avulso a partir de UM pendente da
+        planilha selecionado. Não cria regra. A transação some dos Pendentes
+        (vai pra aba Lançamentos contábeis)."""
+        sel = self.tree_pend_p.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione um lançamento na lista da PLANILHA (lado esquerdo) "
+                "para fazer o lançamento manual.",
+            )
+            return
+        t = self.itens_pendentes_p[sel[0]]
+        forn = t.extras.get("fornecedor", "") or ""
+        sugestao = f"Pagto. {forn}" if forn else ""
+        dlg = DialogoLancamentoManualAvulso(
+            self, t, origem="planilha",
+            plano_contas=self.plano_contas,
+            sugestao_historico=sugestao,
+        )
+        self.wait_window(dlg)
+        if not dlg.resultado:
+            return
+        lanc = LancamentoContabil(
+            data=t.data_pagamento or t.data,  # prioriza pagamento se mapeado
+            historico=dlg.resultado["historico"],
+            valor=t.valor,
+            # Sem OFX correspondente — é dinheiro/caixa, não passou pelo banco
+            banco="Caixa geral",
+            memo_original="",
+            padrao_match="(manual planilha)",
+            conta=dlg.resultado["conta"],
+            tipo_regra="manual_planilha",
+            fornecedor=forn,
+            cnpj=t.extras.get("cnpj", "") or "",
+            transacao_origem=t,
+            par_origem=None,
+        )
+        self.lancamentos_manuais.append(lanc)
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
+        self._atualiza_resumo()
+
+    def _lancamento_manual_pend_ofx(self) -> None:
+        """Lança um lançamento contábil avulso a partir de UM pendente do OFX
+        selecionado. Não cria regra. A transação some dos Pendentes (vai pra
+        aba Lançamentos contábeis)."""
+        sel = self.tree_pend_o.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione um lançamento na lista do OFX (lado direito) "
+                "para fazer o lançamento manual.",
+            )
+            return
+        t = self.itens_pendentes_o[sel[0]]
+        memo = (t.descricao or "").strip()
+        sugestao = memo[:60] if memo else ""
+        dlg = DialogoLancamentoManualAvulso(
+            self, t, origem="ofx",
+            plano_contas=self.plano_contas,
+            sugestao_historico=sugestao,
+        )
+        self.wait_window(dlg)
+        if not dlg.resultado:
+            return
+        lanc = LancamentoContabil(
+            data=t.data,
+            historico=dlg.resultado["historico"],
+            valor=t.valor,
+            banco=t.extras.get("banco", "") or "",
+            memo_original=t.descricao or "",
+            padrao_match="(manual OFX)",
+            conta=dlg.resultado["conta"],
+            tipo_regra="manual_ofx",
+            fornecedor="",
+            cnpj="",
+            transacao_origem=t,
+            par_origem=None,
+        )
+        self.lancamentos_manuais.append(lanc)
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
+        self._atualiza_resumo()
+
+    def _criar_lancamento_padrao_planilha(self) -> None:
+        """Atalho: cria uma regra do tipo 'fornecedor' a partir do pendente
+        da planilha selecionado. A regra é salva imediatamente nas regras
+        da empresa atual e vai gerar lançamento sempre que o CNPJ/nome
+        aparecer."""
+        if not self._exigir_empresa("criar regras de taxas"):
+            return
+        sel = self.tree_pend_p.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione um lançamento na lista da PLANILHA (lado esquerdo) "
+                "para criar uma regra a partir dele.",
+            )
+            return
+        t = self.itens_pendentes_p[sel[0]]
+        cnpj = (t.extras.get("cnpj", "") or "").strip()
+        fornecedor = (t.extras.get("fornecedor", "") or "").strip()
+        historico = (t.extras.get("historico", "") or "").strip()
+        # Pré-popula com CNPJ; senão fornecedor; senão histórico
+        sugestao = cnpj or fornecedor or historico
+        if not sugestao:
+            messagebox.showwarning(
+                "Sem dados",
+                "O lançamento selecionado não tem CNPJ, fornecedor nem "
+                "histórico — não dá pra gerar um padrão automático.",
+            )
+            return
+
+        # Sugestão do histórico contábil da regra: prioriza fornecedor;
+        # senão usa o histórico da planilha se houver
+        sugestao_hist = (
+            f"Pagto. {fornecedor}" if fornecedor
+            else (historico if historico else "")
+        )
+        regra_inicial = {
+            "padrao": sugestao,
+            "historico": sugestao_hist,
+            "tipo": "fornecedor",
+        }
+        dlg = DialogoNovaRegra(
+            self, regra_inicial, plano_contas=self.plano_contas,
+        )
+        emp = self._empresa_selecionada()
+        dlg.title(f"Criar regra (fornecedor) — {emp['razao'][:50]} (empresa {emp['codi_emp']})")
+        self.wait_window(dlg)
+        if not dlg.regra:
+            return
+
+        # Garante que a regra seja tipo "fornecedor" mesmo que o diálogo não
+        # exponha esse campo (compat com diálogos antigos)
+        dlg.regra.setdefault("tipo", "fornecedor")
+        if dlg.regra.get("tipo") != "fornecedor":
+            dlg.regra["tipo"] = "fornecedor"
+
+        regras = self._get_regras_empresa()
+        regras.append(dlg.regra)
+        self._set_regras_empresa(regras)
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
+        self._atualiza_resumo()
 
     def _criar_lancamento_padrao(self) -> None:
         """Atalho: cria uma regra de taxa a partir do pendente OFX
@@ -2424,7 +3208,14 @@ class App(tk.Tk):
             )
             return
 
-        regra_inicial = {"padrao": sugestao, "historico": ""}
+        # Pré-popula o banco: regra só vale pra esse banco específico, evita
+        # falso positivo quando memos parecidos vêm de bancos diferentes.
+        banco_origem = (transacao.extras.get("banco", "") or "").strip()
+        regra_inicial = {
+            "padrao": sugestao,
+            "historico": "",
+            "banco": banco_origem,
+        }
         dlg = DialogoNovaRegra(
             self, regra_inicial, plano_contas=self.plano_contas,
         )
@@ -2447,36 +3238,89 @@ class App(tk.Tk):
         - Pendentes OFX brutos → regras tipo memo
         - Pares conciliados sem Domínio → regras tipo fornecedor
 
-        Deriva ``pendentes_ofx`` (visível, sem classificados) e marca os pares
-        que viraram lançamento em ``self.ids_pares_classificados`` (usado pra
-        ocultá-los na aba Comparação).
+        Deriva ``pendentes_ofx`` e ``pendentes_planilha`` (visíveis, sem os
+        classificados manualmente) e marca os pares que viraram lançamento
+        em ``self.ids_pares_classificados`` (usado pra ocultá-los na aba
+        Comparação).
+
+        Lançamentos manuais avulsos (tipo_regra=manual_planilha/manual_ofx)
+        consomem a transação correspondente dos Pendentes.
         """
         regras = self._get_regras_empresa()
         # Candidatos a "fornecedor": pares P×O sem match no Domínio
+        # E também pendentes da planilha (que não casaram com OFX) —
+        # essas regras viram lançamento com banco='Caixa geral'.
         pares_sem_dominio = [
             p for p in self.pares_conciliados if p.dominio is None
         ]
         automaticos = gerar_lancamentos_contabeis(
             self.pendentes_ofx_brutos, regras, pares_sem_dominio,
+            pendentes_planilha=self.pendentes_planilha_brutos,
         )
-        # Lançamentos manuais persistem se o par ainda está sem Domínio.
-        # Se o par sumiu (ex.: usuário desfez conciliação), removemos o manual.
+        # Remove os lançamentos cujo usuário marcou como ignorado (excluiu
+        # ou editou — a versão editada vai como manual em lancamentos_manuais)
+        if self.lancamentos_ignorados:
+            automaticos = [
+                l for l in automaticos
+                if l.transacao_origem is None
+                or id(l.transacao_origem) not in self.lancamentos_ignorados
+            ]
+        # Filtros de persistência dos manuais:
+        # - manual (com par_origem): par precisa ainda existir
+        # - manual_planilha: transação precisa ainda estar em pendentes_planilha
+        #   OU já ter sido conciliada (o par some, mas o lançamento fica)
+        # - manual_ofx: transação precisa ainda estar em pendentes_ofx_brutos
         ids_pares_atuais = {id(p) for p in self.pares_conciliados}
-        self.lancamentos_manuais = [
-            l for l in self.lancamentos_manuais
-            if l.par_origem is None or id(l.par_origem) in ids_pares_atuais
-        ]
+        ids_pendentes_p = {id(t) for t in self.pendentes_planilha}
+        ids_pendentes_o = {id(t) for t in self.pendentes_ofx_brutos}
+
+        def _manual_vivo(l: LancamentoContabil) -> bool:
+            if l.tipo_regra == "manual":
+                return l.par_origem is None or id(l.par_origem) in ids_pares_atuais
+            if l.tipo_regra == "manual_planilha":
+                return (
+                    l.transacao_origem is None
+                    or id(l.transacao_origem) in ids_pendentes_p
+                )
+            if l.tipo_regra == "manual_ofx":
+                return (
+                    l.transacao_origem is None
+                    or id(l.transacao_origem) in ids_pendentes_o
+                )
+            return True
+
+        self.lancamentos_manuais = [l for l in self.lancamentos_manuais if _manual_vivo(l)]
         self.lancamentos_contabeis = automaticos + self.lancamentos_manuais
 
         # Deriva pendentes_ofx (visível) removendo os classificados por memo
-        ids_trans_classificadas = {
+        # OU por lançamento manual avulso do OFX
+        ids_trans_ofx_classificadas = {
             id(l.transacao_origem) for l in self.lancamentos_contabeis
-            if l.tipo_regra == "memo" and l.transacao_origem is not None
+            if l.tipo_regra in ("memo", "manual_ofx") and l.transacao_origem is not None
         }
         self.pendentes_ofx = [
             t for t in self.pendentes_ofx_brutos
-            if id(t) not in ids_trans_classificadas
+            if id(t) not in ids_trans_ofx_classificadas
         ]
+        # Deriva pendentes_planilha (visível) a partir dos brutos, removendo:
+        # - manual_planilha (lançamento avulso da planilha)
+        # - fornecedor_planilha (regra fornecedor aplicada em pendente da planilha)
+        # - pendentes que casaram com Domínio (caixa_ok — já lançados)
+        ids_trans_p_classificadas = {
+            id(l.transacao_origem) for l in self.lancamentos_contabeis
+            if l.tipo_regra in ("manual_planilha", "fornecedor_planilha")
+            and l.transacao_origem is not None
+        }
+        ids_pendentes_no_dominio = {
+            id_t for id_t, m in self.pendentes_planilha_dominio.items()
+            if m.get("dominio") is not None
+        }
+        self.pendentes_planilha = [
+            t for t in self.pendentes_planilha_brutos
+            if id(t) not in ids_trans_p_classificadas
+            and id(t) not in ids_pendentes_no_dominio
+        ]
+
         # Pares (sem Domínio) que viraram lançamento — pra ocultar em Comparação
         # (tanto por regra de fornecedor quanto por lançamento manual)
         self.ids_pares_classificados = {
@@ -2489,8 +3333,9 @@ class App(tk.Tk):
     def _render_aba_lancamentos(self) -> None:
         for item in self.tree_lancamentos.get_children():
             self.tree_lancamentos.delete(item)
+        self.itens_lancamentos.clear()
         for l in self.lancamentos_contabeis:
-            self.tree_lancamentos.insert(
+            iid = self.tree_lancamentos.insert(
                 "", "end",
                 values=(
                     l.data.strftime("%d/%m/%Y"),
@@ -2502,6 +3347,7 @@ class App(tk.Tk):
                     l.padrao_match,
                 ),
             )
+            self.itens_lancamentos[iid] = l
         idx = self.notebook.index(self._aba_lancamentos)
         self.notebook.tab(
             idx, text=f"Lançamentos contábeis ({len(self.lancamentos_contabeis)})",
@@ -2522,6 +3368,111 @@ class App(tk.Tk):
                     text="⚠ Nenhuma empresa selecionada — clique em "
                          "'Selecionar empresa' para ativar regras.",
                 )
+
+    def _editar_lancamento_contabil(self) -> None:
+        """Edita o lançamento contábil selecionado. Se for automático
+        (vindo de regra), promove para manual — assim a edição persiste
+        e não é sobrescrita no próximo recálculo."""
+        sel = self.tree_lancamentos.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione um lançamento na lista para editar.",
+            )
+            return
+        lanc = self.itens_lancamentos.get(sel[0])
+        if lanc is None:
+            return
+
+        dlg = DialogoEditarLancamento(
+            self, lanc, plano_contas=self.plano_contas,
+        )
+        self.wait_window(dlg)
+        if not dlg.resultado:
+            return
+        r = dlg.resultado
+
+        eh_manual = lanc.tipo_regra in (
+            "manual", "manual_planilha", "manual_ofx",
+        )
+        if eh_manual:
+            # Edita o objeto manual existente — persiste em lancamentos_manuais
+            lanc.data = r["data"]
+            lanc.valor = r["valor"]
+            lanc.banco = r["banco"]
+            lanc.conta = r["conta"]
+            lanc.historico = r["historico"]
+        else:
+            # Automático: marca o original como ignorado e cria uma cópia
+            # manual com os novos valores (vai para lancamentos_manuais)
+            if lanc.transacao_origem is not None:
+                self.lancamentos_ignorados.add(id(lanc.transacao_origem))
+            # Tipo do novo manual: baseado na origem
+            if lanc.tipo_regra == "memo":
+                novo_tipo = "manual_ofx"
+            elif lanc.tipo_regra == "fornecedor":
+                novo_tipo = "manual"
+            elif lanc.tipo_regra == "fornecedor_planilha":
+                novo_tipo = "manual_planilha"
+            else:
+                novo_tipo = "manual"
+            novo = LancamentoContabil(
+                data=r["data"],
+                historico=r["historico"],
+                valor=r["valor"],
+                banco=r["banco"],
+                memo_original=lanc.memo_original,
+                padrao_match=f"{lanc.padrao_match} (editado)",
+                conta=r["conta"],
+                tipo_regra=novo_tipo,
+                fornecedor=lanc.fornecedor,
+                cnpj=lanc.cnpj,
+                transacao_origem=lanc.transacao_origem,
+                par_origem=lanc.par_origem,
+            )
+            self.lancamentos_manuais.append(novo)
+
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
+
+    def _excluir_lancamento_contabil(self) -> None:
+        """Exclui o lançamento contábil selecionado. Se for automático,
+        marca a transação origem como ignorada para não voltar a aparecer.
+        A transação volta pra Pendentes (do lado correspondente)."""
+        sel = self.tree_lancamentos.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione um lançamento na lista para excluir.",
+            )
+            return
+        lanc = self.itens_lancamentos.get(sel[0])
+        if lanc is None:
+            return
+        if not messagebox.askyesno(
+            "Confirmar exclusão",
+            f"Excluir este lançamento?\n\n"
+            f"Histórico: {lanc.historico}\n"
+            f"Valor: R$ {lanc.valor:.2f}\n"
+            f"Conta: {lanc.conta or '(vazia)'}\n\n"
+            "A transação volta para a aba Pendentes (se aplicável).",
+        ):
+            return
+
+        eh_manual = lanc.tipo_regra in (
+            "manual", "manual_planilha", "manual_ofx",
+        )
+        if eh_manual:
+            # Remove dos manuais
+            if lanc in self.lancamentos_manuais:
+                self.lancamentos_manuais.remove(lanc)
+        else:
+            # Automático: marca a origem como ignorada
+            if lanc.transacao_origem is not None:
+                self.lancamentos_ignorados.add(id(lanc.transacao_origem))
+
+        self._gerar_lancamentos_contabeis()
+        self._redesenha_abas()
 
 
 if __name__ == "__main__":

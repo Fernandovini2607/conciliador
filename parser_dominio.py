@@ -412,6 +412,20 @@ def extrair_plano_contas(
     i_tipo = None
     if mapeamento.get("tipo") and mapeamento["tipo"] in colunas:
         i_tipo = colunas.index(mapeamento["tipo"])
+    else:
+        # Auto-detecta coluna de tipo (analítica/sintética) por nome usual.
+        # Domínio: CTRG_CTA / TIPO_CTA / ANAL_CTA / CONT_CTA — depende da
+        # versão. Procuramos qualquer coluna cujo nome bate com esses
+        # heurísticos.
+        candidatos_nomes = (
+            "TIPO_CTA", "TIPO_CTC", "CTRG_CTA", "CONT_CTA",
+            "ANAL_CTA", "TIPO_CONTA", "ANALITICA", "TIPO",
+        )
+        cols_upper = [c.upper() for c in colunas]
+        for nome in candidatos_nomes:
+            if nome in cols_upper:
+                i_tipo = cols_upper.index(nome)
+                break
 
     contas: list[ContaContabil] = []
     for linha in linhas:
@@ -421,6 +435,18 @@ def extrair_plano_contas(
             str(linha[i_tipo] or "").strip()
             if i_tipo is not None and linha[i_tipo] is not None else ""
         )
-        if cod:
-            contas.append(ContaContabil(codigo=cod, descricao=desc, tipo=tipo))
+        if not cod:
+            continue
+        # Filtra: se temos info de tipo, mantém apenas contas ANALÍTICAS.
+        # Aceita variações comuns: "A", "Analítica", "ANALITICA", etc.
+        # Quando não há info de tipo, mantém tudo (comportamento legado).
+        if i_tipo is not None:
+            t_norm = tipo.upper()
+            eh_analitica = (
+                t_norm.startswith("A")        # "A", "Analítica"
+                or t_norm in ("1", "true")    # alguns sistemas: 1/0
+            )
+            if not eh_analitica:
+                continue
+        contas.append(ContaContabil(codigo=cod, descricao=desc, tipo=tipo))
     return contas
