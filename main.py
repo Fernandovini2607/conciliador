@@ -516,7 +516,7 @@ class App(tk.Tk):
         self.btn_conciliar.pack(side="left", padx=4)
         self.btn_comparar_dominio = ttk.Button(
             acoes, text="Comparar com Domínio",
-            command=self._comparar_com_dominio, state="disabled",
+            command=self._comparar_com_dominio,
         )
         self.btn_comparar_dominio.pack(side="left", padx=4)
         ttk.Button(
@@ -1563,11 +1563,32 @@ class App(tk.Tk):
         self._atualiza_label_dominio()
 
     def _atualiza_botao_comparar(self) -> None:
-        pode = bool(self.pares_conciliados and self.transacoes_dominio)
-        self.btn_comparar_dominio.config(state="normal" if pode else "disabled")
+        """Mantido por compatibilidade — botão Comparar agora fica sempre
+        habilitado e a validação acontece em _comparar_com_dominio."""
+        pass
 
     def _comparar_com_dominio(self) -> None:
-        # Refiltra conciliados pela regra triple (data_venc, valor, NF)
+        # Valida pré-condições com mensagens claras
+        if not self.pares_conciliados:
+            messagebox.showwarning(
+                "Sem conciliação",
+                "Antes de comparar com o Domínio, é preciso:\n"
+                "1. Abrir a planilha (.xlsx)\n"
+                "2. Importar o OFX\n"
+                "3. Clicar em 'Conciliar' (gera os pares Planilha × OFX)",
+            )
+            return
+        if not self.transacoes_dominio:
+            messagebox.showwarning(
+                "Domínio não carregado",
+                "Carregue os pagamentos do Domínio antes de comparar:\n"
+                "1. Conectar Domínio\n"
+                "2. Selecionar empresa\n"
+                "3. Fonte: pagamentos (configurar SQL)\n"
+                "4. Clicar em 'Carregar pagamentos'",
+            )
+            return
+        # Refiltra conciliados pela regra triple
         self._filtrar_conciliados_por_dominio()
         # Regenera lançamentos: pares sem Domínio podem virar lançamento
         self._gerar_lancamentos_contabeis()
