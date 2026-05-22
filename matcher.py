@@ -29,6 +29,12 @@ class Resultado:
     sugestoes: list[Par] = field(default_factory=list)
 
 
+# Tolerância para conciliação AUTOMÁTICA (fase 2 — match aproximado):
+# pares com Δdias ≤ 2 e Δvalor ≤ R$ 0,10 caem direto em Conciliados.
+TOLERANCIA_AUTO_DIAS = 2
+TOLERANCIA_AUTO_VALOR = Decimal("0.10")
+
+# Tolerância para SUGESTÕES (mais permissiva — fica na aba Sugestões):
 TOLERANCIA_DIAS = 2
 TOLERANCIA_VALOR = Decimal("10.00")
 
@@ -56,10 +62,20 @@ def _chave_ofx(t: Transacao) -> tuple[date, Decimal]:
 def conciliar_automatico(
     planilha: list[Transacao],
     ofx: list[Transacao],
+    dias_tol_auto: int = TOLERANCIA_AUTO_DIAS,
+    valor_tol_auto: Decimal = TOLERANCIA_AUTO_VALOR,
 ) -> tuple[list[Par], list[Transacao], list[Transacao]]:
-    """Match exato por (data, valor) — onde "data" da planilha é a
-    data_pagamento (se mapeada) e do OFX é a data de compensação.
-    Devolve pares + pendentes de cada lado."""
+    """Conciliação automática em DUAS FASES:
+
+    1. **Match exato** por (data, valor) — Par com diff_dias=0 e diff_valor=0.
+    2. **Match aproximado** nos restantes com Δdias ≤ dias_tol_auto E
+       Δvalor ≤ valor_tol_auto — Par com diff_dias e diff_valor preenchidos
+       (visíveis na aba Conciliados pra auditoria).
+
+    "data" da planilha é a data_pagamento (se mapeada); do OFX é a data
+    de compensação. Devolve pares + pendentes de cada lado.
+    """
+    # ---------- FASE 1: match exato
     indice_ofx: dict[tuple[date, Decimal], list[Transacao]] = defaultdict(list)
     for t in ofx:
         indice_ofx[_chave_ofx(t)].append(t)
@@ -79,7 +95,36 @@ def conciliar_automatico(
     for restantes in indice_ofx.values():
         pendentes_o.extend(restantes)
 
-    return pares, pendentes_p, pendentes_o
+    # ---------- FASE 2: match aproximado (tolerância pequena)
+    # Para cada planilha pendente, busca o melhor candidato OFX dentro da
+    # tolerância. "Melhor" = menor (diff_dias, diff_valor) lexicográfico.
+    pendentes_p_final: list[Transacao] = []
+    for tp in pendentes_p:
+        data_p = _data_match_ofx(tp)
+        valor_p = _quantizar(tp.valor)
+        melhor_idx: int | None = None
+        melhor_score: tuple[int, Decimal] | None = None
+        for i, to in enumerate(pendentes_o):
+            diff_dias = abs((data_p - to.data).days)
+            diff_valor = abs(valor_p - _quantizar(to.valor))
+            if diff_dias <= dias_tol_auto and diff_valor <= valor_tol_auto:
+                score = (diff_dias, diff_valor)
+                if melhor_score is None or score < melhor_score:
+                    melhor_score = score
+                    melhor_idx = i
+        if melhor_idx is not None and melhor_score is not None:
+            to_melhor = pendentes_o.pop(melhor_idx)
+            pares.append(Par(
+                planilha=tp,
+                ofx=to_melhor,
+                tipo="auto",
+                diff_dias=melhor_score[0],
+                diff_valor=melhor_score[1],
+            ))
+        else:
+            pendentes_p_final.append(tp)
+
+    return pares, pendentes_p_final, pendentes_o
 
 
 def gerar_sugestoes(
