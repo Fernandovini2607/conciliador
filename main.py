@@ -997,13 +997,14 @@ class App(tk.Tk):
             aba,
             text=(
                 "Pares com diferença de até 2 dias e até R$ 10,00. "
-                "Selecione uma sugestão e clique em 'Aceitar como conciliação'."
+                "Marque uma ou mais sugestões (Ctrl+clique ou Shift+clique, "
+                "ou Ctrl+A pra todas) e clique em 'Aceitar selecionadas'."
             ),
         )
         instr.pack(anchor="w", padx=6, pady=(6, 4))
 
         cols = ("data_p", "valor_p", "nf_p", "forn_p", "data_o", "valor_o", "memo_o", "diff_dias", "diff_valor")
-        tree = ttk.Treeview(aba, columns=cols, show="headings", selectmode="browse")
+        tree = ttk.Treeview(aba, columns=cols, show="headings", selectmode="extended")
         for c, t, w, a in [
             ("data_p", "Venc. (pla)", 90, "center"),
             ("valor_p", "Valor (pla)", 90, "e"),
@@ -1027,11 +1028,18 @@ class App(tk.Tk):
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x")
         ttk.Button(
-            botoes, text="Aceitar como conciliação",
+            botoes, text="Selecionar tudo",
+            command=self._selecionar_todas_sugestoes,
+        ).pack(side="left", padx=6, pady=6)
+        ttk.Button(
+            botoes, text="Aceitar selecionadas",
             command=self._aceitar_sugestao,
         ).pack(side="left", padx=6, pady=6)
 
         self.tree_sugestoes = tree
+        # Atalho Ctrl+A pra selecionar tudo
+        tree.bind("<Control-a>", lambda _e: self._selecionar_todas_sugestoes())
+        tree.bind("<Control-A>", lambda _e: self._selecionar_todas_sugestoes())
 
     def _monta_aba_conciliados_dominio(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -1892,13 +1900,51 @@ class App(tk.Tk):
         d_dias, d_valor = diferenca(t_p, t_o)
         self._aceitar_par(t_p, t_o, d_dias, d_valor)
 
+    def _selecionar_todas_sugestoes(self) -> None:
+        """Marca todas as linhas atualmente exibidas na aba Sugestões."""
+        todos = self.tree_sugestoes.get_children()
+        if todos:
+            self.tree_sugestoes.selection_set(todos)
+            self.tree_sugestoes.focus(todos[0])
+
     def _aceitar_sugestao(self) -> None:
-        sel = self.tree_sugestoes.selection()
-        if not sel:
-            messagebox.showinfo("Selecione uma sugestão", "Escolha uma linha de sugestão.")
+        """Aceita uma OU múltiplas sugestões. Pula automaticamente pares
+        que envolvem transações já usadas em outra sugestão aceita
+        (mesma transação não pode ser conciliada 2x)."""
+        sels = self.tree_sugestoes.selection()
+        if not sels:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Marque pelo menos uma sugestão (Ctrl+clique ou Ctrl+A pra todas).",
+            )
             return
-        par = self.itens_sugestoes[sel[0]]
-        self._aceitar_par(par.planilha, par.ofx, par.diff_dias, par.diff_valor)
+
+        # Captura os pares ANTES de aceitar (cada _aceitar_par recalcula sugestoes)
+        pares = [self.itens_sugestoes[iid] for iid in sels if iid in self.itens_sugestoes]
+        if not pares:
+            return
+
+        usados_p: set[int] = set()
+        usados_o: set[int] = set()
+        aceitos = 0
+        puladas = 0
+        for par in pares:
+            if id(par.planilha) in usados_p or id(par.ofx) in usados_o:
+                puladas += 1
+                continue
+            self._aceitar_par(par.planilha, par.ofx, par.diff_dias, par.diff_valor)
+            usados_p.add(id(par.planilha))
+            usados_o.add(id(par.ofx))
+            aceitos += 1
+
+        # Feedback no fim, só se houve algum conflito
+        if puladas > 0:
+            messagebox.showinfo(
+                "Aceitação parcial",
+                f"{aceitos} sugestão(ões) aceita(s).\n"
+                f"{puladas} pulada(s) porque a planilha ou o OFX já tinha "
+                f"sido usado em outra sugestão aceita.",
+            )
 
     def _aceitar_par(
         self, t_p: Transacao, t_o: Transacao, d_dias: int, d_valor,
