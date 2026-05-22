@@ -10,8 +10,11 @@ from parser_xlsx import Transacao
 class Par:
     """Par de transações conciliadas (auto ou manual) ou sugerido.
 
-    ``dominio`` é preenchido na segunda fase (Conciliados × Domínio) quando
-    existe um lançamento equivalente no Domínio (data_venc + valor + NF).
+    ``dominio`` é preenchido quando existe um lançamento equivalente no
+    Domínio. Pode vir de duas fases:
+    1. Match exato (data_venc + valor + NF).
+    2. Match aproximado: pelo menos 2 de 3 (CNPJ, data_venc, valor) iguais,
+       com diferença no campo restante — registrada em diff_*_dominio.
     """
     planilha: Transacao
     ofx: Transacao
@@ -19,6 +22,8 @@ class Par:
     diff_dias: int = 0
     diff_valor: Decimal = Decimal("0")
     dominio: Transacao | None = None
+    diff_dias_dominio: int = 0
+    diff_valor_dominio: Decimal = Decimal("0")
 
 
 @dataclass

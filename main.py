@@ -1059,7 +1059,7 @@ class App(tk.Tk):
 
         cols = (
             "tipo", "data", "pagto", "valor", "emissao",
-            "nf", "cnpj", "fornecedor", "memo_ofx", "status_dom",
+            "nf", "cnpj", "fornecedor", "memo_ofx", "diff_dom", "status_dom",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
@@ -1071,16 +1071,18 @@ class App(tk.Tk):
         tree.heading("cnpj", text="CNPJ")
         tree.heading("fornecedor", text="Fornecedor")
         tree.heading("memo_ofx", text="Memo OFX")
+        tree.heading("diff_dom", text="Δ Domínio")
         tree.heading("status_dom", text="Status (Domínio)")
-        tree.column("tipo", width=65, anchor="w")
+        tree.column("tipo", width=60, anchor="w")
         tree.column("data", width=85, anchor="center")
         tree.column("pagto", width=85, anchor="center")
-        tree.column("valor", width=95, anchor="e")
+        tree.column("valor", width=90, anchor="e")
         tree.column("emissao", width=85, anchor="center")
         tree.column("nf", width=70, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
-        tree.column("fornecedor", width=170, anchor="w")
-        tree.column("memo_ofx", width=160, anchor="w")
+        tree.column("fornecedor", width=160, anchor="w")
+        tree.column("memo_ofx", width=140, anchor="w")
+        tree.column("diff_dom", width=115, anchor="center")
         tree.column("status_dom", width=110, anchor="center")
         tree.tag_configure("aberto", background="#d4edda")    # verde
         tree.tag_configure("parcial", background="#cfe2ff")   # azul claro
@@ -1839,14 +1841,26 @@ class App(tk.Tk):
     def _normaliza_nf(v) -> str:
         return str(v).strip() if v is not None else ""
 
+    @staticmethod
+    def _normaliza_cnpj(v) -> str:
+        """Mantém só dígitos pra comparação robusta (ignora pontuação)."""
+        return "".join(c for c in str(v or "") if c.isdigit())
+
     def _filtrar_conciliados_por_dominio(self) -> None:
-        """Para cada par P×O em pares_conciliados, busca um match no
-        Domínio por (data_vencimento, valor, número da NF) e armazena
-        em par.dominio. Se Domínio não estiver carregado, limpa as
-        atribuições anteriores."""
-        # Limpa associações antigas
+        """Para cada par P×O em pares_conciliados, busca match no Domínio:
+
+        FASE 1 (exato): data_vencimento + valor + NF iguais.
+        FASE 2 (aproximado): pelo menos 2 de 3 critérios (CNPJ, data_venc,
+        valor) iguais. O critério restante pode ter diferença — registrada
+        em par.diff_dias_dominio / par.diff_valor_dominio.
+
+        Cada Transacao do Domínio só pode casar com 1 par.
+        """
+        # Limpa associações anteriores
         for par in self.pares_conciliados:
             par.dominio = None
+            par.diff_dias_dominio = 0
+            par.diff_valor_dominio = Decimal("0")
 
         if not self.transacoes_dominio:
             return
@@ -1854,25 +1868,78 @@ class App(tk.Tk):
         from collections import defaultdict
         from decimal import Decimal
 
-        def _chave(t):
-            nf = self._normaliza_nf(t.extras.get("numero_nf", ""))
-            return (t.data, t.valor.quantize(Decimal("0.01")), nf)
+        def _quant(v: Decimal) -> Decimal:
+            return v.quantize(Decimal("0.01"))
 
+        # ---------- FASE 1: match exato (data + valor + NF)
         indice: dict[tuple, list[Transacao]] = defaultdict(list)
         for t in self.transacoes_dominio:
-            indice[_chave(t)].append(t)
+            chave = (
+                t.data,
+                _quant(t.valor),
+                self._normaliza_nf(t.extras.get("numero_nf", "")),
+            )
+            indice[chave].append(t)
 
         usados: set[int] = set()
+        pares_sem_match: list[Par] = []
         for par in self.pares_conciliados:
             chave = (
                 par.planilha.data,
-                par.planilha.valor.quantize(Decimal("0.01")),
+                _quant(par.planilha.valor),
                 self._normaliza_nf(par.planilha.extras.get("numero_nf", "")),
             )
             candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
             if candidatos:
                 par.dominio = candidatos[0]
                 usados.add(id(par.dominio))
+            else:
+                pares_sem_match.append(par)
+
+        # ---------- FASE 2: match aproximado (2 de 3 — CNPJ, data, valor)
+        dominio_disponivel = [
+            t for t in self.transacoes_dominio if id(t) not in usados
+        ]
+        for par in pares_sem_match:
+            cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
+            data_p = par.planilha.data
+            valor_p = _quant(par.planilha.valor)
+
+            melhor_idx: int | None = None
+            # Score: (-matches, diff_dias, diff_valor) — minimizar
+            melhor_score: tuple | None = None
+            melhor_diff_dias = 0
+            melhor_diff_valor = Decimal("0")
+
+            for i, t in enumerate(dominio_disponivel):
+                cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
+                valor_d = _quant(t.valor)
+
+                matches = 0
+                if cnpj_p and cnpj_p == cnpj_d:
+                    matches += 1
+                if data_p == t.data:
+                    matches += 1
+                if valor_p == valor_d:
+                    matches += 1
+                if matches < 2:
+                    continue
+
+                diff_dias = abs((data_p - t.data).days)
+                diff_valor = abs(valor_p - valor_d)
+                score = (-matches, diff_dias, diff_valor)
+                if melhor_score is None or score < melhor_score:
+                    melhor_score = score
+                    melhor_idx = i
+                    melhor_diff_dias = diff_dias
+                    melhor_diff_valor = diff_valor
+
+            if melhor_idx is not None:
+                t_dom = dominio_disponivel.pop(melhor_idx)
+                par.dominio = t_dom
+                par.diff_dias_dominio = melhor_diff_dias
+                par.diff_valor_dominio = melhor_diff_valor
+                usados.add(id(t_dom))
 
     def _atualiza_resumo(self) -> None:
         self.lbl_resumo.config(
@@ -2110,6 +2177,12 @@ class App(tk.Tk):
             elif sl.startswith("ab"):
                 tag = "aberto"
 
+            # Diferenças com o Domínio (fase 2 — match aproximado)
+            diff_dom = ""
+            if par.diff_dias_dominio or par.diff_valor_dominio:
+                diff_dom = (
+                    f"Δ {par.diff_dias_dominio}d, R$ {par.diff_valor_dominio:.2f}"
+                )
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
@@ -2122,6 +2195,7 @@ class App(tk.Tk):
                     par.planilha.extras.get("cnpj", ""),
                     par.planilha.extras.get("fornecedor", ""),
                     par.ofx.descricao,
+                    diff_dom,
                     status,
                 ),
                 tags=(tag,) if tag else (),
