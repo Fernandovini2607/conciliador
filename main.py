@@ -2272,17 +2272,18 @@ class App(tk.Tk):
             return
         transacao = self.itens_pendentes_o[sel[0]]
         memo = transacao.descricao or ""
-        if not memo.strip():
+        documento = transacao.extras.get("documento", "") or ""
+        # Sugere memo (texto descritivo); se vazio, cai pra documento.
+        sugestao = memo.strip() or documento.strip()
+        if not sugestao:
             messagebox.showwarning(
-                "Memo vazio",
-                "O lançamento selecionado não tem memo/descrição — não dá "
-                "para gerar um padrão automático.",
+                "Sem dados",
+                "O lançamento selecionado não tem memo nem documento — "
+                "não dá pra gerar um padrão automático.",
             )
             return
 
-        # Pré-preenche com o memo completo; o usuário pode editar para algo
-        # mais geral (substring) que vá capturar variações em meses futuros.
-        regra_inicial = {"padrao": memo, "historico": ""}
+        regra_inicial = {"padrao": sugestao, "historico": ""}
         dlg = DialogoNovaRegra(
             self, regra_inicial, plano_contas=self.plano_contas,
         )

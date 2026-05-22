@@ -49,15 +49,19 @@ def _gerar_de_pendentes_ofx(
     pendentes_ofx: list[Transacao],
     regras_memo: list[dict[str, Any]],
 ) -> list[LancamentoContabil]:
-    """Gera lançamentos a partir dos pendentes do OFX casando memo."""
+    """Gera lançamentos a partir dos pendentes do OFX casando o padrão da
+    regra contra (memo + documento) da transação."""
     lancamentos: list[LancamentoContabil] = []
     for t in pendentes_ofx:
         memo = t.descricao or ""
+        documento = t.extras.get("documento", "") or ""
+        # Padrão bate substring em memo OU documento (concatenados)
+        campo_busca = f"{memo} {documento}"
         for regra in regras_memo:
             padrao = (regra.get("padrao") or "").strip()
             if not padrao:
                 continue
-            if _matches(memo, padrao):
+            if _matches(campo_busca, padrao):
                 lancamentos.append(LancamentoContabil(
                     data=t.data,
                     historico=(regra.get("historico") or "").strip(),

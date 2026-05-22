@@ -39,7 +39,7 @@ class DialogoNovaRegra(tk.Toplevel):
             label_padrao = "Padrão (CNPJ ou parte do nome do fornecedor):"
         else:
             self.title("Regra por memo" if not regra_atual else "Editar regra por memo")
-            label_padrao = "Padrão do memo (texto que aparece no OFX):"
+            label_padrao = "Padrão (texto que aparece no memo OU documento do OFX):"
 
         ttk.Label(self, text=label_padrao).grid(
             row=0, column=0, padx=10, pady=(10, 2), sticky="w",
@@ -398,7 +398,8 @@ class DialogoConfigurarTaxas(tk.Toplevel):
             self,
             text=(
                 "Regras de classificação de lançamentos. Dois tipos:\n"
-                "• Memo: casa contra o memo do OFX nos pendentes (tarifas, IOF, juros).\n"
+                "• Memo: casa contra o memo OU documento do OFX nos pendentes "
+                "(tarifas, IOF, juros).\n"
                 "• Fornecedor: casa contra CNPJ/nome do fornecedor nos pares "
                 "conciliados que faltam no Domínio."
             ),
