@@ -54,8 +54,19 @@ def ler_ofx(caminho: str | Path) -> tuple[list[Transacao], int]:
                 continue
             data = t.date.date() if hasattr(t.date, "date") else t.date
             descricao = (t.memo or t.payee or "").strip()
+            # Documento: priorizar CHECKNUM (cheque/doc) e cair em FITID
+            documento = ""
+            for attr in ("checknum", "id"):
+                v = getattr(t, attr, "") or ""
+                if v:
+                    documento = str(v).strip()
+                    break
             transacoes.append(Transacao(
                 data=data, valor=-valor, descricao=descricao, origem="ofx",
-                extras={"banco": banco, "arquivo": arquivo},
+                extras={
+                    "banco": banco,
+                    "arquivo": arquivo,
+                    "documento": documento,
+                },
             ))
     return transacoes, ignorados

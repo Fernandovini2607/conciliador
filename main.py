@@ -709,13 +709,14 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("data", "banco", "valor", "memo")
+        cols = ("data", "banco", "documento", "valor", "memo")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("data", "Data pagamento", 125, "center"),
-            ("banco", "Banco", 140, "w"),
-            ("valor", "Valor", 110, "e"),
-            ("memo", "Memo", 460, "w"),
+            ("data", "Data pagamento", 120, "center"),
+            ("banco", "Banco", 130, "w"),
+            ("documento", "Documento", 120, "w"),
+            ("valor", "Valor", 105, "e"),
+            ("memo", "Memo", 400, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -730,13 +731,15 @@ class App(tk.Tk):
         return (
             t.data.strftime("%d/%m/%Y"),
             t.extras.get("banco", "") or "",
+            t.extras.get("documento", "") or "",
             f"{t.valor:.2f}",
             t.descricao or "",
         )
 
-    COLS_OFX = ("data", "banco", "valor", "memo")
+    COLS_OFX = ("data", "banco", "documento", "valor", "memo")
     LABELS_OFX = {
         "data": "Data pagamento", "banco": "Banco",
+        "documento": "Documento",
         "valor": "Valor", "memo": "Memo",
     }
 
@@ -957,14 +960,15 @@ class App(tk.Tk):
         lado_o = ttk.LabelFrame(corpo, text="Só no OFX")
         lado_o.pack(side="left", fill="both", expand=True, padx=(3, 6), pady=(0, 4))
 
-        cols_o = ("data", "valor", "descricao")
+        cols_o = ("data", "documento", "valor", "descricao")
         self.tree_pend_o = ttk.Treeview(
             lado_o, columns=cols_o, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
             ("data", "Data pagamento", 90, "center"),
-            ("valor", "Valor", 110, "e"),
-            ("descricao", "Memo OFX", 280, "w"),
+            ("documento", "Documento", 100, "w"),
+            ("valor", "Valor", 105, "e"),
+            ("descricao", "Memo OFX", 240, "w"),
         ]:
             self.tree_pend_o.heading(c, text=t)
             self.tree_pend_o.column(c, width=w, anchor=a)
@@ -2007,7 +2011,12 @@ class App(tk.Tk):
         for t in self.pendentes_ofx:
             iid = self.tree_pend_o.insert(
                 "", "end",
-                values=(t.data.strftime("%d/%m/%Y"), f"{t.valor:.2f}", t.descricao),
+                values=(
+                    t.data.strftime("%d/%m/%Y"),
+                    t.extras.get("documento", "") or "",
+                    f"{t.valor:.2f}",
+                    t.descricao,
+                ),
             )
             self.itens_pendentes_o[iid] = t
 
