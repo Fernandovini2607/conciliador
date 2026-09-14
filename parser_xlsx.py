@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 # data_pagamento é exclusivo da planilha (Domínio não tem esse campo direto).
 CAMPOS_EXTRAS = (
     "data_emissao", "data_pagamento",
-    "numero_nf", "cnpj", "fornecedor", "historico",
+    "numero_nf", "cnpj", "fornecedor", "historico", "tipo",
 )
 
 
@@ -91,6 +91,12 @@ HISTORICO_ALIASES = {
     "descricao", "descrição", "complemento", "obs", "observacao", "observação",
     "detalhes", "detalhe", "narrativa",
 }
+TIPO_ALIASES = {
+    "tipo", "tipo de despesa", "tipo despesa", "tipo lancamento",
+    "tipo de lancamento", "tipo de lançamento", "tipo lançamento",
+    "classificacao", "classificação", "categoria", "grupo",
+    "natureza", "natureza da despesa",
+}
 
 ALIAS_MAP = {
     "data": DATA_ALIASES,
@@ -101,6 +107,7 @@ ALIAS_MAP = {
     "cnpj": CNPJ_ALIASES,
     "fornecedor": FORNECEDOR_ALIASES,
     "historico": HISTORICO_ALIASES,
+    "tipo": TIPO_ALIASES,
 }
 
 # Apenas data (vencimento) e valor são chave de match — restante é opcional.
@@ -188,10 +195,11 @@ def _mapeia_por_nome(cabecalho: list[str]) -> dict[str, int]:
     mapa: dict[str, int] = {}
     usados: set[int] = set()
     # Ordem importa: campos mais específicos antes dos genéricos
-    # (histórico antes de fornecedor pra ele pegar "descricao"/"obs" se houver)
+    # (histórico antes de fornecedor pra ele pegar "descricao"/"obs" se houver;
+    # tipo antes de fornecedor pra pegar "categoria"/"grupo" primeiro)
     ordem = (
         "data_pagamento", "data_emissao",
-        "numero_nf", "cnpj", "historico", "fornecedor",
+        "numero_nf", "cnpj", "tipo", "historico", "fornecedor",
         "data", "valor",
     )
     for campo in ordem:

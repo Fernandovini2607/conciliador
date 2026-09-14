@@ -13,12 +13,18 @@ venv/
 env/
 ENV/
 
-# Configuração local de preferências
+# Configuração local de preferências (formato antigo, migrado pro MariaDB)
 config.json
+config.json.bak
 
-# Credenciais do Domínio (padrão Janco: data/dominio_config.json)
+# Credenciais do Domínio e do MariaDB (padrão Janco: data/*.json)
 data/dominio_config.json
+data/db_config.json
 data/*.json
+
+# Backups do banco (contém hashes de senha, regras, dados sensíveis)
+data/backups/
+*.sql
 
 # Dados sensíveis: planilhas e extratos não devem ir pro Git
 *.xlsx
@@ -26,6 +32,13 @@ data/*.json
 *.ofx
 *.qfx
 *.csv
+
+# Builds do PyInstaller (contem exe empacotado + credenciais em data/)
+build/
+dist/
+dist_testar/
+build_testar/
+*.exe
 
 # IDEs
 .vscode/

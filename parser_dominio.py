@@ -35,7 +35,16 @@ class ContaContabil:
     descricao: str        # descrição/nome
     tipo: str = ""        # opcional: "A" analítica / "S" sintética
 
-DOMINIO_CONFIG_PATH = Path(__file__).parent / "data" / "dominio_config.json"
+def _base_dir() -> Path:
+    """Diretório-base pra encontrar ``data/``.
+    Em modo dev: pasta do .py. Empacotado (.exe): pasta do executável."""
+    import sys
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
+DOMINIO_CONFIG_PATH = _base_dir() / "data" / "dominio_config.json"
 SCHEMA_PADRAO = "bethadba"
 
 

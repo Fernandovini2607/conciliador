@@ -36,7 +36,10 @@ class DialogoNovaRegra(tk.Toplevel):
 
         if self.tipo == "fornecedor":
             self.title("Regra por fornecedor" if not regra_atual else "Editar regra por fornecedor")
-            label_padrao = "Padrão (CNPJ, parte do nome do fornecedor OU texto do histórico):"
+            label_padrao = (
+                "Padrão (CNPJ, nome do fornecedor, histórico OU tipo — "
+                "casa se aparecer em qualquer um):"
+            )
         else:
             self.title("Regra por memo" if not regra_atual else "Editar regra por memo")
             label_padrao = "Padrão (texto que aparece no memo OU documento do OFX):"

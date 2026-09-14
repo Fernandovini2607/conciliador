@@ -100,8 +100,9 @@ def _gerar_de_pares_sem_dominio(
         cnpj = (par.planilha.extras.get("cnpj") or "").strip()
         fornecedor = (par.planilha.extras.get("fornecedor") or "").strip()
         historico = (par.planilha.extras.get("historico") or "").strip()
-        # Padrão bate substring em CNPJ, fornecedor OU histórico (concatenados)
-        campo_busca = f"{cnpj} {fornecedor} {historico}"
+        tipo = (par.planilha.extras.get("tipo") or "").strip()
+        # Padrão bate substring em CNPJ, fornecedor, histórico OU tipo
+        campo_busca = f"{cnpj} {fornecedor} {historico} {tipo}"
         for regra in regras_fornecedor:
             padrao = (regra.get("padrao") or "").strip()
             if not padrao:
@@ -139,7 +140,8 @@ def _gerar_de_pendentes_planilha(
         cnpj = (t.extras.get("cnpj") or "").strip()
         fornecedor = (t.extras.get("fornecedor") or "").strip()
         historico = (t.extras.get("historico") or "").strip()
-        campo_busca = f"{cnpj} {fornecedor} {historico}"
+        tipo = (t.extras.get("tipo") or "").strip()
+        campo_busca = f"{cnpj} {fornecedor} {historico} {tipo}"
         for regra in regras_fornecedor:
             padrao = (regra.get("padrao") or "").strip()
             if not padrao:

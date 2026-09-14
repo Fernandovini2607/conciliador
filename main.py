@@ -14,6 +14,12 @@ from dialogos_taxas import (
     DialogoLancamentoManualAvulso,
     DialogoNovaRegra,
 )
+from exportar_xlsx import (
+    exportar_conciliados_dominio,
+    exportar_lancamentos_contabeis,
+    exportar_pendencias_comparacao,
+    exportar_pendentes,
+)
 from lancamentos import LancamentoContabil, gerar_lancamentos_contabeis
 from matcher import (
     Par,
@@ -42,12 +48,13 @@ CAMPOS = [
     ("cnpj", "CNPJ fornecedor"),
     ("fornecedor", "Fornecedor"),
     ("historico", "Histórico"),
+    ("tipo", "Tipo"),
 ]
 # Apenas data (vencimento) e valor são chave de match — os demais podem
 # ser deixados em branco se a planilha não tiver a coluna.
 CAMPOS_OPCIONAIS = {
     "data_pagamento", "data_emissao",
-    "numero_nf", "cnpj", "fornecedor", "historico",
+    "numero_nf", "cnpj", "fornecedor", "historico", "tipo",
 }
 
 
@@ -245,7 +252,7 @@ class DialogoMapeamento(tk.Toplevel):
 
         cols = (
             "linha", "data", "data_pagamento", "data_emissao",
-            "valor", "numero_nf", "cnpj", "fornecedor", "historico",
+            "valor", "numero_nf", "cnpj", "fornecedor", "historico", "tipo",
         )
         self.preview = ttk.Treeview(
             preview_frame, columns=cols, show="headings", height=self.PREVIEW_LINHAS,
@@ -259,6 +266,7 @@ class DialogoMapeamento(tk.Toplevel):
         self.preview.heading("cnpj", text="CNPJ")
         self.preview.heading("fornecedor", text="Fornecedor")
         self.preview.heading("historico", text="Histórico")
+        self.preview.heading("tipo", text="Tipo")
         self.preview.column("linha", width=45, anchor="center")
         self.preview.column("data", width=80, anchor="w")
         self.preview.column("data_pagamento", width=80, anchor="w")
@@ -267,7 +275,8 @@ class DialogoMapeamento(tk.Toplevel):
         self.preview.column("numero_nf", width=70, anchor="center")
         self.preview.column("cnpj", width=120, anchor="w")
         self.preview.column("fornecedor", width=180, anchor="w")
-        self.preview.column("historico", width=200, anchor="w")
+        self.preview.column("historico", width=180, anchor="w")
+        self.preview.column("tipo", width=110, anchor="w")
         self.preview.tag_configure("erro", background="#f8d7da")
         self.preview.pack(side="left", fill="both", expand=True)
 
@@ -316,6 +325,7 @@ class DialogoMapeamento(tk.Toplevel):
             cel_cnpj = _cel(idxs["cnpj"])
             cel_forn = _cel(idxs["fornecedor"])
             cel_hist = _cel(idxs["historico"])
+            cel_tipo = _cel(idxs["tipo"])
 
             data_parsed = para_data(cel_data) if idxs["data"] >= 0 else None
             pgto_parsed = para_data(cel_pgto) if idxs["data_pagamento"] >= 0 else None
@@ -359,6 +369,7 @@ class DialogoMapeamento(tk.Toplevel):
                     _fmt_str(cel_cnpj),
                     _fmt_str(cel_forn),
                     _fmt_str(cel_hist),
+                    _fmt_str(cel_tipo),
                 ),
                 tags=(tag,) if tag else (),
             )
@@ -412,6 +423,31 @@ class App(tk.Tk):
         self.title("Conciliador OFX × Planilha")
         self.geometry("1200x720")
 
+        # Mostra a janela principal já visível (com placeholder) — assim
+        # o Toplevel do login aparece corretamente na frente. Esconder a
+        # janela principal (withdraw) fazia o dialog filho ficar invisível
+        # em algumas versões do Windows.
+        placeholder = ttk.Label(
+            self,
+            text="Aguardando login...",
+            font=("TkDefaultFont", 14),
+            foreground="#1f3a68",
+        )
+        placeholder.pack(expand=True, padx=40, pady=40)
+        self.update()  # força renderização antes de abrir o diálogo
+
+        # Usuário logado — populado pelo login. Se None ao final do
+        # _pedir_login, encerra o app.
+        self.usuario_atual: dict | None = None
+        if not self._pedir_login():
+            self.destroy()
+            return
+        # Registra no config pra que ele saiba de quem é a empresa_ativa
+        config.set_usuario_atual(self.usuario_atual["id"])
+
+        # Remove o placeholder — a UI real será montada em _monta_ui()
+        placeholder.destroy()
+
         # Dados originais
         self.transacoes_planilha: list[Transacao] = []
         self.transacoes_ofx: list[Transacao] = []
@@ -432,6 +468,9 @@ class App(tk.Tk):
         # IDs de transacao_origem cuja regra automática deve ser IGNORADA
         # (usuário excluiu/editou o lançamento contábil).
         self.lancamentos_ignorados: set[int] = set()
+        # Match no Domínio dos pendentes do OFX (comparação OFX×Domínio sem
+        # planilha): id(t_ofx) → {dominio, diff_dias, diff_valor}
+        self.pendentes_ofx_dominio: dict[int, dict] = {}
         self.pendentes_ofx: list[Transacao] = []
         # "brutos": pendentes OFX sem desconto dos que viraram lançamentos
         # contábeis. self.pendentes_ofx (visível) = brutos - classificados.
@@ -457,6 +496,78 @@ class App(tk.Tk):
         self._migrar_config_legado()
 
         self._monta_ui()
+
+        # Conecta o Domínio automaticamente usando as credenciais salvas
+        # (após a UI estar montada, senão os botões que ele habilita ainda
+        # não existem). Silencioso se falhar — o usuário pode conectar manualmente.
+        self.after(100, self._auto_conectar_dominio)
+
+    # ------------------------------------------------------ Login
+
+    def _pedir_login(self) -> bool:
+        """Mostra o diálogo de login. Retorna True se autenticou, False
+        se cancelou/fechou. Se o banco não tem nenhum usuário cadastrado,
+        avisa e retorna False (usuário precisa rodar setup_db.py)."""
+        from dialogos_login import DialogoLogin
+        import auth
+
+        try:
+            tem_usuario = auth.existe_algum_usuario()
+        except Exception as e:
+            messagebox.showerror(
+                "Erro no banco",
+                f"Não consegui conectar ao banco de dados:\n\n{e}\n\n"
+                "Verifique se o MariaDB está rodando e se o data/db_config.json "
+                "está correto. Se ainda não configurou, rode:\n"
+                "    python setup_db.py",
+            )
+            return False
+
+        if not tem_usuario:
+            messagebox.showerror(
+                "Sem usuários cadastrados",
+                "O banco ainda não tem nenhum usuário do app. "
+                "Rode primeiro:\n\n    python setup_db.py\n\n"
+                "e cadastre o admin.",
+            )
+            return False
+
+        dlg = DialogoLogin(self)
+        self.wait_window(dlg)
+        if dlg.usuario is None:
+            return False
+        self.usuario_atual = dlg.usuario
+        return True
+
+    def _trocar_usuario(self) -> None:
+        """Fecha o app atual — usuário reabre e loga com outra conta."""
+        if not messagebox.askyesno(
+            "Trocar usuário",
+            "Isso vai fechar o aplicativo. Você precisa reabri-lo pra "
+            "logar com outra conta.\n\nQuaisquer conciliações não "
+            "exportadas serão perdidas. Continuar?",
+        ):
+            return
+        self.destroy()
+
+    def _gerenciar_usuarios(self) -> None:
+        if not self.usuario_atual.get("admin"):
+            messagebox.showwarning(
+                "Permissão negada",
+                "Apenas usuários com perfil admin podem gerenciar usuários.",
+            )
+            return
+        from dialogos_login import DialogoGerenciarUsuarios
+        dlg = DialogoGerenciarUsuarios(self, self.usuario_atual)
+        self.wait_window(dlg)
+
+    def _mudar_minha_senha(self) -> None:
+        from dialogos_login import DialogoMudarSenha
+        dlg = DialogoMudarSenha(
+            self, usuario_id=self.usuario_atual["id"],
+            exigir_senha_atual=True,
+        )
+        self.wait_window(dlg)
 
     def _migrar_config_legado(self) -> None:
         """Migrações de formato de config:
@@ -505,23 +616,56 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ UI
 
     def _monta_ui(self) -> None:
+        # --- Linha 0: Usuário logado (barra fina no topo) ---
+        topo_user = ttk.Frame(self, padding=(10, 6, 10, 2))
+        topo_user.pack(fill="x")
+        eh_admin = bool(self.usuario_atual.get("admin"))
+        nome = self.usuario_atual.get("nome") or self.usuario_atual["username"]
+        perfil = "admin" if eh_admin else "operador"
+        ttk.Label(
+            topo_user,
+            text=f"👤 {nome} ({self.usuario_atual['username']}) — {perfil}",
+            foreground="#1f3a68",
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(side="left")
+        ttk.Button(
+            topo_user, text="Trocar usuário",
+            command=self._trocar_usuario,
+        ).pack(side="right", padx=2)
+        ttk.Button(
+            topo_user, text="Minha senha",
+            command=self._mudar_minha_senha,
+        ).pack(side="right", padx=2)
+        # "Gerenciar usuarios" so aparece pra admin (operadores nao precisam)
+        self.btn_gerenciar_usuarios = ttk.Button(
+            topo_user, text="Gerenciar usuários",
+            command=self._gerenciar_usuarios,
+        )
+        if eh_admin:
+            self.btn_gerenciar_usuarios.pack(side="right", padx=2)
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x")
+
         # --- Linha 1: Domínio (sistema contábil) ---
-        topo_dom = ttk.Frame(self, padding=(10, 10, 10, 4))
+        topo_dom = ttk.Frame(self, padding=(10, 6, 10, 4))
         topo_dom.pack(fill="x")
         ttk.Button(topo_dom, text="Conectar Domínio", command=self._conectar_dominio).pack(side="left", padx=4)
         self.btn_empresa = ttk.Button(
             topo_dom, text="Selecionar empresa", command=self._selecionar_empresa, state="disabled",
         )
         self.btn_empresa.pack(side="left", padx=4)
+        # Botões de FONTE (SQL Domínio) são configuração do sistema —
+        # só admin vê. Operadores usam a fonte que o admin já configurou.
         self.btn_fonte = ttk.Button(
             topo_dom, text="Fonte: pagamentos", command=self._configurar_fonte_dominio, state="disabled",
         )
-        self.btn_fonte.pack(side="left", padx=4)
         self.btn_fonte_plano = ttk.Button(
             topo_dom, text="Fonte: plano contas",
             command=self._configurar_fonte_plano_contas, state="disabled",
         )
-        self.btn_fonte_plano.pack(side="left", padx=4)
+        if eh_admin:
+            self.btn_fonte.pack(side="left", padx=4)
+            self.btn_fonte_plano.pack(side="left", padx=4)
         self.btn_carregar_dominio = ttk.Button(
             topo_dom, text="Carregar pagamentos", command=self._carregar_dominio, state="disabled",
         )
@@ -680,7 +824,7 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor", "historico")
+        cols = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor", "historico", "tipo")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("linha", "Linha", 55, "center"),
@@ -690,8 +834,9 @@ class App(tk.Tk):
             ("valor", "Valor", 105, "e"),
             ("nf", "Nº NF", 85, "center"),
             ("cnpj", "CNPJ", 130, "w"),
-            ("fornecedor", "Fornecedor", 250, "w"),
-            ("historico", "Histórico", 250, "w"),
+            ("fornecedor", "Fornecedor", 220, "w"),
+            ("historico", "Histórico", 220, "w"),
+            ("tipo", "Tipo", 130, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -713,16 +858,18 @@ class App(tk.Tk):
             t.extras.get("cnpj", "") or "",
             t.extras.get("fornecedor", "") or "",
             t.extras.get("historico", "") or "",
+            t.extras.get("tipo", "") or "",
         )
 
     COLS_PLANILHA = (
         "linha", "venc", "pagto", "emis", "valor",
-        "nf", "cnpj", "fornecedor", "historico",
+        "nf", "cnpj", "fornecedor", "historico", "tipo",
     )
     LABELS_PLANILHA = {
         "linha": "Linha", "venc": "Vencimento", "pagto": "Pagamento",
         "emis": "Emissão", "valor": "Valor", "nf": "Nº NF",
-        "cnpj": "CNPJ", "fornecedor": "Fornecedor", "historico": "Histórico",
+        "cnpj": "CNPJ", "fornecedor": "Fornecedor",
+        "historico": "Histórico", "tipo": "Tipo",
     }
 
     def _on_click_header_planilha(self, event: tk.Event) -> None:
@@ -1059,6 +1206,10 @@ class App(tk.Tk):
             rodape, text="Conciliar selecionadas (escolha 1 linha em cada bloco) →",
             command=self._conciliar_selecionadas,
         ).pack(side="left", padx=4, pady=2)
+        ttk.Button(
+            rodape, text="Exportar para Excel (.xlsx)",
+            command=self._exportar_pendentes,
+        ).pack(side="left", padx=4, pady=2)
 
         # ----- Bloco PLANILHA (em cima): tabela + ações da planilha
         lado_p = ttk.LabelFrame(aba, text="Só na planilha")
@@ -1080,17 +1231,18 @@ class App(tk.Tk):
         # Tabela planilha
         tabela_p = ttk.Frame(lado_p)
         tabela_p.pack(side="top", fill="both", expand=True)
-        cols_p = ("data", "pagto", "valor", "nf", "fornecedor", "historico")
+        cols_p = ("data", "pagto", "valor", "nf", "fornecedor", "historico", "tipo")
         self.tree_pend_p = ttk.Treeview(
             tabela_p, columns=cols_p, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
-            ("data", "Vencimento", 95, "center"),
-            ("pagto", "Pagamento", 95, "center"),
-            ("valor", "Valor", 105, "e"),
-            ("nf", "Nº NF", 75, "center"),
-            ("fornecedor", "Fornecedor", 280, "w"),
-            ("historico", "Histórico", 280, "w"),
+            ("data", "Vencimento", 90, "center"),
+            ("pagto", "Pagamento", 90, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 70, "center"),
+            ("fornecedor", "Fornecedor", 220, "w"),
+            ("historico", "Histórico", 220, "w"),
+            ("tipo", "Tipo", 130, "w"),
         ]:
             self.tree_pend_p.heading(c, text=t)
             self.tree_pend_p.column(c, width=w, anchor=a)
@@ -1237,10 +1389,19 @@ class App(tk.Tk):
         tree.tag_configure("parcial", background="#cfe2ff")   # azul claro
         tree.tag_configure("paga", background="#e9ecef")      # cinza (já liquidada)
 
+        # Rodapé com botão de exportação — packado ANTES do tree pra ficar
+        # ancorado embaixo mesmo com tree expandindo
+        rodape_cd = ttk.Frame(aba)
+        rodape_cd.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            rodape_cd, text="Exportar para Excel (.xlsx)",
+            command=self._exportar_conciliados_dominio,
+        ).pack(side="left", padx=2)
+
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
-        tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
         self.tree_conciliados_dominio = tree
 
     def _monta_aba_dominio(self) -> None:
@@ -1248,14 +1409,47 @@ class App(tk.Tk):
         self.notebook.add(aba, text="Domínio (0)")
         self._aba_dominio = aba
 
+        # ---- Cabeçalho: instrução + legenda de cores lado a lado
+        topo_comp = ttk.Frame(aba)
+        topo_comp.pack(side="top", fill="x", padx=6, pady=(6, 4))
+
         instr = ttk.Label(
-            aba,
+            topo_comp,
             text=(
-                "Comparação dos pagamentos conciliados (planilha×OFX) com o Domínio. "
-                "Match por data + valor exatos."
+                "Comparação de 3 fontes com o Domínio:\n"
+                "• Pares Planilha×OFX conciliados\n"
+                "• Pendentes só na planilha (Caixa geral)\n"
+                "• Pendentes só no OFX (quando não há planilha importada)"
             ),
+            wraplength=500,
+            justify="left",
         )
-        instr.pack(anchor="w", padx=6, pady=(6, 4))
+        instr.pack(side="left", anchor="nw")
+
+        # Legenda das cores — 6 chips coloridos com significado
+        legenda = ttk.LabelFrame(topo_comp, text="Legenda de cores")
+        legenda.pack(side="right", padx=(10, 0))
+        cores = [
+            ("#d4edda", "OK",          "Conciliado P×OFX e no Domínio"),
+            ("#fff3cd", "Falta dom",   "Conciliado P×OFX, falta no Domínio"),
+            ("#cce5ff", "Caixa OK",    "Pendente da planilha (Caixa geral) no Domínio"),
+            ("#e2e3e5", "Caixa falta", "Pendente da planilha (Caixa geral) falta no Domínio"),
+            ("#d1ecf1", "OFX OK",      "Pendente do OFX (sem planilha) no Domínio"),
+            ("#ffe5cc", "OFX falta",   "Pendente do OFX (sem planilha) falta no Domínio"),
+        ]
+        for i, (cor, rotulo, desc) in enumerate(cores):
+            # tk.Label aceita background — ttk.Label ignora em alguns temas
+            chip = tk.Label(
+                legenda, text=f"  {rotulo}  ",
+                background=cor, foreground="#111",
+                font=("TkDefaultFont", 8, "bold"),
+                relief="solid", borderwidth=1,
+            )
+            chip.grid(row=i, column=0, padx=(6, 4), pady=1, sticky="w")
+            ttk.Label(
+                legenda, text=desc, font=("TkDefaultFont", 8),
+                foreground="#333",
+            ).grid(row=i, column=1, padx=(0, 8), pady=1, sticky="w")
 
         cols = (
             "status", "vencimento", "valor", "emissao", "nf",
@@ -1284,6 +1478,9 @@ class App(tk.Tk):
         # Pendentes da planilha (Caixa geral, sem OFX)
         tree.tag_configure("caixa_ok", background="#cce5ff")          # azul claro
         tree.tag_configure("caixa_falta", background="#e2e3e5")       # cinza claro
+        # Pendentes do OFX (sem planilha) — comparação OFX × Domínio direta
+        tree.tag_configure("ofx_ok", background="#d1ecf1")            # ciano claro
+        tree.tag_configure("ofx_falta", background="#ffe5cc")         # laranja claro
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
@@ -1307,6 +1504,10 @@ class App(tk.Tk):
         ttk.Button(
             botoes, text="Criar regra de fornecedor (do amarelo selecionado)",
             command=self._criar_regra_fornecedor,
+        ).pack(side="top", anchor="w", padx=6, pady=(2, 2))
+        ttk.Button(
+            botoes, text="Exportar pendências (amarelos + cinzas + laranjas) para Excel",
+            command=self._exportar_pendencias_comparacao,
         ).pack(side="top", anchor="w", padx=6, pady=(2, 6))
 
     def _editar_par_amarelo(self) -> None:
@@ -1510,12 +1711,16 @@ class App(tk.Tk):
         cnpj = t_planilha.extras.get("cnpj", "") or ""
         fornecedor = t_planilha.extras.get("fornecedor", "") or ""
         historico = t_planilha.extras.get("historico", "") or ""
-        # Prioridade: CNPJ → fornecedor → histórico
-        sugestao = cnpj.strip() or fornecedor.strip() or historico.strip()
+        tipo_col = t_planilha.extras.get("tipo", "") or ""
+        # Prioridade: CNPJ → fornecedor → tipo → histórico
+        sugestao = (
+            cnpj.strip() or fornecedor.strip()
+            or tipo_col.strip() or historico.strip()
+        )
         if not sugestao:
             messagebox.showwarning(
                 "Sem dados",
-                "A linha selecionada não tem CNPJ, fornecedor nem "
+                "A linha selecionada não tem CNPJ, fornecedor, tipo nem "
                 "histórico preenchidos.",
             )
             return
@@ -1570,6 +1775,10 @@ class App(tk.Tk):
         ttk.Button(
             rodape_lanc, text="Excluir lançamento",
             command=self._excluir_lancamento_contabil,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            rodape_lanc, text="Exportar para Excel (.xlsx)",
+            command=self._exportar_lancamentos_contabeis,
         ).pack(side="left", padx=2)
 
         corpo_lanc = ttk.Frame(aba)
@@ -1671,6 +1880,12 @@ class App(tk.Tk):
         if dlg.conn is None:
             return
         self.conn_dominio = dlg.conn
+        self._pos_conexao_dominio()
+
+    def _pos_conexao_dominio(self) -> None:
+        """Ações depois que self.conn_dominio foi estabelecido: habilita
+        botões dependentes e atualiza o label. Usado tanto pela conexão
+        manual (via diálogo) quanto pela auto-conexão do startup."""
         self.btn_empresa.config(state="normal")
         self.btn_fonte.config(state="normal")
         self.btn_fonte_plano.config(state="normal")
@@ -1679,6 +1894,30 @@ class App(tk.Tk):
         if self.cfg.get("dominio_fonte_plano_contas", {}).get("mapeamento"):
             self.btn_carregar_plano.config(state="normal")
         self._atualiza_label_dominio()
+
+    def _auto_conectar_dominio(self) -> None:
+        """Tenta abrir a conexão com o Domínio automaticamente usando as
+        credenciais salvas em data/dominio_config.json. Silencioso — se
+        falhar, o usuário pode conectar manualmente no botão."""
+        if self.conn_dominio is not None:
+            return
+        try:
+            cred = parser_dominio.load_odbc_config()
+        except Exception:
+            return
+        if not cred.get("dsn"):
+            return  # ainda não configurou credenciais
+        try:
+            self.conn_dominio = parser_dominio.open_connection(cfg=cred)
+        except Exception as e:
+            # Não travar o app — só avisa no label do Domínio pra o usuário
+            # saber que a auto-conexão falhou e pode tentar manual.
+            self.lbl_dominio.config(
+                text=f"(Auto-conexão falhou: {e}. Clique em 'Conectar Domínio')",
+                foreground="#c0392b",
+            )
+            return
+        self._pos_conexao_dominio()
 
     def _selecionar_empresa(self) -> None:
         if self.conn_dominio is None:
@@ -1870,13 +2109,18 @@ class App(tk.Tk):
 
     def _comparar_com_dominio(self) -> None:
         # Valida pré-condições com mensagens claras
-        if not self.pares_conciliados and not self.pendentes_planilha_brutos:
+        if (
+            not self.pares_conciliados
+            and not self.pendentes_planilha_brutos
+            and not self.pendentes_ofx_brutos
+        ):
             messagebox.showwarning(
                 "Sem dados",
-                "Antes de comparar com o Domínio, é preciso:\n"
-                "1. Abrir a planilha (.xlsx)\n"
-                "2. (Opcional) Importar o OFX\n"
-                "3. Clicar em 'Conciliar' (gera pares e pendentes da planilha)",
+                "Antes de comparar com o Domínio, é preciso ter pelo menos "
+                "uma dessas fontes:\n"
+                "• Planilha (.xlsx) importada\n"
+                "• OFX importado\n\n"
+                "Depois clique em 'Conciliar' para gerar pares/pendentes.",
             )
             return
         if not self.transacoes_dominio:
@@ -1962,6 +2206,31 @@ class App(tk.Tk):
                     0, Decimal("0"), None,
                 ))
 
+        # 3) Pendentes do OFX (sem planilha): comparação direta OFX × Domínio
+        # Esconde os já classificados (regra memo ou manual OFX).
+        ids_o_classificadas = {
+            id(l.transacao_origem) for l in self.lancamentos_contabeis
+            if l.tipo_regra in ("memo", "manual_ofx")
+            and l.transacao_origem is not None
+        }
+        for t_o in self.pendentes_ofx_brutos:
+            if id(t_o) in ids_o_classificadas:
+                continue
+            match = self.pendentes_ofx_dominio.get(id(t_o))
+            if match and match.get("dominio") is not None:
+                # Passamos t_o como "planilha" (é a origem para render) mas
+                # também como t_ofx pra Memo aparecer
+                resultados.append((
+                    "ofx_ok", t_o, t_o, match["dominio"],
+                    match["diff_dias"], match["diff_valor"], None,
+                ))
+                usados.add(id(match["dominio"]))
+            else:
+                resultados.append((
+                    "ofx_falta", t_o, t_o, None,
+                    0, Decimal("0"), None,
+                ))
+
         # Pagamentos no Domínio que ninguém casou
         sobras_dominio = [t for t in self.transacoes_dominio if id(t) not in usados]
 
@@ -1984,8 +2253,11 @@ class App(tk.Tk):
             "falta_dominio": "Conciliado P×OFX, falta no Domínio",
             "caixa_ok": "Caixa geral (no Domínio)",
             "caixa_falta": "Caixa geral (falta no Domínio)",
+            "ofx_ok": "OFX (sem planilha) no Domínio",
+            "ofx_falta": "OFX (sem planilha) falta no Domínio",
         }
         n_ok = n_falta_dom = n_caixa_ok = n_caixa_falta = 0
+        n_ofx_ok = n_ofx_falta = 0
         for status, t_planilha, t_ofx, t_dom, _diff_d, _diff_v, par in resultados:
             if status == "ok":
                 n_ok += 1
@@ -1993,8 +2265,12 @@ class App(tk.Tk):
                 n_falta_dom += 1
             elif status == "caixa_ok":
                 n_caixa_ok += 1
-            else:
+            elif status == "caixa_falta":
                 n_caixa_falta += 1
+            elif status == "ofx_ok":
+                n_ofx_ok += 1
+            else:
+                n_ofx_falta += 1
             rotulo = rotulos.get(status, status)
             # Extras: prioriza Domínio se houver, depois planilha
             origem_extras = t_dom.extras if t_dom else t_planilha.extras
@@ -2024,13 +2300,12 @@ class App(tk.Tk):
             self._itens_comparacao[iid] = par if par is not None else t_planilha
 
         # Pares só no Domínio (que ninguém conciliou) NÃO são mostrados aqui.
-        self.notebook.tab(
-            7,
-            text=(
-                f"Comparação (ok {n_ok} | falta dom {n_falta_dom} | "
-                f"caixa ok {n_caixa_ok} | caixa falta {n_caixa_falta})"
-            ),
-        )
+        partes = [f"ok {n_ok}", f"falta dom {n_falta_dom}"]
+        if n_caixa_ok or n_caixa_falta:
+            partes.append(f"caixa {n_caixa_ok}/{n_caixa_falta}")
+        if n_ofx_ok or n_ofx_falta:
+            partes.append(f"OFX {n_ofx_ok}/{n_ofx_falta}")
+        self.notebook.tab(7, text=f"Comparação ({' | '.join(partes)})")
 
     # ------------------------------------------------------ Carregar dados
 
@@ -2256,7 +2531,10 @@ class App(tk.Tk):
         self._limpa_resultados()
 
     def _atualiza_botao(self) -> None:
-        pode = bool(self.transacoes_planilha and self.transacoes_ofx)
+        # Basta ter planilha OU OFX carregado. Sem planilha, o fluxo
+        # é comparar direto OFX × Domínio (todos os OFX ficam em pendentes_ofx).
+        # Sem OFX, é planilha × Domínio (tudo vira Caixa geral).
+        pode = bool(self.transacoes_planilha or self.transacoes_ofx)
         self.btn_conciliar.config(state="normal" if pode else "disabled")
 
     # ---------------------------------------------------- Lógica de matching
@@ -2269,6 +2547,8 @@ class App(tk.Tk):
         self.lancamentos_ignorados = set()
         self.pendentes_ofx = []
         self.pendentes_ofx_brutos = []
+        # Match OFX × Domínio direto (sem planilha) — mesmo esquema do Caixa
+        self.pendentes_ofx_dominio = {}
         self.sugestoes = []
         self.lancamentos_contabeis = []
         self.lancamentos_manuais = []
@@ -2315,17 +2595,20 @@ class App(tk.Tk):
         return "".join(c for c in str(v or "") if c.isdigit())
 
     def _filtrar_conciliados_por_dominio(self) -> None:
-        """Match com Domínio em DUAS fases, aplicado a:
+        """Match com Domínio em DUAS fases, aplicado a TRÊS fontes:
         - pares_conciliados (Planilha×OFX) — atualiza par.dominio
         - pendentes_planilha_brutos (sem OFX = Caixa geral) — atualiza
           self.pendentes_planilha_dominio[id(t)]
+        - pendentes_ofx_brutos (sem planilha) — atualiza
+          self.pendentes_ofx_dominio[id(t)] (comparação OFX×Domínio direta,
+          quando o usuário não importou planilha)
 
         FASE 1 (exato): data_vencimento + valor + NF iguais.
         FASE 2 (aproximado): pelo menos 2 de 3 critérios (CNPJ, data_venc,
         valor) iguais. O critério restante pode ter diferença.
 
-        Cada Transacao do Domínio só pode casar com 1 item (pares têm
-        prioridade sobre pendentes).
+        Ordem de prioridade (cada Transacao do Domínio só casa com 1 item):
+        pares > pendentes planilha > pendentes OFX.
         """
         from collections import defaultdict
         from decimal import Decimal
@@ -2336,6 +2619,7 @@ class App(tk.Tk):
             par.diff_dias_dominio = 0
             par.diff_valor_dominio = Decimal("0")
         self.pendentes_planilha_dominio = {}
+        self.pendentes_ofx_dominio = {}
 
         if not self.transacoes_dominio:
             return
@@ -2388,6 +2672,27 @@ class App(tk.Tk):
                 usados.add(id(candidatos[0]))
             else:
                 pendentes_sem_match.append(t_p)
+
+        # Pendentes do OFX (sem planilha correspondente) — FASE 1.
+        # OFX geralmente não tem Nº NF, então o match exato aqui é
+        # essencialmente (data, valor) com NF vazio dos dois lados.
+        pendentes_ofx_sem_match: list[Transacao] = []
+        for t_o in self.pendentes_ofx_brutos:
+            chave = (
+                t_o.data,
+                _quant(t_o.valor),
+                self._normaliza_nf(t_o.extras.get("numero_nf", "")),
+            )
+            candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
+            if candidatos:
+                self.pendentes_ofx_dominio[id(t_o)] = {
+                    "dominio": candidatos[0],
+                    "diff_dias": 0,
+                    "diff_valor": Decimal("0"),
+                }
+                usados.add(id(candidatos[0]))
+            else:
+                pendentes_ofx_sem_match.append(t_o)
 
         # ---------- FASE 2: match aproximado (2 de 3 — CNPJ, data, valor)
         dominio_disponivel = [
@@ -2447,6 +2752,23 @@ class App(tk.Tk):
             if idx is not None:
                 t_dom = dominio_disponivel.pop(idx)
                 self.pendentes_planilha_dominio[id(t_p)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                usados.add(id(t_dom))
+
+        # Pendentes do OFX — FASE 2 no que sobrou.
+        # CNPJ do OFX raramente existe, então normalmente o match aqui é
+        # 2-de-3 usando data + valor (o CNPJ empresa nem sempre bate).
+        for t_o in pendentes_ofx_sem_match:
+            cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
+            idx, dd, dv = _melhor_match_dominio(
+                cnpj_o, t_o.data, _quant(t_o.valor),
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                self.pendentes_ofx_dominio[id(t_o)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
                     "diff_valor": dv,
@@ -2635,6 +2957,7 @@ class App(tk.Tk):
                     t.extras.get("numero_nf", ""),
                     t.extras.get("fornecedor", ""),
                     t.extras.get("historico", "") or "",
+                    t.extras.get("tipo", "") or "",
                 ),
             )
             self.itens_pendentes_p[iid] = t
@@ -2775,7 +3098,49 @@ class App(tk.Tk):
                 tags=(_tag_status(status),) if _tag_status(status) else (),
             )
 
-        total = len(pares) + len(caixa_dominio)
+        # 3) Pendentes do OFX (sem planilha) que casaram com Domínio
+        ofx_dominio = [
+            t for t in self.pendentes_ofx_brutos
+            if (m := self.pendentes_ofx_dominio.get(id(t)))
+            and m.get("dominio") is not None
+        ]
+        for t_o in ofx_dominio:
+            match = self.pendentes_ofx_dominio[id(t_o)]
+            t_dom = match["dominio"]
+            d_d = match.get("diff_dias", 0)
+            d_v = match.get("diff_valor", 0)
+
+            emissao = t_dom.extras.get("data_emissao") if t_dom else None
+            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
+            pagto_txt = t_o.data.strftime("%d/%m/%Y")
+            origem = t_o.extras.get("banco", "") or "OFX"
+
+            status = (t_dom.extras.get("status", "") if t_dom else "") or ""
+
+            diff_dom = ""
+            if d_d or d_v:
+                diff_dom = f"Δ {d_d}d, R$ {d_v:.2f}"
+
+            self.tree_conciliados_dominio.insert(
+                "", "end",
+                values=(
+                    "OFX",                                # Tipo
+                    origem,                               # Origem = banco do OFX
+                    t_o.data.strftime("%d/%m/%Y"),
+                    pagto_txt,
+                    f"{t_o.valor:.2f}",
+                    emissao_txt,
+                    t_dom.extras.get("numero_nf", "") if t_dom else "",
+                    t_dom.extras.get("cnpj", "") if t_dom else "",
+                    t_dom.extras.get("fornecedor", "") if t_dom else "",
+                    t_o.descricao or "",
+                    diff_dom,
+                    status,
+                ),
+                tags=(_tag_status(status),) if _tag_status(status) else (),
+            )
+
+        total = len(pares) + len(caixa_dominio) + len(ofx_dominio)
         self.notebook.tab(6, text=f"Conciliados × Domínio ({total})")
 
     # ---------------- Abas de dados crus (origem) ----------------
@@ -3139,22 +3504,25 @@ class App(tk.Tk):
         cnpj = (t.extras.get("cnpj", "") or "").strip()
         fornecedor = (t.extras.get("fornecedor", "") or "").strip()
         historico = (t.extras.get("historico", "") or "").strip()
-        # Pré-popula com CNPJ; senão fornecedor; senão histórico
-        sugestao = cnpj or fornecedor or historico
+        tipo_col = (t.extras.get("tipo", "") or "").strip()
+        # PRIORIZA Tipo — regra por tipo captura categorias inteiras
+        # (ex.: "CONDOMÍNIO" pega todos os condomínios de qualquer fornecedor)
+        sugestao = tipo_col or cnpj or fornecedor or historico
         if not sugestao:
             messagebox.showwarning(
                 "Sem dados",
-                "O lançamento selecionado não tem CNPJ, fornecedor nem "
-                "histórico — não dá pra gerar um padrão automático.",
+                "O lançamento selecionado não tem Tipo, CNPJ, fornecedor "
+                "nem histórico — não dá pra gerar um padrão automático.",
             )
             return
 
-        # Sugestão do histórico contábil da regra: prioriza fornecedor;
-        # senão usa o histórico da planilha se houver
-        sugestao_hist = (
-            f"Pagto. {fornecedor}" if fornecedor
-            else (historico if historico else "")
-        )
+        # Sugestão do histórico contábil da regra: prefixo fixo "PAGAMENTO
+        # REF. A " + o que estiver na coluna Histórico da planilha.
+        # (Se histórico vazio, o prefixo fica sozinho pra usuário completar.)
+        if historico:
+            sugestao_hist = f"PAGAMENTO REF. A {historico}"
+        else:
+            sugestao_hist = "PAGAMENTO REF. A "
         regra_inicial = {
             "padrao": sugestao,
             "historico": sugestao_hist,
@@ -3267,11 +3635,12 @@ class App(tk.Tk):
             ]
         # Filtros de persistência dos manuais:
         # - manual (com par_origem): par precisa ainda existir
-        # - manual_planilha: transação precisa ainda estar em pendentes_planilha
-        #   OU já ter sido conciliada (o par some, mas o lançamento fica)
+        # - manual_planilha: transação precisa ainda estar em pendentes_planilha_brutos
+        #   (fonte da verdade — a lista visível é DERIVADA e vai perder a
+        #   transação quando ela vira lançamento, causando bug de ela reaparecer)
         # - manual_ofx: transação precisa ainda estar em pendentes_ofx_brutos
         ids_pares_atuais = {id(p) for p in self.pares_conciliados}
-        ids_pendentes_p = {id(t) for t in self.pendentes_planilha}
+        ids_pendentes_p = {id(t) for t in self.pendentes_planilha_brutos}
         ids_pendentes_o = {id(t) for t in self.pendentes_ofx_brutos}
 
         def _manual_vivo(l: LancamentoContabil) -> bool:
@@ -3298,9 +3667,16 @@ class App(tk.Tk):
             id(l.transacao_origem) for l in self.lancamentos_contabeis
             if l.tipo_regra in ("memo", "manual_ofx") and l.transacao_origem is not None
         }
+        # Também esconde os OFX que casaram com Domínio direto (ofx_ok):
+        # a movimentação já está registrada contabilmente, nada a fazer.
+        ids_ofx_no_dominio = {
+            id_t for id_t, m in self.pendentes_ofx_dominio.items()
+            if m.get("dominio") is not None
+        }
         self.pendentes_ofx = [
             t for t in self.pendentes_ofx_brutos
             if id(t) not in ids_trans_ofx_classificadas
+            and id(t) not in ids_ofx_no_dominio
         ]
         # Deriva pendentes_planilha (visível) a partir dos brutos, removendo:
         # - manual_planilha (lançamento avulso da planilha)
@@ -3473,6 +3849,209 @@ class App(tk.Tk):
 
         self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
+
+    # ----------------- Exportação para Excel -----------------
+
+    def _sugere_nome_export(self, prefixo: str) -> str:
+        """Gera nome sugerido para o arquivo .xlsx, incluindo empresa e data."""
+        from datetime import datetime as _dt
+        emp = self._empresa_selecionada() or {}
+        codi = emp.get("codi_emp", "")
+        hoje = _dt.now().strftime("%Y-%m-%d")
+        # Só caracteres seguros no nome de arquivo
+        base = f"{prefixo}_{codi}_{hoje}" if codi else f"{prefixo}_{hoje}"
+        return "".join(c if c.isalnum() or c in "_-" else "_" for c in base) + ".xlsx"
+
+    def _exportar_conciliados_dominio(self) -> None:
+        """Exporta a aba Conciliados × Domínio para .xlsx.
+        Inclui pares P×OFX triple-matched E pendentes de Caixa que casaram."""
+        # Fontes de dados exatamente como o render da aba
+        pares_triple = [p for p in self.pares_conciliados if p.dominio is not None]
+        caixa_dominio: list[tuple[Transacao, dict]] = []
+        for t in self.pendentes_planilha_brutos:
+            m = self.pendentes_planilha_dominio.get(id(t))
+            if m and m.get("dominio") is not None:
+                caixa_dominio.append((t, m))
+
+        if not pares_triple and not caixa_dominio:
+            messagebox.showinfo(
+                "Sem dados",
+                "Não há lançamentos conciliados com o Domínio para exportar.",
+            )
+            return
+
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar Conciliados × Domínio",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+            initialfile=self._sugere_nome_export("conciliados_dominio"),
+        )
+        if not caminho:
+            return
+        try:
+            total = exportar_conciliados_dominio(caminho, pares_triple, caixa_dominio)
+        except PermissionError:
+            messagebox.showerror(
+                "Arquivo em uso",
+                f"Não foi possível gravar em:\n{caminho}\n\n"
+                "Feche o arquivo se ele já está aberto no Excel e tente novamente.",
+            )
+            return
+        except Exception as e:
+            messagebox.showerror("Erro ao exportar", str(e))
+            return
+        messagebox.showinfo(
+            "Exportação concluída",
+            f"{total} linha(s) exportada(s) para:\n{caminho}",
+        )
+
+    def _exportar_pendentes(self) -> None:
+        """Exporta a aba Pendentes para .xlsx (2 abas: planilha + OFX).
+        Usa a lista VISÍVEL (sem os classificados por regra/manual)."""
+        if not self.pendentes_planilha and not self.pendentes_ofx:
+            messagebox.showinfo(
+                "Sem dados",
+                "Não há pendentes para exportar.",
+            )
+            return
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar Pendentes",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+            initialfile=self._sugere_nome_export("pendentes"),
+        )
+        if not caminho:
+            return
+        try:
+            n_p, n_o = exportar_pendentes(
+                caminho, self.pendentes_planilha, self.pendentes_ofx,
+            )
+        except PermissionError:
+            messagebox.showerror(
+                "Arquivo em uso",
+                f"Não foi possível gravar em:\n{caminho}\n\n"
+                "Feche o arquivo se ele já está aberto no Excel e tente novamente.",
+            )
+            return
+        except Exception as e:
+            messagebox.showerror("Erro ao exportar", str(e))
+            return
+        messagebox.showinfo(
+            "Exportação concluída",
+            f"Exportado para:\n{caminho}\n\n"
+            f"• Pendentes Planilha: {n_p} linha(s)\n"
+            f"• Pendentes OFX: {n_o} linha(s)",
+        )
+
+    def _exportar_pendencias_comparacao(self) -> None:
+        """Exporta as pendências da aba Comparação (linhas amarelas +
+        cinzas + laranjas — tudo que falta no Domínio) para .xlsx.
+        Gera abas separadas por tipo pra manter estruturas coerentes."""
+        # Amarelos: pares P×OFX sem Domínio E que ainda não viraram lançamento
+        amarelos = [
+            par for par in self.pares_conciliados
+            if par.dominio is None and id(par) not in self.ids_pares_classificados
+        ]
+        # Cinzas: pendentes planilha sem match no Domínio E não classificados
+        ids_p_classificadas = {
+            id(l.transacao_origem) for l in self.lancamentos_contabeis
+            if l.tipo_regra in ("manual_planilha", "fornecedor_planilha")
+            and l.transacao_origem is not None
+        }
+        cinzas = [
+            t for t in self.pendentes_planilha_brutos
+            if id(t) not in ids_p_classificadas
+            and not (
+                (m := self.pendentes_planilha_dominio.get(id(t)))
+                and m.get("dominio") is not None
+            )
+        ]
+        # Laranjas: pendentes OFX sem match no Domínio E não classificados
+        ids_o_classificadas = {
+            id(l.transacao_origem) for l in self.lancamentos_contabeis
+            if l.tipo_regra in ("memo", "manual_ofx")
+            and l.transacao_origem is not None
+        }
+        laranjas = [
+            t for t in self.pendentes_ofx_brutos
+            if id(t) not in ids_o_classificadas
+            and not (
+                (m := self.pendentes_ofx_dominio.get(id(t)))
+                and m.get("dominio") is not None
+            )
+        ]
+        if not amarelos and not cinzas and not laranjas:
+            messagebox.showinfo(
+                "Sem pendências",
+                "Não há linhas amarelas, cinzas ou laranjas para exportar.",
+            )
+            return
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar pendências da Comparação",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+            initialfile=self._sugere_nome_export("pendencias_comparacao"),
+        )
+        if not caminho:
+            return
+        try:
+            n_a, n_c, n_l = exportar_pendencias_comparacao(
+                caminho, amarelos, cinzas, laranjas,
+            )
+        except PermissionError:
+            messagebox.showerror(
+                "Arquivo em uso",
+                f"Não foi possível gravar em:\n{caminho}\n\n"
+                "Feche o arquivo se ele já está aberto no Excel e tente novamente.",
+            )
+            return
+        except Exception as e:
+            messagebox.showerror("Erro ao exportar", str(e))
+            return
+        partes = []
+        if n_a:
+            partes.append(f"• Amarelos (P×OFX): {n_a}")
+        if n_c:
+            partes.append(f"• Cinzas (Caixa geral): {n_c}")
+        if n_l:
+            partes.append(f"• Laranjas (OFX sem planilha): {n_l}")
+        messagebox.showinfo(
+            "Exportação concluída",
+            f"Exportado para:\n{caminho}\n\n" + "\n".join(partes),
+        )
+
+    def _exportar_lancamentos_contabeis(self) -> None:
+        """Exporta a aba Lançamentos contábeis para .xlsx."""
+        if not self.lancamentos_contabeis:
+            messagebox.showinfo(
+                "Sem dados",
+                "Não há lançamentos contábeis para exportar.",
+            )
+            return
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar Lançamentos contábeis",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+            initialfile=self._sugere_nome_export("lancamentos_contabeis"),
+        )
+        if not caminho:
+            return
+        try:
+            total = exportar_lancamentos_contabeis(caminho, self.lancamentos_contabeis)
+        except PermissionError:
+            messagebox.showerror(
+                "Arquivo em uso",
+                f"Não foi possível gravar em:\n{caminho}\n\n"
+                "Feche o arquivo se ele já está aberto no Excel e tente novamente.",
+            )
+            return
+        except Exception as e:
+            messagebox.showerror("Erro ao exportar", str(e))
+            return
+        messagebox.showinfo(
+            "Exportação concluída",
+            f"{total} lançamento(s) exportado(s) para:\n{caminho}",
+        )
 
 
 if __name__ == "__main__":
