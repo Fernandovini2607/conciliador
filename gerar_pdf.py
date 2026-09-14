@@ -72,30 +72,31 @@ def bullets(itens: list[str]) -> ListFlowable:
     )
 
 
+# ---------------------------------------------------- Tabelas auxiliares
+
 def tabela_abas() -> Table:
     cabecalho = ["#", "Aba", "Conteúdo"]
     linhas = [
-        ["0", "Planilha", "Dados crus da planilha (linha, vencimento, "
-         "pagamento, emissão, valor, NF, CNPJ, fornecedor, histórico). "
-         "Botão Editar lançamento selecionado."],
-        ["1", "OFX", "Pagamentos do extrato (data compensação, banco, valor, memo). "
-         "Aceita múltiplos OFX de bancos diferentes."],
-        ["2", "Domínio dados", "Parcelas vindas do Domínio com status "
-         "(Aberto / Parcial / Paga, com cores)."],
-        ["3", "Conciliados", "Todos os pares Planilha × OFX casados (verde=auto, "
-         "azul=manual). Coluna Origem mostra o banco do OFX."],
+        ["0", "Planilha", "Dados crus (vencimento, pagamento, emissão, valor, "
+         "NF, CNPJ, fornecedor, histórico, TIPO). Botão Editar lançamento."],
+        ["1", "OFX", "Pagamentos do extrato (data, banco identificado, valor, "
+         "memo, documento). Aceita múltiplos OFX de bancos diferentes."],
+        ["2", "Domínio dados", "Parcelas do Domínio com status (Aberto/Parcial/Paga)."],
+        ["3", "Conciliados", "Pares Planilha × OFX casados. Coluna 'Origem' "
+         "mostra o banco do OFX."],
         ["4", "Pendentes", "Layout vertical (planilha em cima, OFX embaixo). "
-         "4 botões: Lançamento manual e Criar regra para cada lado."],
-        ["5", "Sugestões", "Pares aproximados P × OFX (Δ ≤ 2d e Δ ≤ R$ 10). "
-         "Seleção múltipla + 'Selecionar tudo'."],
-        ["6", "Conciliados × Domínio", "Pares triple-matched (P × OFX × Domínio) "
-         "+ pendentes da planilha (Caixa geral) que casaram com o Domínio."],
-        ["7", "Comparação", "4 status com cores: ok (verde), falta dom (amarelo), "
-         "Caixa ok (azul), Caixa falta (cinza). 3 botões de ação."],
-        ["8", "Lançamentos contábeis", "Saídas geradas por regras (memo / fornecedor / "
-         "fornecedor_planilha) ou manualmente (5 tipos). Botões Editar e Excluir."],
-        ["9", "Plano de contas", "Plano da empresa carregado do Domínio (ctcontas) "
-         "FILTRADO só por contas analíticas."],
+         "4 botões: Lançamento manual e Criar regra para cada lado. "
+         "Botão Exportar Excel."],
+        ["5", "Sugestões", "Pares aproximados (Δ ≤ 2d e Δ ≤ R$ 10). Seleção múltipla."],
+        ["6", "Conciliados × Domínio", "Pares triple-matched + Caixa geral + OFX "
+         "(sem planilha) que casaram no Domínio. Botão Exportar Excel."],
+        ["7", "Comparação", "6 status coloridos (ok, falta dom, caixa ok/falta, "
+         "OFX ok/falta). Legenda + 4 botões (Editar dados, Lançar manual, "
+         "Criar regra, Exportar pendências)."],
+        ["8", "Lançamentos contábeis", "Saídas geradas por regras ou manualmente "
+         "(6 tipos). Botões Editar, Excluir, Exportar Excel."],
+        ["9", "Plano de contas", "Plano da empresa carregado do Domínio, "
+         "FILTRADO só por contas analíticas (tipo A)."],
     ]
     dados = [cabecalho] + [
         [c, ab, Paragraph(co, TEXTO)] for c, ab, co in linhas
@@ -123,32 +124,78 @@ def tabela_abas() -> Table:
 def tabela_tipos_lancamento() -> Table:
     cabecalho = ["tipo_regra", "Origem", "Banco", "Notas"]
     linhas = [
-        ["memo", "Regra automática casa contra memo+documento do OFX",
+        ["memo",
+         "Regra automática casa contra memo + documento do OFX",
          "Do OFX",
-         "Tarifas, IOF, juros. Campo Banco opcional na regra para evitar "
+         "Tarifas, IOF, juros. Regra tem campo opcional Banco para evitar "
          "falso positivo entre bancos diferentes."],
-        ["fornecedor", "Regra automática casa contra par P×OFX sem Domínio",
+        ["fornecedor",
+         "Regra automática casa contra par P × OFX sem Domínio",
          "Do OFX (banco do par)",
-         "Casa contra CNPJ, fornecedor OU histórico da planilha."],
-        ["fornecedor_planilha", "Regra automática casa contra pendente da planilha sem OFX",
+         "Casa contra CNPJ, fornecedor, histórico OU tipo da planilha."],
+        ["fornecedor_planilha",
+         "Regra automática casa contra pendente da planilha (sem OFX)",
          "Caixa geral",
-         "Mesma regra de fornecedor, mas aplicada quando não existe par com OFX."],
-        ["manual", "Lançamento manual a partir de par P×OFX",
-         "Do OFX (banco do par)",
-         "Botão 'Lançar manualmente' na aba Comparação."],
-        ["manual_ofx", "Lançamento manual a partir de pendente OFX",
+         "Mesma regra fornecedor, aplicada ao pendente-só-planilha."],
+        ["manual",
+         "Lançamento manual a partir de par P × OFX (aba Comparação)",
          "Do OFX",
-         "Botão 'Lançamento manual' na aba Pendentes (lado OFX)."],
-        ["manual_planilha", "Lançamento manual a partir de pendente planilha",
+         "Botão 'Lançar manualmente' — não cria regra."],
+        ["manual_ofx",
+         "Lançamento manual a partir de pendente OFX",
+         "Do OFX",
+         "Botão na aba Pendentes lado OFX."],
+        ["manual_planilha",
+         "Lançamento manual a partir de pendente da planilha",
          "Caixa geral",
-         "Botão 'Lançamento manual' na aba Pendentes (lado Planilha)."],
+         "Botão na aba Pendentes lado Planilha."],
     ]
     dados = [cabecalho] + [
         [Paragraph(f"<b>{t}</b>", TEXTO), Paragraph(o, TEXTO),
          Paragraph(b, TEXTO), Paragraph(n, TEXTO)]
         for t, o, b, n in linhas
     ]
-    t = Table(dados, colWidths=[3.0 * cm, 4.6 * cm, 3.0 * cm, 5.8 * cm])
+    t = Table(dados, colWidths=[3.2 * cm, 4.6 * cm, 3.0 * cm, 5.6 * cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a68")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Arial-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTSIZE", (0, 1), (-1, -1), 8.5),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f4f6fa"), colors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return t
+
+
+def tabela_schema_banco() -> Table:
+    cabecalho = ["Tabela", "Conteúdo", "Colunas principais"]
+    linhas = [
+        ["app_config",
+         "Configurações globais (fontes SQL do Domínio, chaves/valores JSON)",
+         "chave (PK), valor (JSON), atualizado_em"],
+        ["regra_taxa",
+         "Regras de classificação contábil, uma linha por regra",
+         "id (PK), codi_emp, tipo (memo/fornecedor), padrao, historico, "
+         "conta, banco, ordem"],
+        ["mapeamento_planilha",
+         "Mapeamento coluna→campo por empresa",
+         "id (PK), codi_emp, campo, nome_coluna (UNIQUE codi_emp+campo)"],
+        ["usuario",
+         "Usuários do app com senha (PBKDF2)",
+         "id (PK), username (UNIQUE), nome, email, senha_hash, ativo, "
+         "admin, empresa_ativa (JSON), ultimo_login, criado_em"],
+    ]
+    dados = [cabecalho] + [
+        [Paragraph(f"<b>{t}</b>", TEXTO), Paragraph(c, TEXTO), Paragraph(co, TEXTO)]
+        for t, c, co in linhas
+    ]
+    t = Table(dados, colWidths=[3.8 * cm, 5.4 * cm, 7.2 * cm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a68")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -180,7 +227,8 @@ def construir() -> list:
 
     flow.append(Paragraph("Relatório do Sistema", TITULO))
     flow.append(Paragraph(
-        "Conciliador OFX × Planilha × Domínio — funcionalidades implementadas",
+        "Conciliador OFX × Planilha × Domínio — funcionalidades implementadas "
+        "(Janco Assessoria Contábil)",
         SUBTITULO,
     ))
 
@@ -188,88 +236,147 @@ def construir() -> list:
     flow.append(Paragraph("1. Visão geral", H1))
     flow.append(Paragraph(
         "Aplicativo desktop em Python/Tkinter para conciliação em 3 níveis "
-        "e classificação contábil automática. Suporta inclusive lançamentos "
-        "de Caixa geral (entradas na planilha sem contraparte no extrato "
-        "bancário).",
+        "e classificação contábil automática. Multi-usuário (rede) com "
+        "autenticação individual, dados persistidos em MariaDB compartilhado.",
         TEXTO,
     ))
     flow.append(bullets([
         "<b>Planilha (.xlsx)</b> com contas a pagar — só Vencimento e Valor "
         "são obrigatórios; demais campos (pagamento, emissão, NF, CNPJ, "
-        "fornecedor, histórico) são opcionais.",
+        "fornecedor, histórico, tipo) são opcionais.",
         "<b>Extrato bancário (OFX)</b>: aceita <b>múltiplos arquivos</b> de "
-        "bancos diferentes; só pagamentos (negativos) são considerados.",
+        "bancos diferentes; identifica o banco de cada transação.",
         "<b>Sistema Domínio (Escrita Fiscal + Contábil)</b> via ODBC "
         "(read-only): puxa parcelas, status (Aberto/Parcial/Paga) e o plano "
-        "de contas da empresa (filtrado por contas analíticas).",
+        "de contas da empresa (filtrado só por contas analíticas).",
         "<b>Lançamentos contábeis automáticos</b>: pendentes do OFX, pares "
-        "que faltam no Domínio E pendentes da planilha sem OFX podem ser "
-        "classificados por regras (salvas por empresa) ou manualmente.",
-        "<b>Mapeamento de colunas por empresa</b>: a primeira vez que você "
-        "mapeia as colunas da planilha de uma empresa fica salvo — próximas "
-        "planilhas dessa empresa não precisam re-mapear (a menos que o "
-        "cabeçalho tenha mudado).",
+        "que faltam no Domínio E pendentes da planilha (Caixa geral) podem "
+        "ser classificados por regras salvas por empresa ou manualmente.",
+        "<b>Comparação OFX × Domínio direta</b>: mesmo sem planilha, dá pra "
+        "conferir se os pagamentos do extrato bateram com o Domínio.",
+        "<b>Multi-usuário com login individual</b>: cada operador tem seu "
+        "próprio username/senha; empresa ativa é individual; regras e "
+        "mapeamentos são compartilhados.",
     ]))
 
     # ============================ 2
-    flow.append(Paragraph("2. Leitura de dados", H1))
+    flow.append(Paragraph("2. Arquitetura", H1))
+
+    flow.append(Paragraph("Stack tecnológico", H2))
+    flow.append(bullets([
+        "<b>Python 3.11+</b> + <b>Tkinter</b> (UI desktop nativa)",
+        "<b>MariaDB 10.5+</b> como banco de configurações compartilhado "
+        "(via PyMySQL, pure Python — sem compilação C)",
+        "<b>SQL Anywhere (Domínio Contábil)</b> via <b>pyodbc</b> (read-only)",
+        "<b>openpyxl</b> para .xlsx (leitura e escrita), <b>ofxparse</b> para OFX",
+        "<b>reportlab</b> para geração do PDF de documentação",
+        "<b>PyInstaller</b> para empacotar em .exe distribuível (Windows)",
+    ]))
+
+    flow.append(Paragraph("Modelo de deployment", H2))
+    flow.append(bullets([
+        "<b>Um servidor MariaDB</b> na rede local (ex: 10.0.1.47:3307) "
+        "guardando todas as configurações, regras, mapeamentos e usuários.",
+        "<b>Máquinas cliente</b> rodam o Conciliador.exe empacotado, "
+        "conectando no MariaDB via rede.",
+        "<b>Domínio Contábil</b> continua sendo lido diretamente via ODBC "
+        "em cada máquina (não é feito cache no MariaDB).",
+        "<b>Distribuição</b>: ZIP com .exe + pasta data/ (credenciais do "
+        "MariaDB já preenchidas). Cada operador só configura o "
+        "<i>dominio_config.json</i> com o próprio login do Domínio.",
+    ]))
+
+    # ============================ 3
+    flow.append(Paragraph("3. Autenticação e usuários", H1))
+
+    flow.append(Paragraph("Login individual", H2))
+    flow.append(bullets([
+        "Tela de login aparece antes da UI principal, forçada ao topo "
+        "(-topmost + focus_force pra não ficar atrás de outras janelas).",
+        "Autenticação por username + senha, validados contra a tabela "
+        "<i>usuario</i> do MariaDB.",
+        "Senhas armazenadas com <b>PBKDF2-HMAC-SHA256</b>, 200.000 iterações, "
+        "salt aleatório de 16 bytes. Formato: <i>iter$salt$hash</i>. "
+        "Comparação em tempo constante (hmac.compare_digest).",
+        "Após login: <i>usuario.ultimo_login</i> atualizado; "
+        "<i>config.set_usuario_atual(id)</i> registra pra config saber "
+        "de qual usuário é a <i>empresa_ativa</i>.",
+    ]))
+
+    flow.append(Paragraph("Perfis", H2))
+    flow.append(bullets([
+        "<b>admin</b>: gerencia (criar/editar/desativar) outros usuários, "
+        "vê botões <i>Fonte: pagamentos</i>, <i>Fonte: plano contas</i>, "
+        "<i>Gerenciar usuários</i>.",
+        "<b>operador</b>: uso normal do app + trocar a própria senha. "
+        "Botões de configuração escondidos.",
+    ]))
+
+    flow.append(Paragraph("Empresa ativa por usuário", H2))
+    flow.append(bullets([
+        "Antes: <i>dominio_empresa</i> era global no config.json.",
+        "Agora: coluna <i>usuario.empresa_ativa</i> (JSON) — cada login "
+        "tem sua própria empresa selecionada.",
+        "<b>Regras e mapeamentos continuam por empresa</b> (compartilhados) "
+        "— A muda regra da empresa 55, B vê o mesmo estado.",
+        "<b>Fontes SQL do Domínio</b> continuam globais (mesma config pra "
+        "todos, faz sentido — SQL de acesso ao Domínio é do sistema).",
+    ]))
+
+    flow.append(Paragraph("Barra do topo", H2))
+    flow.append(Paragraph(
+        "Todo usuário vê 'Usuário logado — perfil' + botões 'Minha senha' e "
+        "'Trocar usuário'. Admin vê também 'Gerenciar usuários'.",
+        TEXTO,
+    ))
+
+    # ============================ 4
+    flow.append(PageBreak())
+    flow.append(Paragraph("4. Leitura de dados", H1))
 
     flow.append(Paragraph("Planilha Excel (.xlsx) — parser_xlsx.py", H2))
     flow.append(bullets([
         "Detecção automática da linha do cabeçalho (busca nas primeiras 15).",
-        "Auto-detecção dos campos por nome (dezenas de aliases pra Data, "
-        "Vencimento, Pagamento, Emissão, Valor, Nº NF, CNPJ, Fornecedor, "
-        "Histórico).",
+        "Auto-detecção dos campos por nome, com dezenas de aliases pra cada "
+        "(Vencimento, Pagamento, Emissão, Valor, NF, CNPJ, Fornecedor, "
+        "Histórico, Tipo).",
         "Fallback por conteúdo (datas → Data, números → Valor, textos "
         "longos → Fornecedor).",
-        "<b>Apenas Vencimento e Valor são obrigatórios</b> — os demais são "
-        "opcionais. O diálogo de mapeamento tem opção <i>(deixar vazia)</i> "
-        "em cada combo para colunas que a planilha não tem.",
-        "Diálogo de mapeamento com preview ao vivo (10 linhas), marcação "
-        "vermelha em linhas inválidas e labels diferenciadas (opcional "
-        "em cinza, obrigatório em preto).",
+        "<b>Apenas Vencimento e Valor são obrigatórios</b>. No diálogo de "
+        "mapeamento cada combo tem opção <i>(deixar vazia)</i>.",
+        "Preview ao vivo (10 linhas) com marcação vermelha em linhas inválidas.",
         "Conversão BR de valores (R$ 1.234,56, parênteses pra negativo).",
     ]))
 
     flow.append(Paragraph("Extrato OFX — parser_ofx.py", H2))
     flow.append(bullets([
-        "Leitura via <i>ofxparse</i>.",
-        "<b>Aceita múltiplos arquivos</b> num único Importar (Ctrl+clique "
-        "no dialog) — soma todas as transações em <i>transacoes_ofx</i>.",
+        "Leitura via <i>ofxparse</i>. Aceita <b>múltiplos arquivos</b> num "
+        "único Importar (Ctrl+clique).",
         "Identifica o <b>banco</b> de cada lançamento via OFX "
         "(institution.organization, routing_number, account_id) com "
         "fallback ao nome do arquivo.",
         "Extrai o número do <b>documento</b> (CHECKNUM ou FITID) — usado "
-        "no match de regras tipo memo.",
-        "Filtra automaticamente só pagamentos (valores negativos), "
-        "invertendo o sinal para casar com a planilha.",
+        "em regras tipo memo.",
+        "Filtra automaticamente só pagamentos (valores negativos), invertendo "
+        "o sinal pra casar com a planilha.",
     ]))
 
     flow.append(Paragraph("Sistema Domínio (ODBC) — parser_dominio.py", H2))
     flow.append(bullets([
-        "Padrão Janco: <i>data/dominio_config.json</i> guarda credenciais; "
-        "<i>connect_dominio(readonly=True)</i> como context manager.",
-        "<b>Duas fontes independentes</b> (<i>dominio_fonte_pagamentos</i> e "
-        "<i>dominio_fonte_plano_contas</i>) — cada uma com seu SQL e mapeamento.",
-        "Modelos: <i>Transacao</i> (pagamentos) e <i>ContaContabil</i> "
-        "(plano de contas).",
-        "<i>listar_empresas(conn)</i> lê <i>bethadba.geempre</i>; "
-        "<i>listar_tabelas</i> filtra schema <i>bethadba</i> por default.",
-        "<i>extrair_pagamentos</i> detecta colunas opcionais <i>status_parcela</i> "
-        "e <i>valor_pago</i> vindas do SQL (status calculado por sub-query em "
-        "<i>efentradaspag</i>).",
+        "<b>Auto-conexão no startup</b>: usa credenciais salvas em "
+        "<i>data/dominio_config.json</i>. Silencioso se falhar — usuário "
+        "pode reconectar manualmente.",
+        "<b>Duas fontes independentes</b> (<i>pagamentos</i> e "
+        "<i>plano_contas</i>) — cada uma com seu SQL e mapeamento próprios.",
+        "<i>extrair_pagamentos</i> detecta colunas opcionais "
+        "<i>status_parcela</i> e <i>valor_pago</i>.",
         "<i>extrair_plano_contas</i> <b>filtra automaticamente só contas "
-        "analíticas</b> (tipo = \"A\"). Reconhece a coluna de tipo pelo "
-        "nome (TIPO_CTA, CTRG_CTA, TIPO_CTC, ANAL_CTA, etc.) ou por "
-        "mapeamento explícito.",
+        "analíticas</b> (tipo A). Reconhece a coluna de tipo pelo nome "
+        "(TIPO_CTA, CTRG_CTA, etc.) ou mapeamento explícito.",
         "Injeção automática de <i>CODI_EMP = ?</i> quando o SQL tem <i>?</i>.",
     ]))
 
-    flow.append(Paragraph("SQL recomendado para o plano de contas", H2))
-    flow.append(Paragraph(
-        "Cole isso no modo Query SQL manual da Fonte de plano de contas:",
-        TEXTO,
-    ))
+    flow.append(Paragraph("SQL recomendado — plano de contas", H2))
     flow.append(Paragraph(
         "SELECT CLAS_CTA, NOME_CTA, TIPO_CTA<br/>"
         "FROM bethadba.ctcontas<br/>"
@@ -278,286 +385,292 @@ def construir() -> list:
         TEXTO_CODIGO,
     ))
 
-    # ============================ 3
-    flow.append(Paragraph("3. Modelo de dados", H1))
-    flow.append(Paragraph("Campos da planilha (8 — apenas 2 obrigatórios)", H2))
-    flow.append(bullets([
-        "<b>Data vencimento</b> — chave do match (obrigatório)",
-        "<b>Valor</b> — chave do match (obrigatório)",
-        "Data pagamento — opcional, usada quando disponível",
-        "Data emissão — opcional",
-        "Nº NF — opcional, usado no match com Domínio quando disponível",
-        "CNPJ fornecedor — opcional, usado em regras fornecedor",
-        "Nome do fornecedor — opcional, usado em regras fornecedor",
-        "Histórico — opcional, usado em regras fornecedor (case-insensitive substring)",
-    ]))
-    flow.append(Paragraph("Campos do Domínio (pagamentos): 6 obrigatórios + 2 opcionais", TEXTO))
-    flow.append(bullets([
-        "Obrigatórios: Data vencimento, Valor, Data emissão, NF, CNPJ, Fornecedor",
-        "Opcionais (vindos do SELECT): <i>status_parcela</i> e <i>valor_pago</i>",
-    ]))
-    flow.append(Paragraph("Campos do plano de contas: 2 obrigatórios + 1 opcional", TEXTO))
-    flow.append(bullets([
-        "Obrigatórios: <b>Código</b> (CLAS_CTA) e <b>Descrição</b> (NOME_CTA)",
-        "Opcional mas <b>recomendado</b>: <b>Tipo</b> (TIPO_CTA — A/S analítica/sintética) "
-        "— filtra para mostrar só contas analíticas",
-    ]))
+    # ============================ 5
+    flow.append(Paragraph("5. Lógica de conciliação", H1))
 
-    # ============================ 4
-    flow.append(PageBreak())
-    flow.append(Paragraph("4. Lógica de conciliação", H1))
-
-    flow.append(Paragraph("Fase 1 — Planilha × OFX (matcher.py)", H2))
+    flow.append(Paragraph("Nível 1 — Planilha × OFX (matcher.py)", H2))
     flow.append(bullets([
         "<b>conciliar_automatico</b> em DUAS sub-fases:",
-        "<b>Sub-fase 1.1 — match exato</b>: por (data_pagamento ou "
-        "vencimento, valor). Da planilha usa <i>data_pagamento</i> se "
-        "mapeada; do OFX usa <i>data</i> (compensação).",
-        "<b>Sub-fase 1.2 — match aproximado pequeno</b>: nos restantes, "
-        "Δdias ≤ 2 E Δvalor ≤ R$ 0,10. Esses caem direto em Conciliados "
-        "(visíveis na coluna Diferenças) — não viram sugestão.",
-        "<b>gerar_sugestoes</b>: pares com Δdias ≤ 2 e Δvalor ≤ R$ 10,00 "
-        "(mais permissivo) — ficam na aba Sugestões com seleção múltipla.",
-        "<b>Conciliação manual</b>: selecionar 1 em cada lado dos Pendentes.",
+        "<b>1.1 Match exato</b> por (data_pagamento se mapeada senão "
+        "vencimento, valor). Cada Transacao do OFX só casa com 1 planilha.",
+        "<b>1.2 Match aproximado pequeno</b>: nos restantes, Δdias ≤ 2 E "
+        "Δvalor ≤ R$ 0,10. Caem em Conciliados (com diferença visível).",
+        "<b>gerar_sugestoes</b>: Δdias ≤ 2 e Δvalor ≤ R$ 10 — ficam na aba "
+        "Sugestões com seleção múltipla e 'Aceitar tudo'.",
     ]))
 
-    flow.append(Paragraph("Fase 2 — Comparação com Domínio (main.py)", H2))
+    flow.append(Paragraph("Nível 2 — Comparação com Domínio", H2))
     flow.append(bullets([
-        "<i>_filtrar_conciliados_por_dominio</i> roda em DUAS fontes:",
-        "<b>Pares P×OFX</b> (têm prioridade) e <b>pendentes da planilha</b> "
-        "(Caixa geral, sem OFX casado).",
-        "<b>Sub-fase 2.1 — match exato</b>: por (data_vencimento + valor + Nº NF).",
-        "<b>Sub-fase 2.2 — match aproximado 2-de-3</b>: para os restantes, "
-        "pelo menos 2 de 3 critérios (CNPJ, data_vencimento, valor) iguais. "
-        "Diferença registrada em <i>diff_dias_dominio</i> / "
-        "<i>diff_valor_dominio</i> e mostrada na coluna Δ Domínio.",
-        "Cada Transação do Domínio só pode casar com 1 item — pares têm "
-        "prioridade sobre pendentes em ambas as sub-fases.",
-        "Pares triple-matched → aba <b>Conciliados × Domínio</b>.",
-        "Pendentes da planilha que casaram → também aparecem em "
-        "<b>Conciliados × Domínio</b> com origem \"Caixa geral\".",
-        "Pares que não bateram (amarelos) e pendentes que não bateram "
-        "(cinzas) ficam na aba <b>Comparação</b> — alvos de classificação.",
+        "<i>_filtrar_conciliados_por_dominio</i> processa <b>3 fontes</b>:",
+        "1. Pares Planilha × OFX conciliados",
+        "2. Pendentes da planilha (Caixa geral, sem OFX correspondente)",
+        "3. Pendentes do OFX (sem planilha correspondente)",
+        "<b>Fase exata</b>: (data_vencimento + valor + NF).",
+        "<b>Fase aproximada 2-de-3</b>: pelo menos 2 de 3 critérios (CNPJ, "
+        "data, valor) iguais.",
+        "Prioridade: pares > pendentes planilha > pendentes OFX. Cada "
+        "Transacao do Domínio só casa com 1 item.",
     ]))
 
-    # ============================ 5
-    flow.append(Paragraph("5. Lançamentos contábeis", H1))
+    flow.append(Paragraph("Comparação OFX × Domínio direta (sem planilha)", H2))
+    flow.append(bullets([
+        "Cenário útil quando o operador só tem OFX e Domínio (não recebeu "
+        "planilha de contas a pagar).",
+        "Botão 'Conciliar' habilita com planilha OU OFX (não exige os dois).",
+        "Match OFX × Domínio segue mesma lógica exato + 2-de-3.",
+        "Pendentes OFX que casarem com Domínio somem da aba Pendentes e "
+        "aparecem em Conciliados × Domínio com 'Origem = banco do OFX'.",
+    ]))
+
+    # ============================ 6
+    flow.append(PageBreak())
+    flow.append(Paragraph("6. Lançamentos contábeis", H1))
     flow.append(Paragraph(
-        "Existem 6 tipos de lançamento contábil no app, cobrindo todas as "
-        "combinações possíveis de origem (pendente / par) e modo (regra "
-        "automática / manual avulso):", TEXTO,
+        "6 tipos de lançamento cobrindo todas as combinações "
+        "origem (par/pendente) × modo (regra/manual):", TEXTO,
     ))
     flow.append(tabela_tipos_lancamento())
     flow.append(Spacer(1, 6))
 
     flow.append(Paragraph("Regras automáticas — configuração", H2))
     flow.append(bullets([
-        "Botão <b>\"Configurar taxas\"</b> abre diálogo com lista editável "
-        "de regras. Dois botões separados: <i>+ Regra por memo</i> e "
-        "<i>+ Regra por fornecedor</i>.",
-        "Cada regra tem: tipo, padrão, histórico contábil, conta contábil. "
-        "Regras tipo <i>memo</i> têm também o campo opcional <b>Banco</b> "
-        "(se preenchido, regra só dispara em transações do banco específico).",
-        "O campo <b>Conta contábil</b> é um <b>Combobox autocomplete</b> "
-        "carregando o plano da empresa filtrado por analíticas.",
-        "Regras tipo <i>fornecedor</i> casam contra <b>CNPJ + nome + "
-        "histórico</b> da planilha (substring case-insensitive). Atendem "
-        "tanto pares P×OFX quanto pendentes-só-planilha (Caixa geral).",
-        "Regras são <b>salvas por empresa</b> em "
-        "<i>cfg[\"regras_taxas_por_empresa\"][codi_emp]</i>. Trocar de "
-        "empresa muda automaticamente o conjunto ativo.",
-        "<b>Atalhos contextuais na aba Pendentes</b>: 2 botões em cada lado "
-        "(Lançamento manual + Criar regra) pré-populam dados a partir do "
-        "pendente selecionado.",
-        "<b>Atalho na aba Comparação</b>: <i>\"Criar regra de fornecedor\"</i> "
-        "funciona tanto pra par amarelo quanto pra Caixa cinza.",
+        "Botão <b>Configurar taxas</b> abre diálogo com lista editável.",
+        "2 botões: <i>+ Regra por memo</i> e <i>+ Regra por fornecedor</i>.",
+        "Regras <b>memo</b> podem ter campo opcional <i>Banco</i> — se "
+        "preenchido, regra só dispara em transações daquele banco (evita "
+        "falso positivo entre bancos com memos parecidos).",
+        "Regras <b>fornecedor</b> casam contra CNPJ + nome + histórico + "
+        "TIPO da planilha (substring case-insensitive).",
+        "Campo Conta é Combobox autocomplete carregando plano de contas "
+        "filtrado por analíticas.",
+        "Regras salvas por empresa em <i>regra_taxa.codi_emp</i>.",
+        "<b>Atalhos contextuais na aba Pendentes</b>: pré-populam a regra "
+        "com dados da linha selecionada.",
     ]))
 
-    flow.append(Paragraph("Edição e exclusão de lançamentos", H2))
+    flow.append(Paragraph("Editar e excluir lançamentos", H2))
     flow.append(bullets([
         "Aba <b>Lançamentos contábeis</b> tem botões <b>Editar lançamento</b> "
         "e <b>Excluir lançamento</b>.",
-        "<b>Editar</b>: abre diálogo com data, valor, banco, conta e "
-        "histórico editáveis. Se o lançamento veio de uma regra automática, "
-        "ele é \"promovido a manual\" — a versão editada persiste e a "
-        "transação origem fica marcada como ignorada para não regerar.",
-        "<b>Excluir</b>: remove o lançamento (manual) ou marca a transação "
-        "origem como ignorada (automático). A transação volta para a aba "
-        "Pendentes (do lado correspondente).",
-        "Estado de ignorados fica em <i>self.lancamentos_ignorados: set[int]</i> "
-        "e é aplicado a cada recálculo.",
-    ]))
-
-    flow.append(Paragraph("Edição de dados do par e da Transacao", H2))
-    flow.append(bullets([
-        "Aba <b>Planilha</b>: botão <i>Editar lançamento selecionado</i> abre "
-        "diálogo com os 8 campos da Transacao (vencimento, pagamento, "
-        "emissão, valor, NF, CNPJ, fornecedor, histórico). Vencimento e "
-        "Valor são obrigatórios. Após salvar, os resultados de conciliação "
-        "são limpos — usuário precisa rodar Conciliar de novo.",
-        "Aba <b>Comparação</b>: botão <i>Editar dados</i> para pares amarelos "
-        "(P×OFX sem Domínio). Após salvar, o app re-tenta o match e o par "
-        "migra automaticamente para <i>Conciliados × Domínio</i> se passar a "
-        "bater.",
-    ]))
-
-    # ============================ 6
-    flow.append(PageBreak())
-    flow.append(Paragraph("6. Interface gráfica (Tkinter)", H1))
-
-    flow.append(Paragraph("Barra de ações (4 blocos no topo)", H2))
-    flow.append(bullets([
-        "<b>1. Domínio:</b> Conectar | Selecionar empresa | Fonte: pagamentos | "
-        "Fonte: plano contas | Carregar pagamentos | Carregar plano contas | label",
-        "<b>2. Planilha:</b> Abrir planilha (.xlsx) | Editar colunas | "
-        "Limpar planilha | label",
-        "<b>3. OFX:</b> Importar OFX (multi-select) | Limpar OFX | label",
-        "<b>4. Ações:</b> Conciliar | Comparar com Domínio | Configurar taxas | resumo",
-    ]))
-    flow.append(Paragraph(
-        "Os botões do Domínio ficam <b>em cima</b> porque define a empresa "
-        "e o plano de contas. Trocar de empresa <b>limpa automaticamente</b> "
-        "planilha, OFX, pagamentos Domínio e plano de contas (com "
-        "confirmação) — força importar dados específicos da nova empresa. "
-        "As regras de taxas e o mapeamento de colunas continuam salvos por "
-        "empresa.",
-        TEXTO,
-    ))
-
-    flow.append(Paragraph("Filtros das abas de dados", H2))
-    flow.append(bullets([
-        "<b>Busca global</b> (campo \"Buscar:\") filtra em todas as colunas "
-        "em tempo real.",
-        "<b>Status</b> (na Domínio dados): dropdown Todos / Aberto / "
-        "Parcial / Paga.",
-        "<b>Filtros estilo Excel por coluna</b>: clica no cabeçalho \"▾\" → "
-        "popup com checkboxes dos valores únicos + busca interna + marcar/"
-        "desmarcar tudo. Cabeçalho mostra \"▼ ★\" com filtro ativo.",
-        "Todos combinam com AND; botão \"Limpar\" zera tudo.",
-    ]))
-
-    flow.append(Paragraph("Cores na aba Comparação", H2))
-    flow.append(bullets([
-        "🟢 <b>ok</b> (verde claro) — Conciliado P×OFX e no Domínio",
-        "🟡 <b>falta_dominio</b> (amarelo) — Conciliado P×OFX, falta no Domínio",
-        "🔵 <b>caixa_ok</b> (azul claro) — Caixa geral no Domínio",
-        "⚪ <b>caixa_falta</b> (cinza) — Caixa geral falta no Domínio",
-    ]))
-
-    flow.append(Paragraph("Cores nas abas Domínio dados e Conciliados × Domínio", H2))
-    flow.append(bullets([
-        "🟢 <b>Aberto</b> — verde (ainda pode ser tratado / lançado)",
-        "🔵 <b>Parcial</b> — azul claro (pagamento parcial)",
-        "⚪ <b>Paga</b> — cinza (já liquidada no Domínio)",
-    ]))
-
-    flow.append(Paragraph("Abas do Notebook (10 abas em 3 blocos)", H2))
-    flow.append(tabela_abas())
-    flow.append(Spacer(1, 8))
-
-    flow.append(Paragraph("Layout da aba Pendentes", H2))
-    flow.append(bullets([
-        "<b>Layout vertical</b>: planilha em cima (com colunas Vencimento, "
-        "Pagamento, Valor, Nº NF, Fornecedor, Histórico), OFX embaixo "
-        "(com colunas Data pagamento, Banco, Documento, Valor, Memo OFX).",
-        "Cada bloco tem 2 botões abaixo da tabela: <b>Lançamento manual</b> "
-        "e <b>Criar regra</b>.",
-        "Botão <b>Conciliar selecionadas</b> ancorado no rodapé absoluto.",
+        "<b>Editar</b>: diálogo com data/valor/banco/conta/histórico editáveis. "
+        "Se lançamento veio de regra, é 'promovido a manual' — a versão "
+        "editada persiste, transação origem é marcada como ignorada.",
+        "<b>Excluir</b>: manual remove; automático marca origem como ignorada. "
+        "Transação volta pra aba Pendentes.",
     ]))
 
     # ============================ 7
-    flow.append(Paragraph("7. Persistência e configuração", H1))
-    flow.append(bullets([
-        "<b>config.json</b> (raiz, gitignored): preferências do app.",
-        "<b>data/dominio_config.json</b> (gitignored): credenciais ODBC.",
-        "Migrações automáticas no startup: <i>cfg[\"dominio\"]</i> antigo → "
-        "estrutura nova; <i>cfg[\"regras_taxas\"]</i> global → por empresa; "
-        "<i>cfg[\"dominio_fonte\"]</i> → <i>dominio_fonte_pagamentos</i>.",
-    ]))
-
-    flow.append(Paragraph("Conteúdo do config.json", H2))
-    flow.append(bullets([
-        "<b>dominio_empresa</b>: {codi_emp, razao, cnpj} da empresa ativa.",
-        "<b>dominio_fonte_pagamentos</b>: {modo, sql ou tabela, mapeamento, where}.",
-        "<b>dominio_fonte_plano_contas</b>: idem, para o plano.",
-        "<b>regras_taxas_por_empresa</b>: dict {codi_emp: [regras…]}.",
-        "<b>mapeamentos_planilha_por_empresa</b>: dict {codi_emp: "
-        "{campo: nome_coluna}}. Mapeamento salvo POR NOME DE COLUNA — "
-        "resiste a reordenação de colunas entre planilhas.",
-    ]))
-
-    flow.append(Paragraph("Estrutura típica de regras_taxas_por_empresa", H2))
+    flow.append(Paragraph("7. Aba Comparação — 6 cores", H1))
     flow.append(Paragraph(
-        '{ "55": [ '
-        '{ "tipo": "memo", "padrao": "TAR PACOTE", "banco": "Banco do Brasil", '
-        '"historico": "Tarifa BB", "conta": "4.2.1.001" }, '
-        '{ "tipo": "fornecedor", "padrao": "07358761", "historico": "Compras Gerdau", '
-        '"conta": "1.1.3.005" } '
-        '] }',
-        TEXTO_CODIGO,
+        "Cabeçalho tem legenda com 6 chips coloridos indicando o significado "
+        "de cada cor:", TEXTO,
     ))
-
-    flow.append(Paragraph("Estrutura típica de mapeamentos_planilha_por_empresa", H2))
+    flow.append(bullets([
+        "🟢 <b>OK</b> (verde) — Conciliado P × OFX e no Domínio",
+        "🟡 <b>Falta dom</b> (amarelo) — Conciliado P × OFX, falta no Domínio",
+        "🔵 <b>Caixa OK</b> (azul claro) — Pendente planilha (Caixa geral) no Domínio",
+        "⚪ <b>Caixa falta</b> (cinza) — Pendente planilha, falta no Domínio",
+        "🩵 <b>OFX OK</b> (ciano) — Pendente OFX (sem planilha) no Domínio",
+        "🟠 <b>OFX falta</b> (laranja) — Pendente OFX, falta no Domínio",
+    ]))
     flow.append(Paragraph(
-        '{ "55": { '
-        '"data": "Vencimento", "data_pagamento": "Data Pgto", '
-        '"valor": "Valor", "fornecedor": "Fornecedor", '
-        '"historico": "Histórico" '
-        '} }',
-        TEXTO_CODIGO,
+        "Título da aba mostra contagem por grupo. Ações (Editar dados, "
+        "Lançar manualmente, Criar regra, Exportar pendências) funcionam "
+        "em qualquer linha 'falta'.",
+        TEXTO,
     ))
 
     # ============================ 8
-    flow.append(Paragraph("8. Infraestrutura", H1))
+    flow.append(Paragraph("8. Interface gráfica", H1))
+
+    flow.append(Paragraph("Barras superiores (4 blocos)", H2))
     flow.append(bullets([
-        "<b>requirements.txt:</b> openpyxl, ofxparse, pyodbc, reportlab.",
-        "<b>.gitignore:</b> protege config.json, data/dominio_config.json, "
-        ".venv/, __pycache__/, planilhas, OFX e CSV.",
-        "<b>iniciar.bat:</b> duplo-clique no Explorer → faz git pull + "
-        "ativa venv + abre o app, sem precisar abrir terminal.",
-        "<b>gerar_pdf.py:</b> regenera este relatório.",
-        "<b>Repositório:</b> github.com/Fernandovini2607/conciliador (privado).",
+        "<b>Usuário</b>: logado, perfil, botões Minha senha / Gerenciar / Trocar.",
+        "<b>Domínio</b>: Conectar, Selecionar empresa, Fonte pagamentos "
+        "(admin), Fonte plano contas (admin), Carregar pagamentos, Carregar "
+        "plano contas.",
+        "<b>Planilha</b>: Abrir, Editar colunas, Limpar planilha.",
+        "<b>OFX</b>: Importar, Limpar OFX.",
+        "<b>Ações</b>: Conciliar, Comparar com Domínio, Configurar taxas.",
     ]))
 
-    # ============================ 9
-    flow.append(Paragraph("9. Convenções herdadas do projeto Janco", H1))
+    flow.append(Paragraph("Filtros das abas de dados", H2))
     flow.append(bullets([
-        "Tabelas do Domínio Escrita Fiscal e Contábil vivem no schema "
-        "<b>bethadba</b> (sempre prefixar).",
-        "Conexão ODBC é sempre <b>read-only</b> — escrita exige RPA "
-        "(fora do escopo deste app).",
-        "<b>Gotcha SQL Anywhere</b>: DISTINCT + ORDER BY exige aliases "
-        "do SELECT (não nomes qualificados — erro -854).",
-        "Empresas compartilham a mesma base — separação por "
-        "<b>CODI_EMP</b> em cada tabela; o app injeta o filtro "
-        "automaticamente quando o SQL tem <i>?</i>.",
+        "<b>Busca global</b> (Buscar:) filtra em tempo real.",
+        "<b>Status</b> (Domínio dados): dropdown Todos/Aberto/Parcial/Paga.",
+        "<b>Filtros estilo Excel por coluna</b>: clique no cabeçalho ▾ → "
+        "popup com checkboxes + busca + marcar/desmarcar tudo.",
+        "Cabeçalho mostra ▼ ★ em colunas com filtro ativo.",
+    ]))
+
+    flow.append(Paragraph("Abas do Notebook (10 abas)", H2))
+    flow.append(tabela_abas())
+
+    # ============================ 9
+    flow.append(PageBreak())
+    flow.append(Paragraph("9. Persistência (MariaDB)", H1))
+
+    flow.append(Paragraph("Banco compartilhado", H2))
+    flow.append(bullets([
+        "Todas as configurações do sistema, regras, mapeamentos e usuários "
+        "ficam em MariaDB compartilhado na rede local.",
+        "Cada máquina cliente lê/escreve diretamente no banco — não há "
+        "backend intermediário.",
+        "Camada de acesso: <i>db.py</i> (PyMySQL + context manager) e "
+        "<i>config.py</i> (API carregar/salvar compatível com o config.json "
+        "antigo, agora sobre MariaDB).",
+    ]))
+
+    flow.append(Paragraph("Schema (4 tabelas)", H2))
+    flow.append(tabela_schema_banco())
+    flow.append(Spacer(1, 6))
+
+    flow.append(Paragraph("Setup e migração", H2))
+    flow.append(bullets([
+        "<i>setup_db.py</i>: script interativo — pede credenciais MariaDB, "
+        "cria banco + tabelas, cadastra 1º admin, migra <i>config.json</i> "
+        "antigo se houver.",
+        "Idempotente (CREATE IF NOT EXISTS); pode rodar de novo sem risco.",
+        "Bootstrap: se não existe nenhum usuário, força criação do 1º admin "
+        "no setup.",
+    ]))
+
+    flow.append(Paragraph("Credenciais", H2))
+    flow.append(bullets([
+        "<i>data/db_config.json</i>: host, porta, user, senha, database.",
+        "<i>data/dominio_config.json</i>: DSN, usuário, senha do Domínio "
+        "(individual por operador — cada consulta ODBC fica rastreada no "
+        "Domínio).",
+        "Ambos são gitignored — nunca vão pro repositório.",
     ]))
 
     # ============================ 10
-    flow.append(Paragraph("10. Tabelas do Domínio utilizadas", H1))
+    flow.append(Paragraph("10. Exportação para Excel (.xlsx)", H1))
+    flow.append(Paragraph(
+        "3 abas do app têm botão 'Exportar para Excel' — geram .xlsx com "
+        "estilo consistente (cabeçalho azul, freeze pane na linha 1, cores "
+        "de status preservadas):", TEXTO,
+    ))
     flow.append(bullets([
-        "<b>bethadba.efentradas</b> — cabeçalho de NF de entrada.",
-        "<b>bethadba.efentradaspar</b> — parcelas/duplicatas (vcto, valor, número da parcela).",
-        "<b>bethadba.efentradaspag</b> — pagamentos registrados (pgto_entp, "
-        "vpag_entp) usado pra calcular status agregado.",
-        "<b>bethadba.effornece</b> — cadastro de fornecedores "
-        "(codi_for, nome_for, cgce_for).",
-        "<b>bethadba.geempre</b> — cadastro de empresas (codi_emp + razão + CNPJ).",
-        "<b>bethadba.ctcontas</b> — plano de contas (CLAS_CTA, NOME_CTA, "
-        "TIPO_CTA) com filtro por CODI_EMP e TIPO_CTA = 'A' (só analíticas).",
+        "<b>Aba Pendentes</b>: gera .xlsx com 2 abas (Pendentes Planilha + "
+        "Pendentes OFX) — colunas específicas de cada lado.",
+        "<b>Aba Conciliados × Domínio</b>: pares triple-matched + Caixa "
+        "geral + OFX (todos os matchados). Coluna Origem indica banco ou "
+        "'Caixa geral'.",
+        "<b>Aba Lançamentos contábeis</b>: todos os lançamentos com "
+        "tipo_regra legível + linha TOTAL com fórmula =SUM() no fim.",
+        "<b>Aba Comparação</b>: botão Exportar pendências separa em 3 abas "
+        "por tipo (Amarelos P × OFX / Cinzas Caixa geral / Laranjas OFX-só). "
+        "Cores das linhas preservadas.",
     ]))
 
     # ============================ 11
-    flow.append(Paragraph("11. O que ainda não existe", H1))
+    flow.append(Paragraph("11. Distribuição (build .exe)", H1))
+    flow.append(Paragraph(
+        "Empacotamento via PyInstaller (spec <i>Conciliador.spec</i>). Modo "
+        "onedir — gera pasta <i>dist/Conciliador/</i> com:", TEXTO,
+    ))
+    flow.append(bullets([
+        "<b>Conciliador.exe</b> — entry point (6 MB)",
+        "<b>_internal/</b> — libs Python + DLLs (pyodbc, tkinter, MariaDB "
+        "driver, reportlab, etc.)",
+        "<b>data/db_config.json</b> — apontando pro servidor MariaDB (já "
+        "preenchido, distribuído junto).",
+        "<b>data/dominio_config.json.EXEMPLO</b> — template pro operador "
+        "preencher com seu login individual do Domínio.",
+        "<b>LEIA-ME.txt</b> — instruções básicas.",
+        "Zipado (~25 MB) e distribuído por pen drive, rede ou email.",
+    ]))
+    flow.append(Paragraph("Detecção runtime do modo empacotado", H2))
+    flow.append(Paragraph(
+        "<i>db.py</i> e <i>parser_dominio.py</i> têm helper <i>_base_dir()</i> "
+        "que detecta <i>sys.frozen</i> (PyInstaller) e usa o diretório do "
+        "executável em vez de <i>__file__.parent</i>. Assim as credenciais "
+        "ficam ao lado do .exe (editáveis) e não enterradas em _internal.",
+        TEXTO,
+    ))
+
+    # ============================ 12
+    flow.append(Paragraph("12. Diagnóstico ODBC (testar_dominio.py)", H1))
+    flow.append(bullets([
+        "Script standalone que testa a conexão ODBC com o Domínio em 6 "
+        "passos, identificando exatamente onde trava:",
+        "1. pyodbc carregado? 2. dominio_config.json existe e é JSON válido? "
+        "3. DSN listada no ODBC 64-bit? 4. Conexão abre? 5. SELECT roda? "
+        "6. Tem permissão em bethadba?",
+        "Detecta erros específicos: IM014 (incompatibilidade 32/64 bit), "
+        "28000 (credenciais inválidas), 08001 (servidor Domínio fora).",
+        "Empacotável como .exe standalone pra distribuir aos operadores "
+        "quando derem problema.",
+    ]))
+
+    # ============================ 13
+    flow.append(PageBreak())
+    flow.append(Paragraph("13. Convenções herdadas do projeto Janco", H1))
+    flow.append(bullets([
+        "Tabelas do Domínio Escrita Fiscal e Contábil vivem no schema "
+        "<b>bethadba</b> (sempre prefixar).",
+        "Conexão ODBC é sempre <b>read-only</b> — escrita exigiria RPA "
+        "(fora do escopo deste app).",
+        "<b>Gotcha SQL Anywhere</b>: DISTINCT + ORDER BY exige aliases "
+        "do SELECT (não nomes qualificados — erro -854).",
+        "Empresas compartilham a mesma base — separação por <b>CODI_EMP</b> "
+        "em cada tabela; o app injeta o filtro automaticamente quando o "
+        "SQL tem <i>?</i>.",
+    ]))
+
+    # ============================ 14
+    flow.append(Paragraph("14. Tabelas do Domínio utilizadas", H1))
+    flow.append(bullets([
+        "<b>bethadba.efentradas</b> — cabeçalho de NF de entrada.",
+        "<b>bethadba.efentradaspar</b> — parcelas/duplicatas (vcto, valor, "
+        "número da parcela).",
+        "<b>bethadba.efentradaspag</b> — pagamentos registrados (usado pra "
+        "calcular status agregado da parcela).",
+        "<b>bethadba.effornece</b> — cadastro de fornecedores.",
+        "<b>bethadba.geempre</b> — cadastro de empresas.",
+        "<b>bethadba.ctcontas</b> — plano de contas (CLAS_CTA, NOME_CTA, "
+        "TIPO_CTA) filtrado por CODI_EMP e TIPO_CTA = 'A'.",
+    ]))
+
+    # ============================ 15
+    flow.append(Paragraph("15. Infraestrutura e código-fonte", H1))
+    flow.append(bullets([
+        "<b>requirements.txt</b>: openpyxl, ofxparse, pyodbc, reportlab, "
+        "PyMySQL.",
+        "<b>.gitignore</b>: protege credenciais (db_config, dominio_config), "
+        "config.json legado, backups .sql, dist/, build/, .exe, planilhas, "
+        "OFX, CSV.",
+        "<b>iniciar.bat</b>: git pull + venv + pip install + roda setup_db "
+        "se primeira execução + abre app.",
+        "<b>Conciliador.spec</b>: config do PyInstaller com hidden imports "
+        "declarados e pasta data/ incluída.",
+        "<b>gerar_pdf.py</b>: regenera este relatório.",
+        "<b>Repositório</b>: github.com/Fernandovini2607/conciliador (privado).",
+    ]))
+
+    # ============================ 16
+    flow.append(Paragraph("16. Documentação incluída no projeto", H1))
+    flow.append(bullets([
+        "<b>INSTALACAO_CLIENTE.md</b> — método Git (para desenvolvedores): "
+        "Python + Git + venv + pip install. ~30 min.",
+        "<b>INSTALACAO_CLIENTE_EXE.md</b> — método ZIP (para operadores): "
+        "extrair, criar dominio_config.json, atalho. ~10 min. Recomendado.",
+        "<b>relatorio_sistema.pdf</b> — este documento.",
+    ]))
+
+    # ============================ 17
+    flow.append(Paragraph("17. O que ainda não existe", H1))
     flow.append(bullets([
         "Tolerâncias configuráveis via UI (hoje fixas em código).",
-        "Exportação dos lançamentos contábeis para CSV/Excel.",
-        "Tratamento de planilhas com colunas separadas Crédito/Débito.",
-        "Match por similaridade textual (fuzzy match) em descrição/fornecedor.",
         "Histórico de conciliações entre execuções (auditoria).",
+        "Match por similaridade textual (fuzzy match) em fornecedor.",
         "Escrita de volta no Domínio (exigiria RPA via pywinauto).",
-        "Edição dos dados do lado OFX (só o lado planilha é editável hoje).",
-        "Exportação do plano de contas para arquivo (atualmente fica só em memória).",
+        "Edição dos dados do lado OFX (só a planilha é editável hoje).",
+        "Tela de configuração de credenciais Domínio no primeiro login "
+        "(hoje é manual editando JSON).",
+        "Recuperação de senha por email.",
+        "Auditoria de ações (quem fez o quê e quando).",
     ]))
 
     return flow
