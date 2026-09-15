@@ -1399,7 +1399,8 @@ class App(tk.Tk):
 
         cols = (
             "tipo", "origem", "data", "pagto", "valor", "emissao",
-            "nf", "cnpj", "fornecedor", "memo_ofx", "diff_dom", "status_dom",
+            "nf", "cnpj", "fornecedor", "empresa", "memo_ofx",
+            "diff_dom", "status_dom",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("tipo", text="Tipo")
@@ -1411,6 +1412,9 @@ class App(tk.Tk):
         tree.heading("nf", text="Nº NF")
         tree.heading("cnpj", text="CNPJ")
         tree.heading("fornecedor", text="Fornecedor")
+        # Empresa: útil pra grupo matriz+filiais — mostra de qual empresa
+        # do Domínio veio a parcela (ex.: matriz paga boleto de filial)
+        tree.heading("empresa", text="Empresa (código)")
         tree.heading("memo_ofx", text="Memo OFX")
         tree.heading("diff_dom", text="Δ Domínio")
         tree.heading("status_dom", text="Status (Domínio)")
@@ -1423,6 +1427,7 @@ class App(tk.Tk):
         tree.column("nf", width=70, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
         tree.column("fornecedor", width=140, anchor="w")
+        tree.column("empresa", width=130, anchor="w")
         tree.column("memo_ofx", width=130, anchor="w")
         tree.column("diff_dom", width=110, anchor="center")
         tree.column("status_dom", width=110, anchor="center")
@@ -4072,6 +4077,19 @@ class App(tk.Tk):
                     return v
             return ""
 
+        def _empresa_do_dominio(t_dom) -> str:
+            """Formata 'codi - razao' da empresa de origem da parcela do
+            Domínio. Útil quando o grupo matriz+filiais foi carregado —
+            mostra em qual filial (ou na matriz) a parcela foi lançada.
+            Vazio se não veio de grupo (só a matriz)."""
+            if t_dom is None:
+                return ""
+            codi = t_dom.extras.get("codi_emp_origem")
+            if codi is None:
+                return ""
+            razao = t_dom.extras.get("razao_empresa", "") or ""
+            return f"{codi} - {razao[:30]}" if razao else str(codi)
+
         # 1) Pares P×OFX triple-matched
         # PRIORIDADE de dados: Domínio > planilha/PDF > OFX
         # (Domínio é a fonte mais confiável — planilhas e comprovantes
@@ -4116,6 +4134,7 @@ class App(tk.Tk):
                     numero_nf,
                     cnpj,
                     fornecedor,
+                    _empresa_do_dominio(par.dominio),
                     par.ofx.descricao,
                     diff_dom,
                     status,
@@ -4173,6 +4192,7 @@ class App(tk.Tk):
                     numero_nf,
                     cnpj,
                     fornecedor,
+                    _empresa_do_dominio(t_dom),
                     memo_txt,
                     diff_dom,
                     status,
@@ -4227,6 +4247,7 @@ class App(tk.Tk):
                     numero_nf,
                     cnpj,
                     fornecedor,
+                    _empresa_do_dominio(t_dom),
                     t_o.descricao or "",
                     diff_dom,
                     status,

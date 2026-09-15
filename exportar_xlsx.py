@@ -117,11 +117,23 @@ def exportar_conciliados_dominio(
         ("Nº NF", 12),
         ("CNPJ", 20),
         ("Fornecedor", 32),
+        # Empresa: só populada quando o grupo matriz+filiais foi
+        # carregado — mostra em qual empresa a parcela foi lançada.
+        ("Empresa (código)", 30),
         ("Memo OFX / Histórico", 40),
         ("Δ Domínio", 16),
         ("Status (Domínio)", 15),
     ]
     _aplica_header(ws, colunas)
+
+    def _empresa(t_dom) -> str:
+        if t_dom is None:
+            return ""
+        codi = t_dom.extras.get("codi_emp_origem")
+        if codi is None:
+            return ""
+        razao = t_dom.extras.get("razao_empresa", "") or ""
+        return f"{codi} - {razao[:40]}" if razao else str(codi)
 
     linha = 2
 
@@ -154,6 +166,7 @@ def exportar_conciliados_dominio(
             str(numero_nf),
             str(cnpj),
             str(fornecedor),
+            _empresa(par.dominio),
             (par.ofx.descricao or ""),
             diff_dom,
             status,
@@ -200,6 +213,7 @@ def exportar_conciliados_dominio(
             str(numero_nf),
             str(cnpj),
             str(fornecedor),
+            _empresa(t_dom),
             memo_txt,
             diff_dom,
             status,
@@ -243,6 +257,7 @@ def exportar_conciliados_dominio(
                 str(numero_nf),
                 str(cnpj),
                 str(fornecedor),
+                _empresa(t_dom),
                 (t_o.descricao or ""),
                 diff_dom,
                 status,
