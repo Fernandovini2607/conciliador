@@ -50,3 +50,6 @@ build_testar/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Log de depuração da conciliação (DEBUG_NF=...)
+debug_dominio.log

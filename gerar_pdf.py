@@ -466,6 +466,12 @@ def construir() -> list:
         "juros/multa/desconto onde o valor divergiu da parcela original "
         "mas a NF é a mesma. Data como desempate. Δ dias e Δ valor ficam "
         "visíveis na coluna Δ Domínio.",
+        "<b>Reuso de parcela 'Parcial' na Fase 4</b>: quando o Domínio "
+        "marca a parcela com status <i>Parcial</i> (parcela que recebe "
+        "vários pagamentos parciais), a Fase 4 permite vincular a mesma "
+        "parcela a <b>múltiplos pagamentos</b> — não é consumida ao casar. "
+        "Reflete a realidade contábil de uma parcela quitada por vários "
+        "lançamentos bancários. Parcelas <i>Aberto</i> continuam exclusivas.",
         "Prioridade nas 4 fases: pares > pendentes planilha > pendentes OFX.",
     ]))
 

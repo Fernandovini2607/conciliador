@@ -430,7 +430,13 @@ def construir():
     ]))
     flow.append(caixa_dica(
         "Cada parcela do Domínio só pode ser vinculada a <b>um "
-        "pagamento</b> — não gera duplicidade."
+        "pagamento</b> — não gera duplicidade.<br/><br/>"
+        "<b>Exceção — parcelas 'Parcial'</b>: quando o Domínio marca a "
+        "parcela como <b>Parcial</b> (indicando que ela recebe vários "
+        "pagamentos parciais), a <b>Fase 4</b> permite vincular a mesma "
+        "parcela a <b>vários pagamentos</b>. Reflete o caso real de um "
+        "boleto pago em partes — todos os pagamentos ficam ligados à "
+        "mesma parcela do Domínio."
     ))
     flow.append(Spacer(1, 6))
     flow.append(Paragraph("Na aba Comparação você vê 6 cores:", H3))

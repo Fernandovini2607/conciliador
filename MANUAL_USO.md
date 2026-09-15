@@ -224,6 +224,13 @@ não passa pra próxima):
 
 > Cada parcela do Domínio só pode ser vinculada a **um pagamento** —
 > não gera duplicidade.
+>
+> **Exceção — parcelas com status `Parcial`**: quando o Domínio marca
+> a parcela como `Parcial` (indicando que ela recebe vários pagamentos
+> parciais), a **Fase 4** permite vincular a mesma parcela a **vários
+> pagamentos** ao mesmo tempo. Isso reflete o caso real de um boleto
+> pago em partes — todos os pagamentos ficam ligados à mesma parcela
+> do Domínio.
 
 Na aba Comparação você vê **6 cores**:
 

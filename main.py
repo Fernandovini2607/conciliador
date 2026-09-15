@@ -3186,7 +3186,15 @@ class App(tk.Tk):
             fizeram o valor pago divergir da parcela original. Data
             usada só como desempate.
 
-        Ordem de prioridade (cada Transacao do Domínio só casa com 1 item):
+            **Reuso de parcela 'Parcial'**: na Fase 4, quando a parcela
+            do Domínio tem status='Parcial' (indicando que ela recebe
+            vários pagamentos parciais), ela pode ser vinculada a
+            múltiplos pagamentos — não é consumida ao casar. Isso
+            reflete a realidade contábil de uma parcela que é quitada
+            por vários lançamentos bancários.
+
+        Ordem de prioridade (cada Transacao do Domínio 'Aberto' só casa
+        com 1 item; parcelas 'Parcial' podem casar com vários na Fase 4):
         pares > pendentes planilha > pendentes OFX (nas 4 fases).
 
         Depuração: se a variável de ambiente ``DEBUG_NF`` estiver setada
@@ -3543,19 +3551,43 @@ class App(tk.Tk):
         # a NF continua a mesma. Exige NF não-vazia dos dois lados pra
         # evitar match espúrio "sem NF ↔ sem NF" (que casaria qualquer
         # pagamento sem NF com qualquer parcela sem NF do Domínio).
+        def _eh_parcial(t) -> bool:
+            """True se a parcela do Domínio tem status 'Parcial' — indica
+            que ela recebe VÁRIOS pagamentos parciais. Nesse caso, a
+            Fase 4 permite que múltiplos pagamentos casem com a mesma
+            parcela do Domínio."""
+            return str(t.extras.get("status", "")).strip().lower() == "parcial"
+
         def _melhor_match_fase4(
             nf_p_norm: str, cnpj_p_norm: str, nome_p_norm: str,
             valor_p, data_p,
-        ) -> tuple[int | None, int, Decimal]:
+        ):
             """Fase 4: exige NF igual (não-vazia) E (CNPJ ou nome bate).
-            Valor livre. Data usada só pra desempate."""
+            Valor livre. Data usada só pra desempate.
+
+            Considera duas fontes de candidatos:
+            (a) ``dominio_disponivel`` — parcelas ainda não consumidas
+                (comportamento normal).
+            (b) Parcelas do universo total (self.transacoes_dominio) que
+                têm status 'Parcial' — permitindo REUSO da parcela mesmo
+                se ela já foi vinculada a outro pagamento em fase
+                anterior ou na própria Fase 4.
+
+            Devolve (Transacao_dominio ou None, diff_dias, diff_valor).
+            """
             if not nf_p_norm:
                 return None, 0, Decimal("0")
-            melhor_idx: int | None = None
-            melhor_score: tuple | None = None
+            # Monta o pool de candidatos: disponíveis + parciais reutilizáveis
+            ids_disponiveis = {id(t) for t in dominio_disponivel}
+            candidatos = list(dominio_disponivel)
+            for t in self.transacoes_dominio:
+                if id(t) not in ids_disponiveis and _eh_parcial(t):
+                    candidatos.append(t)
+            melhor_t = None
+            melhor_score = None
             melhor_d = 0
             melhor_v = Decimal("0")
-            for i, t in enumerate(dominio_disponivel):
+            for t in candidatos:
                 nf_d = self._normaliza_nf(t.extras.get("numero_nf", ""))
                 if not nf_d or nf_p_norm != nf_d:
                     continue  # NF tem que bater exato e não pode ser vazia
@@ -3574,10 +3606,22 @@ class App(tk.Tk):
                 score = (prioridade, dd, dv)
                 if melhor_score is None or score < melhor_score:
                     melhor_score = score
-                    melhor_idx = i
+                    melhor_t = t
                     melhor_d = dd
                     melhor_v = dv
-            return melhor_idx, melhor_d, melhor_v
+            return melhor_t, melhor_d, melhor_v
+
+        def _consome_dominio_f4(t_dom) -> None:
+            """Consome a parcela do Domínio após match de Fase 4.
+            Se status='Parcial', NÃO remove — mantém disponível para
+            outros pagamentos parciais casarem com ela também."""
+            if _eh_parcial(t_dom):
+                return  # parcela reutilizável — não remove nem marca
+            try:
+                dominio_disponivel.remove(t_dom)
+            except ValueError:
+                pass  # já não estava em disponivel (era parcial reutilizada)
+            usados.add(id(t_dom))
 
         # Pares P×OFX — FASE 4
         for par in pares_sem_match_f4:
@@ -3586,16 +3630,24 @@ class App(tk.Tk):
             nome_p = self._normaliza_nome_fornecedor(
                 par.planilha.extras.get("fornecedor", "")
             )
-            idx, dd, dv = _melhor_match_fase4(
+            t_dom, dd, dv = _melhor_match_fase4(
                 nf_p, cnpj_p, nome_p,
                 _quant(par.planilha.valor), par.planilha.data,
             )
-            if idx is not None:
-                t_dom = dominio_disponivel.pop(idx)
+            if t_dom is not None:
                 par.dominio = t_dom
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
-                usados.add(id(t_dom))
+                _consome_dominio_f4(t_dom)
+                if _tem_nf_debug(par.planilha) or _tem_nf_debug(t_dom):
+                    _log(
+                        f"[F4 par] CASOU par(NF={nf_p} valor="
+                        f"{par.planilha.valor}) <-> dominio(NF="
+                        f"{t_dom.extras.get('numero_nf','')} valor="
+                        f"{t_dom.valor} status="
+                        f"{t_dom.extras.get('status','')}) dd={dd} dv={dv} "
+                        f"reutilizavel={_eh_parcial(t_dom)}"
+                    )
 
         # Pendentes planilha (Caixa geral) — FASE 4
         for t_p in pendentes_sem_match_f4:
@@ -3604,29 +3656,30 @@ class App(tk.Tk):
             nome_p = self._normaliza_nome_fornecedor(
                 t_p.extras.get("fornecedor", "")
             )
-            idx, dd, dv = _melhor_match_fase4(
+            t_dom, dd, dv = _melhor_match_fase4(
                 nf_p, cnpj_p, nome_p, _quant(t_p.valor), t_p.data,
             )
-            if idx is not None:
-                t_dom = dominio_disponivel.pop(idx)
+            if t_dom is not None:
                 self.pendentes_planilha_dominio[id(t_p)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                usados.add(id(t_dom))
+                _consome_dominio_f4(t_dom)
                 if _tem_nf_debug(t_p) or _tem_nf_debug(t_dom):
                     _log(
                         f"[F4 pend_plan] CASOU planilha(NF={nf_p} "
                         f"cnpj={cnpj_p} nome={nome_p}) <-> dominio(NF="
                         f"{t_dom.extras.get('numero_nf','')} valor="
-                        f"{t_dom.valor}) dd={dd} dv={dv}"
+                        f"{t_dom.valor} status="
+                        f"{t_dom.extras.get('status','')}) dd={dd} dv={dv} "
+                        f"reutilizavel={_eh_parcial(t_dom)}"
                     )
             elif _tem_nf_debug(t_p):
                 # Diagnóstico: por que Fase 4 não achou nada?
                 nf_p_str = str(nf_p)
                 candidatos_por_nf = [
-                    (i, t) for i, t in enumerate(dominio_disponivel)
+                    t for t in self.transacoes_dominio
                     if self._normaliza_nf(t.extras.get("numero_nf", ""))
                     == nf_p_str
                 ]
@@ -3636,12 +3689,10 @@ class App(tk.Tk):
                 )
                 if not candidatos_por_nf:
                     _log(
-                        f"  -> nenhuma parcela do Dominio com NF {nf_p} "
-                        "esta DISPONIVEL (todas ja consumidas em fases "
-                        "anteriores ou a NF nao existe no Dominio)."
+                        f"  -> nenhuma parcela do Dominio tem NF {nf_p}."
                     )
                 else:
-                    for i, t in candidatos_por_nf:
+                    for t in candidatos_por_nf:
                         cnpj_d = self._normaliza_cnpj(
                             t.extras.get("cnpj", "")
                         )
@@ -3652,8 +3703,10 @@ class App(tk.Tk):
                             bool(cnpj_p) and cnpj_p == cnpj_d
                         )
                         bate_nome = self._nomes_batem(nome_p, nome_d)
+                        status_d = t.extras.get("status", "")
                         _log(
-                            f"  -> candidata idx={i} CNPJ={cnpj_d} "
+                            f"  -> candidata NF={nf_p_str} valor="
+                            f"{t.valor} status={status_d!r} CNPJ={cnpj_d} "
                             f"nome={nome_d!r}: bate_cnpj={bate_cnpj}, "
                             f"bate_nome={bate_nome}"
                         )
@@ -3667,17 +3720,16 @@ class App(tk.Tk):
             nome_o = self._normaliza_nome_fornecedor(
                 t_o.extras.get("fornecedor", "")
             )
-            idx, dd, dv = _melhor_match_fase4(
+            t_dom, dd, dv = _melhor_match_fase4(
                 nf_o, cnpj_o, nome_o, _quant(t_o.valor), t_o.data,
             )
-            if idx is not None:
-                t_dom = dominio_disponivel.pop(idx)
+            if t_dom is not None:
                 self.pendentes_ofx_dominio[id(t_o)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                usados.add(id(t_dom))
+                _consome_dominio_f4(t_dom)
 
         # Dump do log de debug (se ativado via DEBUG_NF)
         if _nf_debug and _log_lines:
