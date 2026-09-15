@@ -682,6 +682,10 @@ class App(tk.Tk):
         topo = ttk.Frame(self, padding=(10, 0, 10, 4))
         topo.pack(fill="x")
         ttk.Button(topo, text="Abrir planilha (.xlsx)", command=self._abrir_planilha).pack(side="left", padx=4)
+        ttk.Button(
+            topo, text="Importar comprovantes PDF",
+            command=self._importar_comprovantes_pdf,
+        ).pack(side="left", padx=4)
         self.btn_editar_colunas = ttk.Button(
             topo, text="Editar colunas", command=self._editar_colunas, state="disabled",
         )
@@ -970,14 +974,19 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("data", "banco", "documento", "valor", "memo")
+        # Fornecedor e CNPJ só ficam preenchidos quando o OFX foi
+        # enriquecido por comprovante PDF que casou por data+valor.
+        cols = ("data", "banco", "documento", "valor", "memo",
+                "fornecedor", "cnpj")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("data", "Data pagamento", 120, "center"),
-            ("banco", "Banco", 130, "w"),
-            ("documento", "Documento", 120, "w"),
-            ("valor", "Valor", 105, "e"),
-            ("memo", "Memo", 400, "w"),
+            ("data", "Data pagamento", 110, "center"),
+            ("banco", "Banco", 120, "w"),
+            ("documento", "Documento", 100, "w"),
+            ("valor", "Valor", 100, "e"),
+            ("memo", "Memo", 260, "w"),
+            ("fornecedor", "Fornecedor (via PDF)", 200, "w"),
+            ("cnpj", "CNPJ (via PDF)", 130, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -986,6 +995,8 @@ class App(tk.Tk):
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_ofx = tree
+        # Tag pra destacar linhas enriquecidas por PDF (fundo azul claro)
+        tree.tag_configure("enriquecido_pdf", background="#e7f3ff")
         tree.bind("<Button-1>", self._on_click_header_ofx)
 
     def _row_ofx(self, t) -> tuple:
@@ -995,13 +1006,18 @@ class App(tk.Tk):
             t.extras.get("documento", "") or "",
             f"{t.valor:.2f}",
             t.descricao or "",
+            t.extras.get("fornecedor", "") or "",
+            t.extras.get("cnpj", "") or "",
         )
 
-    COLS_OFX = ("data", "banco", "documento", "valor", "memo")
+    COLS_OFX = ("data", "banco", "documento", "valor", "memo",
+                "fornecedor", "cnpj")
     LABELS_OFX = {
         "data": "Data pagamento", "banco": "Banco",
         "documento": "Documento",
         "valor": "Valor", "memo": "Memo",
+        "fornecedor": "Fornecedor (via PDF)",
+        "cnpj": "CNPJ (via PDF)",
     }
 
     def _on_click_header_ofx(self, event: tk.Event) -> None:
@@ -1268,19 +1284,27 @@ class App(tk.Tk):
 
         tabela_o = ttk.Frame(lado_o)
         tabela_o.pack(side="top", fill="both", expand=True)
-        cols_o = ("data", "banco", "documento", "valor", "descricao")
+        # Fornecedor e CNPJ ficam preenchidos quando o OFX foi enriquecido
+        # por comprovante PDF que casou por data+valor durante a conciliação
+        # anterior — mesmo que depois tenha voltado pra Pendentes.
+        cols_o = ("data", "banco", "documento", "valor", "descricao",
+                  "fornecedor", "cnpj")
         self.tree_pend_o = ttk.Treeview(
             tabela_o, columns=cols_o, show="headings", selectmode="browse",
         )
         for c, t, w, a in [
-            ("data", "Data pagamento", 105, "center"),
-            ("banco", "Banco", 150, "w"),
-            ("documento", "Documento", 110, "w"),
-            ("valor", "Valor", 105, "e"),
-            ("descricao", "Memo OFX", 420, "w"),
+            ("data", "Data pagamento", 100, "center"),
+            ("banco", "Banco", 130, "w"),
+            ("documento", "Documento", 100, "w"),
+            ("valor", "Valor", 100, "e"),
+            ("descricao", "Memo OFX", 280, "w"),
+            ("fornecedor", "Fornecedor (via PDF)", 180, "w"),
+            ("cnpj", "CNPJ (via PDF)", 130, "w"),
         ]:
             self.tree_pend_o.heading(c, text=t)
             self.tree_pend_o.column(c, width=w, anchor=a)
+        # Tag pra destacar linhas com dados enriquecidos por PDF
+        self.tree_pend_o.tag_configure("enriquecido_pdf", background="#e7f3ff")
         sb_o = ttk.Scrollbar(tabela_o, orient="vertical", command=self.tree_pend_o.yview)
         self.tree_pend_o.configure(yscrollcommand=sb_o.set)
         self.tree_pend_o.pack(side="left", fill="both", expand=True)
@@ -2382,6 +2406,156 @@ class App(tk.Tk):
                 "automaticamente. Use 'Editar colunas' para revisar/alterar.",
             )
 
+    def _importar_comprovantes_pdf(self) -> None:
+        """Importa comprovantes de pagamento de boleto em PDF (nativos)
+        de bancos suportados (Sicoob, Bradesco). Cada comprovante vira
+        uma Transacao — vai pra 'planilha virtual' e entra no fluxo
+        normal de conciliação com OFX/Domínio."""
+        caminhos = filedialog.askopenfilenames(
+            title="Selecione um ou mais PDFs de comprovantes",
+            filetypes=[("PDF", "*.pdf"), ("Todos", "*.*")],
+        )
+        if not caminhos:
+            return
+
+        # Import tardio pra não travar o startup se pdfplumber não estiver ok
+        import parser_pdf
+
+        # Progresso via label popup — bom pra PDFs grandes (500 pgs)
+        progresso_win = tk.Toplevel(self)
+        progresso_win.title("Processando PDFs...")
+        progresso_win.geometry("500x100")
+        progresso_win.transient(self)
+        progresso_win.resizable(False, False)
+        lbl = ttk.Label(
+            progresso_win, text="Iniciando...",
+            font=("TkDefaultFont", 10),
+        )
+        lbl.pack(padx=20, pady=20, fill="x")
+        progresso_win.update()
+
+        def _on_prog(atual: int, total: int, nome: str) -> None:
+            lbl.config(text=f"[{atual}/{total}] Lendo {nome}...")
+            progresso_win.update()
+
+        try:
+            transacoes, relatorio = parser_pdf.ler_comprovantes_pdfs(
+                list(caminhos), progresso=_on_prog,
+            )
+        except Exception as e:
+            progresso_win.destroy()
+            messagebox.showerror("Erro ao ler PDFs", str(e))
+            return
+        finally:
+            try:
+                progresso_win.destroy()
+            except tk.TclError:
+                pass
+
+        if not transacoes:
+            resumo = "\n".join(
+                f"• {arq}: {banco} — {n} comprovante(s)"
+                for arq, (banco, n) in relatorio.items()
+            )
+            messagebox.showwarning(
+                "Nenhum comprovante extraído",
+                f"Não consegui extrair nenhuma transação dos PDFs.\n\n"
+                f"Relatório:\n{resumo}",
+            )
+            return
+
+        # DEDUPLICAÇÃO: se já há transações na planilha (xlsx ou PDFs
+        # anteriores), evita adicionar o mesmo lançamento duas vezes.
+        # Cada PDF novo é comparado com as transações existentes por
+        # (valor + data + CNPJ/nome). Se duplica, enriquece a existente
+        # com dados que ela não tenha e ignora o novo.
+        ja_existentes = list(self.transacoes_planilha)
+        novos: list[Transacao] = []
+        duplicatas: list[Transacao] = []  # os PDFs que foram ignorados
+        for t_novo in transacoes:
+            duplicata_de = None
+            for t_exist in ja_existentes:
+                if self._eh_mesma_transacao(t_novo, t_exist):
+                    duplicata_de = t_exist
+                    break
+            if duplicata_de is not None:
+                # Enriquece a existente com o que faltar (CNPJ/fornecedor)
+                self._enriquecer_transacao_com(duplicata_de, t_novo)
+                duplicatas.append(t_novo)
+            else:
+                novos.append(t_novo)
+                # Já entra na lista pra comparar contra os próximos
+                # (evita adicionar 2 vezes o mesmo PDF em batch)
+                ja_existentes.append(t_novo)
+
+        # Acumula ao invés de substituir
+        modo_acumulado = bool(self.transacoes_planilha)
+        self.transacoes_planilha = list(self.transacoes_planilha) + novos
+
+        n_arqs = len(caminhos)
+        n_extraidos = len(transacoes)
+        n_novos = len(novos)
+        n_duplicados = len(duplicatas)
+        n_total = len(self.transacoes_planilha)
+
+        # Só atualiza estrutura/mapeamento/caminho se está começando do zero.
+        # Se está acumulando sobre uma planilha xlsx existente, mantém tudo.
+        if not modo_acumulado:
+            self.caminho_planilha = Path(caminhos[0])
+            self.estrutura_planilha = None
+            self.mapeamento_planilha = None
+            self.btn_editar_colunas.config(state="disabled")
+
+        # Label
+        bancos = sorted({b for _, (b, n) in relatorio.items() if n > 0})
+        if modo_acumulado:
+            self.lbl_planilha.config(
+                text=(
+                    f"{n_total} lançamentos "
+                    f"(+{n_novos} de {n_arqs} PDF novo{'s' if n_arqs > 1 else ''}"
+                    f"{f', {n_duplicados} duplicado(s) ignorado(s)' if n_duplicados else ''})"
+                )
+            )
+        else:
+            prefixo = (
+                f"{n_arqs} PDF{'s' if n_arqs > 1 else ''}"
+                f" ({', '.join(bancos)})"
+                if bancos else f"{n_arqs} PDF(s)"
+            )
+            self.lbl_planilha.config(
+                text=f"{prefixo} — {n_novos} comprovante(s) importado(s)"
+            )
+
+        self.btn_limpar_planilha.config(state="normal")
+        self._atualiza_botao()
+        self._render_aba_planilha()
+        self._limpa_resultados()
+
+        # Relatório resumido
+        resumo = "\n".join(
+            f"• {arq}: {banco} — {n} comprovante(s)"
+            for arq, (banco, n) in relatorio.items()
+        )
+        msg = f"Total extraído: {n_extraidos} de {n_arqs} PDF(s).\n\n"
+        if n_duplicados > 0:
+            msg += (
+                f"• {n_novos} novo(s) comprovante(s) adicionado(s)\n"
+                f"• {n_duplicados} DUPLICADO(S) ignorado(s) "
+                "(já estavam na planilha; dados enriquecidos onde faltava)\n\n"
+            )
+        else:
+            msg += f"• {n_novos} novo(s) comprovante(s) adicionado(s)\n\n"
+        msg += f"Detalhes:\n{resumo}\n\n"
+        if modo_acumulado:
+            msg += (
+                f"Planilha agora tem {n_total} lançamentos no total.\n\n"
+            )
+        msg += (
+            "Os comprovantes aparecem na aba 'Planilha' e podem ser "
+            "conciliados com o OFX e comparados com o Domínio."
+        )
+        messagebox.showinfo("Comprovantes importados", msg)
+
     def _editar_colunas(self) -> None:
         if not self.estrutura_planilha:
             return
@@ -2488,16 +2662,37 @@ class App(tk.Tk):
         self._limpa_resultados()
 
     def _limpar_planilha(self) -> None:
-        """Remove a planilha importada e tudo que dependa dela (pares,
-        pendentes, sugestões). OFX e Domínio permanecem carregados."""
+        """Remove a planilha importada. Pendentes e sugestões são
+        descartados, MAS os pares já conciliados, os matches com Domínio
+        e os lançamentos contábeis já gerados permanecem intactos.
+
+        Motivo: se você limpar a planilha e importar outra, os pares já
+        conciliados com a planilha anterior NÃO vão ser refeitos — só o
+        que ainda não foi conciliado da nova planilha vai ser processado.
+        """
         if not self.transacoes_planilha and not self.caminho_planilha:
             return
-        if not messagebox.askyesno(
-            "Confirmar",
+        n_lanc = len(self.lancamentos_contabeis)
+        n_pares = len(self.pares_conciliados)
+        msg = (
             "Limpar a planilha importada?\n\n"
-            "Os resultados de conciliação serão descartados. O OFX e o "
-            "Domínio carregados continuam.",
-        ):
+            "Pendentes e sugestões serão descartados. O OFX e o Domínio "
+            "continuam carregados."
+        )
+        detalhes = []
+        if n_pares:
+            detalhes.append(
+                f"{n_pares} conciliação(ões) já feita(s) (aba Conciliados "
+                "e Conciliados × Domínio)"
+            )
+        if n_lanc:
+            detalhes.append(f"{n_lanc} lançamento(s) contábil(is)")
+        if detalhes:
+            msg += (
+                "\n\nSerão PRESERVADOS:\n• "
+                + "\n• ".join(detalhes)
+            )
+        if not messagebox.askyesno("Confirmar", msg):
             return
         self.transacoes_planilha = []
         self.caminho_planilha = None
@@ -2508,19 +2703,46 @@ class App(tk.Tk):
         self.btn_limpar_planilha.config(state="disabled")
         self._atualiza_botao()
         self._render_aba_planilha()
-        self._limpa_resultados()
+        # Preserva pendentes do OFX que ainda estão carregados (não deve
+        # apagar pendentes OFX só porque a planilha foi limpa).
+        self._limpa_resultados(
+            preservar_lancamentos=True,
+            preservar_pendentes_ofx=True,
+        )
 
     def _limpar_ofx(self) -> None:
-        """Remove o(s) OFX importado(s) e tudo que dependa deles. Planilha
-        e Domínio permanecem carregados."""
+        """Remove o(s) OFX importado(s). Pendentes e sugestões são
+        descartados, MAS os pares já conciliados, os matches com Domínio
+        e os lançamentos contábeis já gerados permanecem intactos.
+
+        Motivo: se você limpar OFX-A e importar OFX-B, as linhas da
+        planilha que já casaram com OFX-A NÃO vão ser reconciliadas com
+        OFX-B — só as linhas ainda pendentes do OFX-B vão tentar casar
+        com as planilhas que ainda estão sem par.
+        """
         if not self.transacoes_ofx and not self.caminhos_ofx:
             return
-        if not messagebox.askyesno(
-            "Confirmar",
+        n_lanc = len(self.lancamentos_contabeis)
+        n_pares = len(self.pares_conciliados)
+        msg = (
             "Limpar o(s) OFX importado(s)?\n\n"
-            "Os resultados de conciliação serão descartados. A planilha "
-            "e o Domínio carregados continuam.",
-        ):
+            "Pendentes e sugestões serão descartados. A planilha e o "
+            "Domínio continuam carregados."
+        )
+        detalhes = []
+        if n_pares:
+            detalhes.append(
+                f"{n_pares} conciliação(ões) já feita(s) (aba Conciliados "
+                "e Conciliados × Domínio)"
+            )
+        if n_lanc:
+            detalhes.append(f"{n_lanc} lançamento(s) contábil(is)")
+        if detalhes:
+            msg += (
+                "\n\nSerão PRESERVADOS:\n• "
+                + "\n• ".join(detalhes)
+            )
+        if not messagebox.askyesno("Confirmar", msg):
             return
         self.transacoes_ofx = []
         self.caminhos_ofx = []
@@ -2528,7 +2750,12 @@ class App(tk.Tk):
         self.btn_limpar_ofx.config(state="disabled")
         self._atualiza_botao()
         self._render_aba_ofx()
-        self._limpa_resultados()
+        # Preserva pendentes da planilha ainda carregada (não deve apagar
+        # pendentes da planilha só porque o OFX foi limpo).
+        self._limpa_resultados(
+            preservar_lancamentos=True,
+            preservar_pendentes_planilha=True,
+        )
 
     def _atualiza_botao(self) -> None:
         # Basta ter planilha OU OFX carregado. Sem planilha, o fluxo
@@ -2539,39 +2766,99 @@ class App(tk.Tk):
 
     # ---------------------------------------------------- Lógica de matching
 
-    def _limpa_resultados(self) -> None:
-        self.pares_conciliados = []
-        self.pendentes_planilha = []
-        self.pendentes_planilha_brutos = []
-        self.pendentes_planilha_dominio = {}
-        self.lancamentos_ignorados = set()
-        self.pendentes_ofx = []
-        self.pendentes_ofx_brutos = []
-        # Match OFX × Domínio direto (sem planilha) — mesmo esquema do Caixa
-        self.pendentes_ofx_dominio = {}
+    def _limpa_resultados(
+        self,
+        preservar_lancamentos: bool = False,
+        preservar_pendentes_planilha: bool = False,
+        preservar_pendentes_ofx: bool = False,
+    ) -> None:
+        """Zera o estado de conciliação, com preservação seletiva.
+
+        Parâmetros:
+        - ``preservar_lancamentos``: mantém pares conciliados, matches com
+          Domínio, lançamentos contábeis e manuais. Usado ao limpar
+          planilha ou OFX (mas NÃO ao trocar de empresa).
+        - ``preservar_pendentes_planilha``: mantém pendentes da planilha.
+          Usado quando o OFX foi limpo — as planilhas ainda pendentes
+          devem continuar visíveis na aba Pendentes.
+        - ``preservar_pendentes_ofx``: mantém pendentes do OFX. Usado
+          quando a planilha foi limpa — os OFX ainda pendentes devem
+          continuar visíveis na aba Pendentes.
+
+        Sugestões são sempre zeradas — são recalculadas no próximo
+        Conciliar a partir dos pendentes atualizados.
+        """
+        if not preservar_lancamentos:
+            # Zera TUDO (comportamento antigo — usado em troca de empresa
+            # e outras situações que descartam o estado inteiro).
+            self.pares_conciliados = []
+            self.pendentes_planilha_dominio = {}
+            self.pendentes_ofx_dominio = {}
+            self.lancamentos_ignorados = set()
+            self.lancamentos_contabeis = []
+            self.lancamentos_manuais = []
+            self.ids_pares_classificados = set()
+
+        # Pendentes: preserva o lado oposto do que foi limpo.
+        if not preservar_pendentes_planilha:
+            self.pendentes_planilha_brutos = []
+        if not preservar_pendentes_ofx:
+            self.pendentes_ofx_brutos = []
+        # Visíveis serão re-derivados (dos brutos, se houver)
+        self.pendentes_planilha = list(self.pendentes_planilha_brutos)
+        self.pendentes_ofx = list(self.pendentes_ofx_brutos)
         self.sugestoes = []
-        self.lancamentos_contabeis = []
-        self.lancamentos_manuais = []
-        self.ids_pares_classificados = set()
+
+        # Se preservando algo, regera lançamentos automáticos + deriva
+        # pendentes visíveis (removendo os que viraram lançamento).
+        if preservar_lancamentos and (
+            self.pendentes_planilha_brutos or self.pendentes_ofx_brutos
+            or self.pares_conciliados or self.lancamentos_manuais
+        ):
+            self._gerar_lancamentos_contabeis()
+
         self._redesenha_abas()
         if hasattr(self, "tree_lancamentos"):
             self._render_aba_lancamentos()
         self.lbl_resumo.config(text="")
-        for item in self.tree_dominio.get_children():
-            self.tree_dominio.delete(item)
-        self.notebook.tab(7, text="Comparação (0)")
-        self._atualiza_botao_comparar()
+
+        if not preservar_lancamentos:
+            for item in self.tree_dominio.get_children():
+                self.tree_dominio.delete(item)
+            self.notebook.tab(7, text="Comparação (0)")
+            self._atualiza_botao_comparar()
 
     def _executar_conciliacao(self) -> None:
-        pares, pend_p, pend_o = conciliar_automatico(
-            self.transacoes_planilha, self.transacoes_ofx,
+        # PRESERVA pares já conciliados (de rodadas anteriores, se o
+        # usuário limpou planilha/OFX e importou outros). Isso evita
+        # dupla conciliação: uma linha da planilha que já casou com
+        # OFX-A NÃO vai casar de novo com OFX-B ao importar o novo OFX.
+        ids_planilha_ja_pareada = {id(p.planilha) for p in self.pares_conciliados}
+        ids_ofx_ja_pareado = {id(p.ofx) for p in self.pares_conciliados}
+
+        planilha_pra_conciliar = [
+            t for t in self.transacoes_planilha
+            if id(t) not in ids_planilha_ja_pareada
+        ]
+        ofx_pra_conciliar = [
+            t for t in self.transacoes_ofx
+            if id(t) not in ids_ofx_ja_pareado
+        ]
+
+        novos_pares, pend_p, pend_o = conciliar_automatico(
+            planilha_pra_conciliar, ofx_pra_conciliar,
         )
-        self.pares_conciliados = pares
+        # Adiciona os NOVOS pares aos existentes (preservados)
+        self.pares_conciliados.extend(novos_pares)
         # Brutos são a fonte da verdade; visível é derivado depois.
         self.pendentes_planilha_brutos = list(pend_p)
         self.pendentes_planilha = list(pend_p)
         self.pendentes_ofx_brutos = list(pend_o)
         self.pendentes_ofx = list(pend_o)
+        # Enriquece as Transacoes do OFX com CNPJ/nome/nº doc vindos dos
+        # comprovantes PDF (quando a Transacao da planilha foi importada
+        # de PDF). Faz aqui pra que o match com Domínio já use esses dados.
+        self._enriquecer_ofx_com_pdf()
         # Primeiro classifica taxas (remove de pendentes_ofx visível)
         self._gerar_lancamentos_contabeis()
         # Sugestões usam pendentes_ofx visível (sem os classificados)
@@ -2581,6 +2868,49 @@ class App(tk.Tk):
         self._redesenha_abas()
         self._atualiza_resumo()
         self._atualiza_botao_comparar()
+
+    def _enriquecer_ofx_com_pdf(self) -> None:
+        """Copia beneficiário/CNPJ/nº documento dos comprovantes PDF para
+        as Transacoes do OFX que casaram com eles.
+
+        Quando um Par tem ``planilha.origem == "pdf"``, o lado do OFX passa
+        a saber pra quem foi pago — algo que o extrato bancário sozinho
+        não fornece. Isso melhora:
+        - Aba OFX (dados crus): usuário vê o beneficiário sem precisar
+          abrir o comprovante.
+        - Aba Comparação: se depois o par não casar com Domínio, o CNPJ
+          fica disponível pra regras de fornecedor.
+        - Exportação Excel: dados mais completos.
+
+        Chaves gerenciadas em ``extras`` do OFX:
+        - Zeradas em toda Transacao OFX antes de reenriquecer (evita
+          resquício de conciliação anterior com outra planilha).
+        - Repopuladas nos pares onde planilha veio de PDF.
+        """
+        CHAVES_ENRIQ = ("fornecedor", "cnpj", "numero_nf", "historico",
+                        "enriquecido_por_pdf")
+
+        # Zera enriquecimento anterior em todas as Transacoes do OFX
+        # (pares atuais + pendentes brutos)
+        for t in self.transacoes_ofx:
+            for chave in CHAVES_ENRIQ:
+                t.extras.pop(chave, None)
+
+        # Aplica enriquecimento nos pares onde planilha veio de PDF
+        n_enriq = 0
+        for par in self.pares_conciliados:
+            if getattr(par.planilha, "origem", "") != "pdf":
+                continue
+            p_extras = par.planilha.extras
+            o_extras = par.ofx.extras
+            for chave in ("fornecedor", "cnpj", "numero_nf", "historico"):
+                valor = p_extras.get(chave, "")
+                if valor:
+                    o_extras[chave] = valor
+            o_extras["enriquecido_por_pdf"] = True
+            n_enriq += 1
+        # Guarda quantos foram enriquecidos pra debug/relatório
+        self._n_ofx_enriquecidos = n_enriq
 
     def _recalcula_sugestoes(self) -> None:
         self.sugestoes = gerar_sugestoes(self.pendentes_planilha, self.pendentes_ofx)
@@ -2594,8 +2924,141 @@ class App(tk.Tk):
         """Mantém só dígitos pra comparação robusta (ignora pontuação)."""
         return "".join(c for c in str(v or "") if c.isdigit())
 
+    @staticmethod
+    def _normaliza_nome_fornecedor(v) -> str:
+        """Normaliza pra comparação de fornecedor: casefold, sem acentos,
+        sem pontuação, sem sufixos societários (LTDA/ME/EPP/S/A etc).
+
+        Ex: 'Comercial Oeste Ltda ME' → 'comercial oeste'
+            'COMERCIAL OESTE LTDA-ME' → 'comercial oeste'
+        Assim os dois casam por substring.
+        """
+        import re
+        import unicodedata
+        if not v:
+            return ""
+        s = str(v).strip().casefold()
+        # Remove acentos
+        s = "".join(
+            c for c in unicodedata.normalize("NFD", s)
+            if unicodedata.category(c) != "Mn"
+        )
+        # Substitui pontuação por espaço
+        s = re.sub(r"[^\w\s]", " ", s)
+        # Colapsa espaços
+        s = re.sub(r"\s+", " ", s).strip()
+        # Remove sufixos societários no fim (iterativo — remove combinações
+        # tipo "ltda me" ou "eireli epp")
+        sufixos = (
+            "ltda me", "eireli epp", "eireli", "epp", "me", "mei",
+            "s a", "s/a", "sa", "ltda", "s c ltda",
+        )
+        while True:
+            alterou = False
+            for suf in sufixos:
+                if s.endswith(" " + suf):
+                    s = s[: -(len(suf) + 1)].strip()
+                    alterou = True
+                elif s == suf:
+                    s = ""
+                    alterou = True
+            if not alterou:
+                break
+        return s
+
+    @staticmethod
+    def _nomes_batem(nome_a: str, nome_b: str) -> bool:
+        """True se um nome contém o outro (substring, já normalizados).
+        Requer pelo menos 4 caracteres pra evitar falso positivo em nomes
+        curtos (ex: 'PB' bate com 'PB LTDA')."""
+        if not nome_a or not nome_b:
+            return False
+        if len(nome_a) < 4 or len(nome_b) < 4:
+            return nome_a == nome_b
+        return nome_a in nome_b or nome_b in nome_a
+
+    @classmethod
+    def _eh_mesma_transacao(cls, t_a, t_b) -> bool:
+        """Decide se duas Transacoes representam o MESMO lançamento
+        (útil pra deduplicar planilha × comprovantes PDF).
+
+        Critério (todos devem passar):
+        1) VALOR igual (quantizado a 2 casas).
+        2) DATA igual em algum dos pares (vencimento OU pagamento).
+        3) IDENTIDADE: mesmo CNPJ (normalizado) OU nomes batem por
+           substring normalizada.
+
+        Se nenhum dos dois tiver CNPJ nem nome, NÃO considera duplicata
+        (pra não colar coisas diferentes só porque valor+data coincidiram
+        — ex: 2 tarifas iguais no mesmo dia).
+        """
+        from decimal import Decimal
+
+        def _quant(v):
+            return Decimal(str(v)).quantize(Decimal("0.01"))
+
+        # 1) Valor
+        if _quant(t_a.valor) != _quant(t_b.valor):
+            return False
+
+        # 2) Data (qualquer combinação vcto/pgto que bata)
+        datas_a = {t_a.data, getattr(t_a, "data_pagamento", None)}
+        datas_b = {t_b.data, getattr(t_b, "data_pagamento", None)}
+        datas_a.discard(None)
+        datas_b.discard(None)
+        if not (datas_a & datas_b):
+            return False
+
+        # 3) Identidade — CNPJ ou nome
+        cnpj_a = cls._normaliza_cnpj(t_a.extras.get("cnpj", ""))
+        cnpj_b = cls._normaliza_cnpj(t_b.extras.get("cnpj", ""))
+        # Se ambos tem CNPJ, só bate se forem iguais
+        if cnpj_a and cnpj_b:
+            if cnpj_a == cnpj_b:
+                return True
+            # CNPJs diferentes explícitos → não é duplicata
+            return False
+
+        nome_a = cls._normaliza_nome_fornecedor(
+            t_a.extras.get("fornecedor", "")
+        )
+        nome_b = cls._normaliza_nome_fornecedor(
+            t_b.extras.get("fornecedor", "")
+        )
+        if nome_a and nome_b:
+            return cls._nomes_batem(nome_a, nome_b)
+
+        # Um lado tem só CNPJ e o outro só nome (ou nenhum) — pra não
+        # arriscar falso positivo, exige que pelo menos um valor bata
+        # com o outro (o que não pode acontecer aqui) → não é duplicata
+        return False
+
+    @staticmethod
+    def _enriquecer_transacao_com(alvo, doador) -> None:
+        """Copia do ``doador`` pro ``alvo`` os campos que o alvo NÃO tem.
+        Não sobrescreve valores existentes no alvo. Usado quando uma
+        transação da planilha é dedupada contra um comprovante PDF —
+        a linha da planilha ganha CNPJ/fornecedor/nº doc do PDF se
+        estava faltando.
+        """
+        # Campos escalares que podem vir do doador
+        for campo in ("fornecedor", "cnpj", "numero_nf", "historico"):
+            if not alvo.extras.get(campo) and doador.extras.get(campo):
+                alvo.extras[campo] = doador.extras[campo]
+        # data_pagamento (se alvo não tem e doador tem)
+        if (
+            getattr(alvo, "data_pagamento", None) is None
+            and getattr(doador, "data_pagamento", None) is not None
+        ):
+            alvo.data_pagamento = doador.data_pagamento
+        # data_emissao (só em extras)
+        if not alvo.extras.get("data_emissao") and doador.extras.get("data_emissao"):
+            alvo.extras["data_emissao"] = doador.extras["data_emissao"]
+        # Marca que foi enriquecida cruzando com PDF (útil pra debug/log)
+        alvo.extras["dedup_enriquecida"] = True
+
     def _filtrar_conciliados_por_dominio(self) -> None:
-        """Match com Domínio em DUAS fases, aplicado a TRÊS fontes:
+        """Match com Domínio em TRÊS fases, aplicado a TRÊS fontes:
         - pares_conciliados (Planilha×OFX) — atualiza par.dominio
         - pendentes_planilha_brutos (sem OFX = Caixa geral) — atualiza
           self.pendentes_planilha_dominio[id(t)]
@@ -2605,10 +3068,15 @@ class App(tk.Tk):
 
         FASE 1 (exato): data_vencimento + valor + NF iguais.
         FASE 2 (aproximado): pelo menos 2 de 3 critérios (CNPJ, data_venc,
-        valor) iguais. O critério restante pode ter diferença.
+            valor) iguais. O critério restante pode ter diferença.
+        FASE 3 (fornecedor + valor): valor bate exato E (CNPJ bate OU
+            nome do fornecedor bate por substring normalizada). Data
+            usada apenas como desempate quando há vários candidatos —
+            NÃO precisa bater. Útil quando o Domínio tem a mesma parcela
+            mas com vencimento renegociado/prorrogado.
 
         Ordem de prioridade (cada Transacao do Domínio só casa com 1 item):
-        pares > pendentes planilha > pendentes OFX.
+        pares > pendentes planilha > pendentes OFX (nas 3 fases).
         """
         from collections import defaultdict
         from decimal import Decimal
@@ -2731,6 +3199,7 @@ class App(tk.Tk):
             return melhor_idx, melhor_d, melhor_v
 
         # Pares têm prioridade na FASE 2 também
+        pares_sem_match_f3: list[Par] = []
         for par in pares_sem_match:
             cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
             idx, dd, dv = _melhor_match_dominio(
@@ -2742,8 +3211,11 @@ class App(tk.Tk):
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
                 usados.add(id(t_dom))
+            else:
+                pares_sem_match_f3.append(par)
 
         # Pendentes da planilha (Caixa geral) — FASE 2 no que sobrou
+        pendentes_sem_match_f3: list[Transacao] = []
         for t_p in pendentes_sem_match:
             cnpj_p = self._normaliza_cnpj(t_p.extras.get("cnpj", ""))
             idx, dd, dv = _melhor_match_dominio(
@@ -2757,14 +3229,107 @@ class App(tk.Tk):
                     "diff_valor": dv,
                 }
                 usados.add(id(t_dom))
+            else:
+                pendentes_sem_match_f3.append(t_p)
 
         # Pendentes do OFX — FASE 2 no que sobrou.
         # CNPJ do OFX raramente existe, então normalmente o match aqui é
         # 2-de-3 usando data + valor (o CNPJ empresa nem sempre bate).
+        pendentes_ofx_sem_match_f3: list[Transacao] = []
         for t_o in pendentes_ofx_sem_match:
             cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
             idx, dd, dv = _melhor_match_dominio(
                 cnpj_o, t_o.data, _quant(t_o.valor),
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                self.pendentes_ofx_dominio[id(t_o)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                usados.add(id(t_dom))
+            else:
+                pendentes_ofx_sem_match_f3.append(t_o)
+
+        # ---------- FASE 3: valor exato + (CNPJ OU nome do fornecedor)
+        # A data de vencimento vira apenas critério de desempate — quando
+        # há vários candidatos válidos, prefere o de data mais próxima.
+        # Útil pra casos onde a data no Domínio foi alterada (renegociação,
+        # prorrogação de vencimento, etc).
+        def _melhor_match_fase3(
+            cnpj_p_norm: str, nome_p_norm: str, valor_p, data_p,
+        ) -> tuple[int | None, int, Decimal]:
+            """Fase 3: exige valor exato E (CNPJ bate OU nome bate).
+            Data usada só pra desempate quando há múltiplos candidatos."""
+            melhor_idx: int | None = None
+            melhor_score: tuple | None = None
+            melhor_d = 0
+            for i, t in enumerate(dominio_disponivel):
+                valor_d = _quant(t.valor)
+                if valor_p != valor_d:
+                    continue  # valor tem que bater exato
+                cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
+                nome_d = self._normaliza_nome_fornecedor(
+                    t.extras.get("fornecedor", "")
+                )
+                bate_cnpj = bool(cnpj_p_norm) and cnpj_p_norm == cnpj_d
+                bate_nome = self._nomes_batem(nome_p_norm, nome_d)
+                if not (bate_cnpj or bate_nome):
+                    continue
+                dd = abs((data_p - t.data).days)
+                # Prioridade: CNPJ > nome; menor diff de dias primeiro
+                prioridade = 0 if bate_cnpj else 1
+                score = (prioridade, dd)
+                if melhor_score is None or score < melhor_score:
+                    melhor_score = score
+                    melhor_idx = i
+                    melhor_d = dd
+            return melhor_idx, melhor_d, Decimal("0")
+
+        # Pares P×OFX — FASE 3
+        for par in pares_sem_match_f3:
+            cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
+            nome_p = self._normaliza_nome_fornecedor(
+                par.planilha.extras.get("fornecedor", "")
+            )
+            idx, dd, dv = _melhor_match_fase3(
+                cnpj_p, nome_p, _quant(par.planilha.valor), par.planilha.data,
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                par.dominio = t_dom
+                par.diff_dias_dominio = dd
+                par.diff_valor_dominio = dv
+                usados.add(id(t_dom))
+
+        # Pendentes planilha (Caixa geral) — FASE 3
+        for t_p in pendentes_sem_match_f3:
+            cnpj_p = self._normaliza_cnpj(t_p.extras.get("cnpj", ""))
+            nome_p = self._normaliza_nome_fornecedor(
+                t_p.extras.get("fornecedor", "")
+            )
+            idx, dd, dv = _melhor_match_fase3(
+                cnpj_p, nome_p, _quant(t_p.valor), t_p.data,
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                self.pendentes_planilha_dominio[id(t_p)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                usados.add(id(t_dom))
+
+        # Pendentes OFX — FASE 3 (pega quando OFX foi enriquecido por PDF
+        # e ganhou fornecedor/CNPJ, mesmo que a data diverja do Domínio)
+        for t_o in pendentes_ofx_sem_match_f3:
+            cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
+            nome_o = self._normaliza_nome_fornecedor(
+                t_o.extras.get("fornecedor", "")
+            )
+            idx, dd, dv = _melhor_match_fase3(
+                cnpj_o, nome_o, _quant(t_o.valor), t_o.data,
             )
             if idx is not None:
                 t_dom = dominio_disponivel.pop(idx)
@@ -2901,6 +3466,11 @@ class App(tk.Tk):
         self._render_pendentes()
         self._render_sugestoes()
         self._render_aba_conciliados_dominio()
+        # Também re-renderiza a aba OFX (dados crus) — assim o
+        # enriquecimento por PDF (fornecedor/CNPJ nas colunas + tag azul)
+        # aparece imediatamente após clicar em Conciliar.
+        if hasattr(self, "tree_ofx"):
+            self._render_aba_ofx()
         # Atualiza Comparação também (no-op se Domínio não carregado)
         self._recalcular_comparacao()
         self.notebook.tab(3, text=f"Conciliados ({len(self.pares_conciliados)})")
@@ -2966,6 +3536,8 @@ class App(tk.Tk):
             self.tree_pend_o.delete(item)
         self.itens_pendentes_o.clear()
         for t in self.pendentes_ofx:
+            enriquecido = bool(t.extras.get("enriquecido_por_pdf"))
+            tags = ("enriquecido_pdf",) if enriquecido else ()
             iid = self.tree_pend_o.insert(
                 "", "end",
                 values=(
@@ -2974,7 +3546,10 @@ class App(tk.Tk):
                     t.extras.get("documento", "") or "",
                     f"{t.valor:.2f}",
                     t.descricao,
+                    t.extras.get("fornecedor", "") or "",
+                    t.extras.get("cnpj", "") or "",
                 ),
+                tags=tags,
             )
             self.itens_pendentes_o[iid] = t
 
@@ -3014,19 +3589,44 @@ class App(tk.Tk):
                 return "aberto"
             return ""
 
+        def _pega(*fontes, chave: str) -> str:
+            """Devolve o primeiro valor não-vazio entre as fontes. Cada
+            fonte é um dict de extras (ou None). Ordem = prioridade."""
+            for f in fontes:
+                if f is None:
+                    continue
+                v = f.get(chave, "")
+                if v:
+                    return v
+            return ""
+
         # 1) Pares P×OFX triple-matched
+        # PRIORIDADE de dados: Domínio > planilha/PDF > OFX
+        # (Domínio é a fonte mais confiável — planilhas e comprovantes
+        # podem ter CNPJ errado ou vazio)
         pares = [p for p in self.pares_conciliados if p.dominio is not None]
         for par in pares:
             tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
             origem = par.ofx.extras.get("banco", "") or "OFX"
-            emissao = par.planilha.extras.get("data_emissao")
-            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
             pagto = par.planilha.data_pagamento or par.ofx.data
             pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
 
-            status = (par.dominio.extras.get("status", "") if par.dominio else "") or ""
+            dom_extras = par.dominio.extras if par.dominio else {}
+            p_extras = par.planilha.extras
+            o_extras = par.ofx.extras
 
-            # Diferenças com o Domínio (fase 2 — match aproximado)
+            cnpj = _pega(dom_extras, p_extras, o_extras, chave="cnpj")
+            fornecedor = _pega(dom_extras, p_extras, o_extras, chave="fornecedor")
+            numero_nf = _pega(dom_extras, p_extras, chave="numero_nf")
+            emissao_val = _pega(dom_extras, p_extras, chave="data_emissao")
+            emissao_txt = (
+                emissao_val.strftime("%d/%m/%Y")
+                if hasattr(emissao_val, "strftime") else str(emissao_val or "")
+            )
+
+            status = dom_extras.get("status", "") or ""
+
+            # Diferenças com o Domínio (fase 2/3 — match aproximado)
             diff_dom = ""
             if par.diff_dias_dominio or par.diff_valor_dominio:
                 diff_dom = (
@@ -3041,9 +3641,9 @@ class App(tk.Tk):
                     pagto_txt,
                     f"{par.planilha.valor:.2f}",
                     emissao_txt,
-                    par.planilha.extras.get("numero_nf", ""),
-                    par.planilha.extras.get("cnpj", ""),
-                    par.planilha.extras.get("fornecedor", ""),
+                    numero_nf,
+                    cnpj,
+                    fornecedor,
                     par.ofx.descricao,
                     diff_dom,
                     status,
@@ -3063,12 +3663,22 @@ class App(tk.Tk):
             d_d = match.get("diff_dias", 0)
             d_v = match.get("diff_valor", 0)
 
-            emissao = t_p.extras.get("data_emissao")
-            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
+            dom_extras = t_dom.extras if t_dom else {}
+            p_extras = t_p.extras
+
+            cnpj = _pega(dom_extras, p_extras, chave="cnpj")
+            fornecedor = _pega(dom_extras, p_extras, chave="fornecedor")
+            numero_nf = _pega(dom_extras, p_extras, chave="numero_nf")
+            emissao_val = _pega(dom_extras, p_extras, chave="data_emissao")
+            emissao_txt = (
+                emissao_val.strftime("%d/%m/%Y")
+                if hasattr(emissao_val, "strftime") else str(emissao_val or "")
+            )
+
             pagto = t_p.data_pagamento or t_p.data
             pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
 
-            status = (t_dom.extras.get("status", "") if t_dom else "") or ""
+            status = dom_extras.get("status", "") or ""
 
             diff_dom = ""
             if d_d or d_v:
@@ -3088,9 +3698,9 @@ class App(tk.Tk):
                     pagto_txt,
                     f"{t_p.valor:.2f}",
                     emissao_txt,
-                    t_p.extras.get("numero_nf", ""),
-                    t_p.extras.get("cnpj", ""),
-                    t_p.extras.get("fornecedor", ""),
+                    numero_nf,
+                    cnpj,
+                    fornecedor,
                     memo_txt,
                     diff_dom,
                     status,
@@ -3110,12 +3720,24 @@ class App(tk.Tk):
             d_d = match.get("diff_dias", 0)
             d_v = match.get("diff_valor", 0)
 
-            emissao = t_dom.extras.get("data_emissao") if t_dom else None
-            emissao_txt = emissao.strftime("%d/%m/%Y") if emissao else ""
+            dom_extras = t_dom.extras if t_dom else {}
+            o_extras = t_o.extras
+
+            # OFX pode estar enriquecido por PDF (fornecedor/CNPJ), mas o
+            # Domínio ainda tem prioridade.
+            cnpj = _pega(dom_extras, o_extras, chave="cnpj")
+            fornecedor = _pega(dom_extras, o_extras, chave="fornecedor")
+            numero_nf = _pega(dom_extras, o_extras, chave="numero_nf")
+            emissao_val = dom_extras.get("data_emissao")
+            emissao_txt = (
+                emissao_val.strftime("%d/%m/%Y")
+                if hasattr(emissao_val, "strftime") else str(emissao_val or "")
+            )
+
             pagto_txt = t_o.data.strftime("%d/%m/%Y")
             origem = t_o.extras.get("banco", "") or "OFX"
 
-            status = (t_dom.extras.get("status", "") if t_dom else "") or ""
+            status = dom_extras.get("status", "") or ""
 
             diff_dom = ""
             if d_d or d_v:
@@ -3130,9 +3752,9 @@ class App(tk.Tk):
                     pagto_txt,
                     f"{t_o.valor:.2f}",
                     emissao_txt,
-                    t_dom.extras.get("numero_nf", "") if t_dom else "",
-                    t_dom.extras.get("cnpj", "") if t_dom else "",
-                    t_dom.extras.get("fornecedor", "") if t_dom else "",
+                    numero_nf,
+                    cnpj,
+                    fornecedor,
                     t_o.descricao or "",
                     diff_dom,
                     status,
@@ -3203,10 +3825,19 @@ class App(tk.Tk):
                     break
             if pula:
                 continue
-            self.tree_ofx.insert("", "end", values=row)
+            # Linhas enriquecidas por PDF ficam com fundo azul claro
+            tags = ("enriquecido_pdf",) if t.extras.get("enriquecido_por_pdf") else ()
+            self.tree_ofx.insert("", "end", values=row, tags=tags)
             mostradas += 1
         total = len(self.transacoes_ofx)
-        self.notebook.tab(1, text=f"OFX ({total})")
+        n_enriq = sum(
+            1 for t in self.transacoes_ofx
+            if t.extras.get("enriquecido_por_pdf")
+        )
+        label_tab = f"OFX ({total})"
+        if n_enriq:
+            label_tab = f"OFX ({total} | {n_enriq} enriquecido por PDF)"
+        self.notebook.tab(1, text=label_tab)
         if hasattr(self, "lbl_filtro_ofx"):
             tem_filtro = termo or tem_filtro_col
             self.lbl_filtro_ofx.config(
@@ -3457,7 +4088,15 @@ class App(tk.Tk):
             return
         t = self.itens_pendentes_o[sel[0]]
         memo = (t.descricao or "").strip()
-        sugestao = memo[:60] if memo else ""
+        # Dados enriquecidos por PDF (se houver)
+        fornecedor_pdf = (t.extras.get("fornecedor", "") or "").strip()
+        cnpj_pdf = (t.extras.get("cnpj", "") or "").strip()
+
+        # Se OFX foi enriquecido por PDF, sugere histórico com fornecedor
+        if fornecedor_pdf:
+            sugestao = f"PAGAMENTO REF. A {fornecedor_pdf}"
+        else:
+            sugestao = memo[:60] if memo else ""
         dlg = DialogoLancamentoManualAvulso(
             self, t, origem="ofx",
             plano_contas=self.plano_contas,
@@ -3475,8 +4114,8 @@ class App(tk.Tk):
             padrao_match="(manual OFX)",
             conta=dlg.resultado["conta"],
             tipo_regra="manual_ofx",
-            fornecedor="",
-            cnpj="",
+            fornecedor=fornecedor_pdf,
+            cnpj=cnpj_pdf,
             transacao_origem=t,
             par_origem=None,
         )
@@ -3566,22 +4205,36 @@ class App(tk.Tk):
         transacao = self.itens_pendentes_o[sel[0]]
         memo = transacao.descricao or ""
         documento = transacao.extras.get("documento", "") or ""
-        # Sugere memo (texto descritivo); se vazio, cai pra documento.
-        sugestao = memo.strip() or documento.strip()
+        # Dados enriquecidos por PDF (se houver) — mais confiáveis que memo
+        fornecedor_pdf = (transacao.extras.get("fornecedor", "") or "").strip()
+        cnpj_pdf = (transacao.extras.get("cnpj", "") or "").strip()
+
+        # Ordem de preferência do padrão:
+        # 1) Fornecedor enriquecido (nome real, ex: "COMERCIAL OESTE LTDA")
+        # 2) CNPJ enriquecido (identificador único)
+        # 3) Memo do OFX
+        # 4) Documento do OFX
+        sugestao = fornecedor_pdf or cnpj_pdf or memo.strip() or documento.strip()
         if not sugestao:
             messagebox.showwarning(
                 "Sem dados",
-                "O lançamento selecionado não tem memo nem documento — "
-                "não dá pra gerar um padrão automático.",
+                "O lançamento selecionado não tem fornecedor, memo nem "
+                "documento — não dá pra gerar um padrão automático.",
             )
             return
+
+        # Histórico contábil sugerido: se tem fornecedor enriquecido,
+        # usa "PAGAMENTO REF. A <fornecedor>"; senão vazio.
+        sugestao_hist = ""
+        if fornecedor_pdf:
+            sugestao_hist = f"PAGAMENTO REF. A {fornecedor_pdf}"
 
         # Pré-popula o banco: regra só vale pra esse banco específico, evita
         # falso positivo quando memos parecidos vêm de bancos diferentes.
         banco_origem = (transacao.extras.get("banco", "") or "").strip()
         regra_inicial = {
             "padrao": sugestao,
-            "historico": "",
+            "historico": sugestao_hist,
             "banco": banco_origem,
         }
         dlg = DialogoNovaRegra(
@@ -3864,7 +4517,8 @@ class App(tk.Tk):
 
     def _exportar_conciliados_dominio(self) -> None:
         """Exporta a aba Conciliados × Domínio para .xlsx.
-        Inclui pares P×OFX triple-matched E pendentes de Caixa que casaram."""
+        Inclui pares P×OFX triple-matched, pendentes de Caixa geral E
+        pendentes OFX (sem planilha) que casaram com o Domínio."""
         # Fontes de dados exatamente como o render da aba
         pares_triple = [p for p in self.pares_conciliados if p.dominio is not None]
         caixa_dominio: list[tuple[Transacao, dict]] = []
@@ -3872,8 +4526,13 @@ class App(tk.Tk):
             m = self.pendentes_planilha_dominio.get(id(t))
             if m and m.get("dominio") is not None:
                 caixa_dominio.append((t, m))
+        ofx_dominio: list[tuple[Transacao, dict]] = []
+        for t in self.pendentes_ofx_brutos:
+            m = self.pendentes_ofx_dominio.get(id(t))
+            if m and m.get("dominio") is not None:
+                ofx_dominio.append((t, m))
 
-        if not pares_triple and not caixa_dominio:
+        if not pares_triple and not caixa_dominio and not ofx_dominio:
             messagebox.showinfo(
                 "Sem dados",
                 "Não há lançamentos conciliados com o Domínio para exportar.",
@@ -3889,7 +4548,10 @@ class App(tk.Tk):
         if not caminho:
             return
         try:
-            total = exportar_conciliados_dominio(caminho, pares_triple, caixa_dominio)
+            total = exportar_conciliados_dominio(
+                caminho, pares_triple, caixa_dominio,
+                pendentes_ofx_dominio=ofx_dominio,
+            )
         except PermissionError:
             messagebox.showerror(
                 "Arquivo em uso",

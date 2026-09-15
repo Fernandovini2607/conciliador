@@ -46,6 +46,29 @@ Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo:
 > Da próxima vez que abrir uma planilha da mesma empresa, o sistema já
 > lembra o mapeamento — vai direto sem perguntar.
 
+### 3.1.b Comprovantes PDF de pagamento (alternativa/complemento)
+
+Se a empresa **não tem planilha de controle** mas você tem
+comprovantes de boleto em PDF baixados do internet banking:
+
+- Clique em **Importar comprovantes PDF**.
+- Selecione um ou mais arquivos (Ctrl+clique).
+- **Bancos suportados**: Sicoob e Bradesco. Outros bancos podem ser
+  adicionados sob demanda (peça pro admin).
+- Aguarde o processamento (rápido em PDFs pequenos, alguns segundos
+  em PDFs de 100+ páginas).
+- Os comprovantes viram uma "planilha virtual" — mesmas colunas,
+  mesmo fluxo de conciliação.
+
+**Combinar planilha + comprovantes:** você pode importar planilha
+.xlsx primeiro e depois os PDFs. O sistema **detecta duplicatas**
+(quando o mesmo lançamento está nos dois) e importa cada um só uma
+vez. O popup avisa quantos entraram e quantos foram ignorados.
+
+> Cada comprovante PDF traz **CNPJ + nome do fornecedor** — dados
+> mais completos que a maioria das planilhas de controle. Isso ajuda
+> muito a conciliação com o Domínio.
+
 ### 3.2 Extrato bancário OFX
 - Clique em **Importar OFX**.
 - Escolha **um ou mais arquivos .OFX** (Ctrl+clique pra selecionar
@@ -251,6 +274,30 @@ lembra:
 **As regras cadastradas por qualquer usuário ficam disponíveis pra
 todos** que trabalham nessa empresa — não precisa cadastrar de novo
 quando é outro operador.
+
+---
+
+## 🧹 Trocar OFX ou planilha no meio do trabalho
+
+Se você percebeu que importou o OFX errado (ou a planilha errada) e
+já fez conciliação em cima:
+
+**Limpar OFX**:
+- Fecha só o OFX. As **conciliações que você já fez ficam preservadas**.
+- A planilha (ou os comprovantes PDF) que estão carregados continuam.
+- Ao importar o novo OFX e clicar Conciliar de novo, o sistema
+  **não vai refazer** as linhas que já estavam conciliadas — só as
+  que sobraram como pendentes tentam casar com o novo OFX.
+
+**Limpar planilha**:
+- Simetrico: fecha só a planilha, OFX continua, conciliações
+  preservadas.
+
+> Utilíssimo pra corrigir um OFX incompleto sem perder 20 minutos de
+> classificação já feita.
+
+**Popup de confirmação** te avisa quantas conciliações e lançamentos
+serão preservados antes de aplicar.
 
 ---
 

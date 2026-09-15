@@ -71,19 +71,35 @@ def _pinta_linha(ws, row_idx: int, n_cols: int, cor: str) -> None:
         ws.cell(row=row_idx, column=col).fill = fill
 
 
+def _pega(*fontes, chave: str) -> str:
+    """Devolve o primeiro valor não-vazio entre as fontes (dicts de extras)."""
+    for f in fontes:
+        if f is None:
+            continue
+        v = f.get(chave, "")
+        if v:
+            return v
+    return ""
+
+
 def exportar_conciliados_dominio(
     caminho: str | Path,
     pares_triple: list["Par"],
     pendentes_caixa_dominio: list[tuple["Transacao", dict]],
+    pendentes_ofx_dominio: list[tuple["Transacao", dict]] | None = None,
 ) -> int:
     """Exporta a aba "Conciliados × Domínio" para .xlsx.
+
+    PRIORIDADE de dados: Domínio > planilha/PDF > OFX. O CNPJ, fornecedor
+    e NF vêm sempre do Domínio quando disponíveis — o Domínio é a fonte
+    contábil confiável (planilhas e comprovantes podem ter dados errados
+    ou vazios).
 
     Args:
         caminho: destino do .xlsx
         pares_triple: pares P×OFX que casaram com Domínio
-            (par.dominio is not None)
-        pendentes_caixa_dominio: lista de tuplas (transacao_planilha, match_dict)
-            para os pendentes da planilha (Caixa geral) que casaram com Domínio
+        pendentes_caixa_dominio: [(transacao_planilha, match_dict), ...]
+        pendentes_ofx_dominio: [(transacao_ofx, match_dict), ...] — opcional
 
     Devolve o total de linhas escritas.
     """
@@ -109,13 +125,20 @@ def exportar_conciliados_dominio(
 
     linha = 2
 
-    # 1) Pares P×OFX
+    # 1) Pares P×OFX — prioridade Domínio > planilha > OFX
     for par in pares_triple:
         tipo_txt = "Auto" if par.tipo == "auto" else "Manual"
         origem = par.ofx.extras.get("banco", "") or "OFX"
-        emissao = par.planilha.extras.get("data_emissao")
         pagto = par.planilha.data_pagamento or par.ofx.data
-        status = (par.dominio.extras.get("status", "") if par.dominio else "") or ""
+        dom_extras = par.dominio.extras if par.dominio else {}
+        p_extras = par.planilha.extras
+        o_extras = par.ofx.extras
+        status = dom_extras.get("status", "") or ""
+
+        cnpj = _pega(dom_extras, p_extras, o_extras, chave="cnpj")
+        fornecedor = _pega(dom_extras, p_extras, o_extras, chave="fornecedor")
+        numero_nf = _pega(dom_extras, p_extras, chave="numero_nf")
+        emissao = _pega(dom_extras, p_extras, chave="data_emissao")
 
         diff_dom = ""
         if par.diff_dias_dominio or par.diff_valor_dominio:
@@ -127,10 +150,10 @@ def exportar_conciliados_dominio(
             _fmt_data(par.planilha.data),
             _fmt_data(pagto),
             float(par.planilha.valor),
-            _fmt_data(emissao),
-            str(par.planilha.extras.get("numero_nf", "") or ""),
-            str(par.planilha.extras.get("cnpj", "") or ""),
-            str(par.planilha.extras.get("fornecedor", "") or ""),
+            _fmt_data(emissao) if hasattr(emissao, "strftime") else str(emissao or ""),
+            str(numero_nf),
+            str(cnpj),
+            str(fornecedor),
             (par.ofx.descricao or ""),
             diff_dom,
             status,
@@ -143,14 +166,20 @@ def exportar_conciliados_dominio(
         _pinta_linha(ws, linha, len(colunas), _tag_status(status))
         linha += 1
 
-    # 2) Pendentes da planilha (Caixa geral) que casaram com Domínio
+    # 2) Pendentes da planilha (Caixa geral) — prioridade Domínio > planilha
     for t_p, match in pendentes_caixa_dominio:
         t_dom = match.get("dominio")
         d_d = match.get("diff_dias", 0)
         d_v = match.get("diff_valor", Decimal("0"))
-        emissao = t_p.extras.get("data_emissao")
         pagto = t_p.data_pagamento or t_p.data
-        status = (t_dom.extras.get("status", "") if t_dom else "") or ""
+        dom_extras = t_dom.extras if t_dom else {}
+        p_extras = t_p.extras
+        status = dom_extras.get("status", "") or ""
+
+        cnpj = _pega(dom_extras, p_extras, chave="cnpj")
+        fornecedor = _pega(dom_extras, p_extras, chave="fornecedor")
+        numero_nf = _pega(dom_extras, p_extras, chave="numero_nf")
+        emissao = _pega(dom_extras, p_extras, chave="data_emissao")
 
         diff_dom = ""
         if d_d or d_v:
@@ -167,10 +196,10 @@ def exportar_conciliados_dominio(
             _fmt_data(t_p.data),
             _fmt_data(pagto),
             float(t_p.valor),
-            _fmt_data(emissao),
-            str(t_p.extras.get("numero_nf", "") or ""),
-            str(t_p.extras.get("cnpj", "") or ""),
-            str(t_p.extras.get("fornecedor", "") or ""),
+            _fmt_data(emissao) if hasattr(emissao, "strftime") else str(emissao or ""),
+            str(numero_nf),
+            str(cnpj),
+            str(fornecedor),
             memo_txt,
             diff_dom,
             status,
@@ -182,6 +211,49 @@ def exportar_conciliados_dominio(
                 cell.number_format = '#,##0.00'
         _pinta_linha(ws, linha, len(colunas), _tag_status(status))
         linha += 1
+
+    # 3) Pendentes OFX que casaram com Domínio (sem planilha)
+    #    prioridade Domínio > OFX (enriquecido ou não)
+    if pendentes_ofx_dominio:
+        for t_o, match in pendentes_ofx_dominio:
+            t_dom = match.get("dominio")
+            d_d = match.get("diff_dias", 0)
+            d_v = match.get("diff_valor", Decimal("0"))
+            dom_extras = t_dom.extras if t_dom else {}
+            o_extras = t_o.extras
+            status = dom_extras.get("status", "") or ""
+
+            cnpj = _pega(dom_extras, o_extras, chave="cnpj")
+            fornecedor = _pega(dom_extras, o_extras, chave="fornecedor")
+            numero_nf = _pega(dom_extras, o_extras, chave="numero_nf")
+            emissao = dom_extras.get("data_emissao")
+            origem = t_o.extras.get("banco", "") or "OFX"
+
+            diff_dom = ""
+            if d_d or d_v:
+                diff_dom = f"{d_d}d, R$ {d_v:.2f}"
+
+            valores = [
+                "OFX",
+                origem,
+                _fmt_data(t_o.data),
+                _fmt_data(t_o.data),
+                float(t_o.valor),
+                _fmt_data(emissao) if hasattr(emissao, "strftime") else "",
+                str(numero_nf),
+                str(cnpj),
+                str(fornecedor),
+                (t_o.descricao or ""),
+                diff_dom,
+                status,
+            ]
+            for i, v in enumerate(valores, start=1):
+                cell = ws.cell(row=linha, column=i, value=v)
+                cell.font = FONTE_CELULA
+                if i == 5:
+                    cell.number_format = '#,##0.00'
+            _pinta_linha(ws, linha, len(colunas), _tag_status(status))
+            linha += 1
 
     wb.save(str(caminho))
     return linha - 2  # total de linhas de dados

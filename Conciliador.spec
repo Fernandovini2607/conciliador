@@ -31,7 +31,12 @@ hidden_imports = [
     "matcher",
     "parser_dominio",
     "parser_ofx",
+    "parser_pdf",
     "parser_xlsx",
+    "pdfplumber",
+    "pdfminer",
+    "pdfminer.high_level",
+    "pdfminer.pdfparser",
 ]
 
 # Arquivos de dados a incluir no build

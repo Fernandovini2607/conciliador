@@ -210,6 +210,31 @@ def construir():
         "sistema já lembra o mapeamento — vai direto sem perguntar."
     ))
 
+    flow.append(Paragraph(
+        "3.1.b Comprovantes PDF de pagamento (alternativa)", H3,
+    ))
+    flow.append(Paragraph(
+        "Se a empresa não tem planilha de controle mas você tem "
+        "comprovantes de boleto em PDF baixados do internet banking:",
+        TEXTO,
+    ))
+    flow.append(bullets([
+        "Clique em <b>Importar comprovantes PDF</b>.",
+        "Selecione um ou mais arquivos (Ctrl+clique).",
+        "<b>Bancos suportados</b>: Sicoob e Bradesco.",
+        "Aguarde o processamento — rápido em PDFs pequenos, alguns "
+        "segundos em PDFs de 100+ páginas.",
+        "Os comprovantes viram uma \"planilha virtual\" — mesmas colunas, "
+        "mesmo fluxo de conciliação.",
+    ]))
+    flow.append(caixa_dica(
+        "Pode combinar planilha .xlsx + comprovantes PDF. O sistema "
+        "detecta duplicatas e importa cada lançamento uma vez só. O "
+        "popup avisa quantos entraram e quantos foram ignorados. "
+        "Comprovantes PDF trazem CNPJ + nome, o que ajuda muito a "
+        "conciliação com o Domínio."
+    ))
+
     flow.append(Paragraph("3.2 Extrato bancário OFX", H3))
     flow.append(bullets([
         "Clique em <b>Importar OFX</b>.",
@@ -476,6 +501,34 @@ def construir():
     ))
 
     # ============ Uso compartilhado
+    # Nova seção — Limpar OFX/planilha preservando trabalho
+    flow.append(Paragraph(
+        "Trocar OFX ou planilha no meio do trabalho", PASSO,
+    ))
+    flow.append(Paragraph(
+        "Se você percebeu que importou o OFX errado (ou a planilha "
+        "errada) e já fez conciliação em cima:", TEXTO,
+    ))
+    flow.append(Paragraph("Limpar OFX", H3))
+    flow.append(bullets([
+        "Fecha só o OFX. As <b>conciliações que você já fez ficam "
+        "preservadas</b>.",
+        "A planilha (ou os comprovantes PDF) continuam.",
+        "Ao importar o novo OFX e Conciliar de novo, o sistema <b>não "
+        "vai refazer</b> as linhas já conciliadas — só as pendentes "
+        "tentam casar com o novo OFX.",
+    ]))
+    flow.append(Paragraph("Limpar planilha", H3))
+    flow.append(bullets([
+        "Simétrico: fecha só a planilha, OFX continua, conciliações "
+        "preservadas.",
+    ]))
+    flow.append(caixa_dica(
+        "Utilíssimo pra corrigir um OFX incompleto sem perder 20 minutos "
+        "de classificação já feita. O popup te avisa quantas conciliações "
+        "e lançamentos serão preservados antes de aplicar."
+    ))
+
     flow.append(Paragraph("Uso compartilhado (multi-usuário)", PASSO))
     flow.append(bullets([
         "Cada operador tem seu <b>próprio usuário e senha</b>.",

@@ -3,3 +3,4 @@ ofxparse>=0.21
 pyodbc>=5.0.1
 reportlab>=4.0.0
 PyMySQL>=1.1.0
+pdfplumber>=0.11.0

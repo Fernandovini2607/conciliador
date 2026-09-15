@@ -77,10 +77,13 @@ def bullets(itens: list[str]) -> ListFlowable:
 def tabela_abas() -> Table:
     cabecalho = ["#", "Aba", "Conteúdo"]
     linhas = [
-        ["0", "Planilha", "Dados crus (vencimento, pagamento, emissão, valor, "
-         "NF, CNPJ, fornecedor, histórico, TIPO). Botão Editar lançamento."],
-        ["1", "OFX", "Pagamentos do extrato (data, banco identificado, valor, "
-         "memo, documento). Aceita múltiplos OFX de bancos diferentes."],
+        ["0", "Planilha", "Dados crus da planilha .xlsx OU dos comprovantes "
+         "PDF (Sicoob/Bradesco). Botões Abrir planilha e Importar "
+         "comprovantes PDF. Deduplica automaticamente entre xlsx+PDF."],
+        ["1", "OFX", "Pagamentos do extrato (data, banco, valor, memo, "
+         "documento). Multi-arquivo. Após conciliação, ganha colunas "
+         "Fornecedor (via PDF) + CNPJ (via PDF) + fundo azul nas linhas "
+         "enriquecidas."],
         ["2", "Domínio dados", "Parcelas do Domínio com status (Aberto/Parcial/Paga)."],
         ["3", "Conciliados", "Pares Planilha × OFX casados. Coluna 'Origem' "
          "mostra o banco do OFX."],
@@ -361,6 +364,25 @@ def construir() -> list:
         "o sinal pra casar com a planilha.",
     ]))
 
+    flow.append(Paragraph("Comprovantes PDF de pagamento — parser_pdf.py", H2))
+    flow.append(bullets([
+        "Extração <b>nativa</b> de PDFs (via <i>pdfplumber</i>) de "
+        "comprovantes de pagamento de boleto. Não requer OCR — funciona "
+        "só em PDFs digitais (baixados de internet banking).",
+        "<b>Bancos suportados hoje</b>: Sicoob (SISBR) e Bradesco NET "
+        "Empresa. Arquitetura permite adicionar novos bancos com "
+        "detecção automática por marcadores fortes no texto.",
+        "<b>Campos extraídos</b>: valor pago, data pagamento, data "
+        "vencimento, beneficiário (nome e CNPJ), nº documento, banco.",
+        "<b>Multi-comprovante</b>: um único PDF pode ter dezenas ou "
+        "centenas de comprovantes empilhados — o parser divide por "
+        "cabeçalhos e processa cada um separadamente.",
+        "<b>Streaming pra PDFs grandes</b>: performance calibrada pra "
+        "arquivos de 500+ páginas (~50 ms/pág). UI mostra progresso.",
+        "<b>Deduplicação cruzada</b>: se a planilha já tem esse lançamento, "
+        "detecta e ignora (ver seção 5).",
+    ]))
+
     flow.append(Paragraph("Sistema Domínio (ODBC) — parser_dominio.py", H2))
     flow.append(bullets([
         "<b>Auto-conexão no startup</b>: usa credenciais salvas em "
@@ -399,17 +421,40 @@ def construir() -> list:
         "Sugestões com seleção múltipla e 'Aceitar tudo'.",
     ]))
 
-    flow.append(Paragraph("Nível 2 — Comparação com Domínio", H2))
+    flow.append(Paragraph(
+        "Deduplicação Planilha × Comprovantes PDF", H2,
+    ))
     flow.append(bullets([
-        "<i>_filtrar_conciliados_por_dominio</i> processa <b>3 fontes</b>:",
-        "1. Pares Planilha × OFX conciliados",
-        "2. Pendentes da planilha (Caixa geral, sem OFX correspondente)",
-        "3. Pendentes do OFX (sem planilha correspondente)",
-        "<b>Fase exata</b>: (data_vencimento + valor + NF).",
-        "<b>Fase aproximada 2-de-3</b>: pelo menos 2 de 3 critérios (CNPJ, "
-        "data, valor) iguais.",
-        "Prioridade: pares > pendentes planilha > pendentes OFX. Cada "
-        "Transacao do Domínio só casa com 1 item.",
+        "Antes da conciliação, se o usuário importar planilha .xlsx E "
+        "comprovantes PDF, o app detecta lançamentos que aparecem nos "
+        "dois pra evitar duplicidade.",
+        "<b>Regra de match</b>: valor exato + data (vencimento OU pagamento) "
+        "coincidem + identidade (CNPJ igual OU nome bate por substring "
+        "normalizada, sem sufixos societários).",
+        "Quando detecta duplicata: mantém a linha da planilha e usa o "
+        "PDF só pra <b>enriquecer</b> campos faltantes (ex: se a planilha "
+        "não tem CNPJ, herda do PDF).",
+        "Nunca considera duplicata se ambos lados estão sem CNPJ e sem "
+        "nome (evita colar tarifas iguais em datas iguais como se fossem "
+        "uma só).",
+        "Popup pós-importação lista quantos novos entraram e quantos "
+        "duplicados foram ignorados, pra visibilidade.",
+    ]))
+
+    flow.append(Paragraph("Nível 2 — Comparação com Domínio (3 fases)", H2))
+    flow.append(bullets([
+        "<i>_filtrar_conciliados_por_dominio</i> processa <b>3 fontes</b> "
+        "(pares P×OFX, pendentes planilha, pendentes OFX) em <b>3 fases</b> "
+        "hierárquicas. Cada Transacao do Domínio só casa com 1 item.",
+        "<b>Fase 1 — Exata</b>: data_vencimento + valor + NF iguais.",
+        "<b>Fase 2 — 2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) "
+        "iguais. O campo restante pode divergir; a diferença aparece na "
+        "coluna Δ Domínio.",
+        "<b>Fase 3 — Fornecedor + Valor</b>: valor exato E (CNPJ bate "
+        "OU nome bate por substring normalizada). Data usada apenas como "
+        "desempate — NÃO precisa bater. Útil quando o Domínio tem a "
+        "mesma parcela mas com vencimento renegociado/prorrogado.",
+        "Prioridade nas 3 fases: pares > pendentes planilha > pendentes OFX.",
     ]))
 
     flow.append(Paragraph("Comparação OFX × Domínio direta (sem planilha)", H2))
@@ -417,9 +462,40 @@ def construir() -> list:
         "Cenário útil quando o operador só tem OFX e Domínio (não recebeu "
         "planilha de contas a pagar).",
         "Botão 'Conciliar' habilita com planilha OU OFX (não exige os dois).",
-        "Match OFX × Domínio segue mesma lógica exato + 2-de-3.",
+        "Match OFX × Domínio segue as mesmas 3 fases.",
         "Pendentes OFX que casarem com Domínio somem da aba Pendentes e "
         "aparecem em Conciliados × Domínio com 'Origem = banco do OFX'.",
+    ]))
+
+    flow.append(Paragraph(
+        "Enriquecimento cruzado — PDF → OFX → Domínio", H2,
+    ))
+    flow.append(bullets([
+        "Após conciliar, se um par tem <i>planilha.origem = 'pdf'</i>, "
+        "o app copia beneficiário/CNPJ/nº doc do PDF para o extras do OFX.",
+        "Efeito visual: aba OFX (dados crus) mostra colunas Fornecedor e "
+        "CNPJ populadas + linhas com fundo azul claro. Aba Pendentes lado "
+        "OFX também mostra dados enriquecidos, útil pra criar regras memo.",
+        "Efeito funcional: regras memo automaticamente usam o fornecedor "
+        "enriquecido como padrão de match; lançamentos manuais herdam "
+        "CNPJ/fornecedor sem digitação.",
+        "<b>Aba Conciliados × Domínio</b>: dados priorizam sempre o Domínio "
+        "> planilha/PDF > OFX. Se o CNPJ da planilha está errado ou vazio, "
+        "puxa o do Domínio (que é a fonte contábil confiável).",
+    ]))
+
+    flow.append(Paragraph("Preservação seletiva ao limpar", H2))
+    flow.append(bullets([
+        "Ao clicar em <b>Limpar planilha</b>: mantém intactos pares "
+        "conciliados, matches com Domínio, lançamentos contábeis E "
+        "pendentes OFX que ainda estão carregados.",
+        "Ao clicar em <b>Limpar OFX</b>: idem, preservando pendentes "
+        "da planilha.",
+        "<b>Reconciliação seguinte não duplica</b>: linhas já pareadas "
+        "não são reoferecidas — só o que sobrou tenta casar com o novo "
+        "OFX/planilha importado.",
+        "Trocar de empresa continua fazendo <b>reset total</b> (dados "
+        "são específicos por empresa).",
     ]))
 
     # ============================ 6
