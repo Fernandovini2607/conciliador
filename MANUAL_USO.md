@@ -243,6 +243,16 @@ Na aba Comparação você vê **6 cores**:
 | 🩵 Ciano (OFX OK) | Extrato bateu no Domínio | Nada — está fechado |
 | 🟠 Laranja (OFX falta) | Extrato sem lançamento no Domínio | Criar lançamento ou regra |
 
+### Filtrar por cor
+
+No topo da aba Comparação tem o campo **Filtrar por cor**. Escolha uma
+das 6 cores (ou "Todos") pra ver **só os lançamentos daquela cor** —
+útil quando você quer focar só nos amarelos, cinzas ou laranjas
+(pendências). O botão **Limpar** volta pra "Todos".
+
+> O filtro é só visual — não altera os totais no título da aba nem
+> afeta a exportação de pendências.
+
 ### Ações na aba Comparação:
 
 - **Editar dados**: se a planilha tem dados errados (NF errada, valor

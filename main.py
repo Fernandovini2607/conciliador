@@ -1492,6 +1492,44 @@ class App(tk.Tk):
                 foreground="#333",
             ).grid(row=i, column=1, padx=(0, 8), pady=1, sticky="w")
 
+        # ---- Filtro por cor: Combobox + botão limpar
+        # Guarda como StringVar pra persistir entre renders.
+        # Mapeia rótulo visível → tag interna do treeview (mesmo nome do status).
+        self._filtro_cor_map = {
+            "Todos": None,
+            "Verde (OK)": "ok",
+            "Amarelo (Falta dom)": "falta_dominio",
+            "Azul (Caixa OK)": "caixa_ok",
+            "Cinza (Caixa falta)": "caixa_falta",
+            "Ciano (OFX OK)": "ofx_ok",
+            "Laranja (OFX falta)": "ofx_falta",
+        }
+        self.filtro_cor_comparacao = tk.StringVar(value="Todos")
+
+        filtro_frame = ttk.Frame(aba)
+        filtro_frame.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(filtro_frame, text="Filtrar por cor:").pack(
+            side="left", padx=(0, 4),
+        )
+        cb_filtro = ttk.Combobox(
+            filtro_frame, textvariable=self.filtro_cor_comparacao,
+            values=list(self._filtro_cor_map.keys()),
+            state="readonly", width=22,
+        )
+        cb_filtro.pack(side="left")
+        cb_filtro.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._renderizar_comparacao(),
+        )
+        ttk.Button(
+            filtro_frame, text="Limpar",
+            command=self._limpar_filtro_comparacao,
+        ).pack(side="left", padx=(4, 0))
+        self.lbl_filtro_comparacao = ttk.Label(
+            filtro_frame, text="", foreground="#555",
+        )
+        self.lbl_filtro_comparacao.pack(side="left", padx=(10, 0))
+
         cols = (
             "status", "vencimento", "valor", "emissao", "nf",
             "cnpj", "fornecedor", "memo_ofx",
@@ -2284,6 +2322,12 @@ class App(tk.Tk):
         # com _gerar_lancamentos_contabeis. O filtro já foi feito antes.
         self._renderizar_comparacao()
 
+    def _limpar_filtro_comparacao(self) -> None:
+        """Volta o filtro por cor da aba Comparação pra 'Todos' e re-renderiza."""
+        if hasattr(self, "filtro_cor_comparacao"):
+            self.filtro_cor_comparacao.set("Todos")
+            self._renderizar_comparacao()
+
     def _renderizar_comparacao(self) -> None:
         """Monta a lista de resultados e chama _render_aba_dominio.
         Reutilizada por _comparar_com_dominio e _recalcular_comparacao."""
@@ -2385,9 +2429,11 @@ class App(tk.Tk):
             "ofx_ok": "OFX (sem planilha) no Domínio",
             "ofx_falta": "OFX (sem planilha) falta no Domínio",
         }
+        # Contadores TOTAIS (independentes do filtro visual) — vão no
+        # título da aba pra o operador sempre ver o panorama geral.
         n_ok = n_falta_dom = n_caixa_ok = n_caixa_falta = 0
         n_ofx_ok = n_ofx_falta = 0
-        for status, t_planilha, t_ofx, t_dom, _diff_d, _diff_v, par in resultados:
+        for status, *_ in resultados:
             if status == "ok":
                 n_ok += 1
             elif status == "falta_dominio":
@@ -2400,6 +2446,19 @@ class App(tk.Tk):
                 n_ofx_ok += 1
             else:
                 n_ofx_falta += 1
+
+        # Filtro por cor: se selecionado, esconde tudo que não é do
+        # status escolhido. Mantido só como filtro visual — não muda
+        # os totais nem afeta exportação, edição, etc.
+        status_filtro = None
+        if hasattr(self, "filtro_cor_comparacao"):
+            rotulo_sel = self.filtro_cor_comparacao.get()
+            status_filtro = self._filtro_cor_map.get(rotulo_sel)
+        mostradas = 0
+        for status, t_planilha, t_ofx, t_dom, _diff_d, _diff_v, par in resultados:
+            if status_filtro is not None and status != status_filtro:
+                continue
+            mostradas += 1
             rotulo = rotulos.get(status, status)
             # Extras: prioriza Domínio se houver, depois planilha
             origem_extras = t_dom.extras if t_dom else t_planilha.extras
@@ -2435,6 +2494,19 @@ class App(tk.Tk):
         if n_ofx_ok or n_ofx_falta:
             partes.append(f"OFX {n_ofx_ok}/{n_ofx_falta}")
         self.notebook.tab(7, text=f"Comparação ({' | '.join(partes)})")
+
+        # Atualiza o rotulo do filtro pra o operador ver o efeito
+        if hasattr(self, "lbl_filtro_comparacao"):
+            total = len(resultados)
+            if status_filtro is None:
+                self.lbl_filtro_comparacao.config(
+                    text=f"{total} lançamento(s) na aba"
+                )
+            else:
+                self.lbl_filtro_comparacao.config(
+                    text=f"Mostrando {mostradas} de {total} "
+                    "(filtro ativo — outras cores estão ocultas)"
+                )
 
     # ------------------------------------------------------ Carregar dados
 

@@ -462,6 +462,16 @@ def construir():
         larguras=[4 * cm, 6 * cm, 6 * cm],
     ))
 
+    flow.append(Paragraph("Filtrar por cor", H3))
+    flow.append(Paragraph(
+        "No topo da aba tem o campo <b>Filtrar por cor</b>. Escolha uma "
+        "das 6 cores (ou <i>Todos</i>) pra ver <b>só os lançamentos "
+        "daquela cor</b> — útil pra focar em amarelos, cinzas ou "
+        "laranjas (pendências). Botão <b>Limpar</b> volta pra <i>Todos</i>. "
+        "O filtro é só visual — não altera os totais no título da aba "
+        "nem afeta a exportação.", TEXTO,
+    ))
+
     flow.append(Paragraph("Ações na aba Comparação", H3))
     flow.append(bullets([
         "<b>Editar dados</b>: se a planilha tem erros (NF errada, valor "
