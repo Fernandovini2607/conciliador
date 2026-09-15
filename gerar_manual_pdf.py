@@ -410,6 +410,29 @@ def construir():
         "Clique em <b>Comparar com Domínio</b> (barra do meio).",
         "Vai pra aba <b>Comparação</b> automaticamente.",
     ]))
+    flow.append(Paragraph(
+        "Como o sistema decide que um pagamento bate com o Domínio", H3,
+    ))
+    flow.append(Paragraph(
+        "Ele tenta <b>4 formas de match, uma depois da outra</b> "
+        "(se casou numa, não passa pra próxima):", TEXTO,
+    ))
+    flow.append(bullets([
+        "<b>Match exato</b>: data de vencimento + valor + Nº NF iguais.",
+        "<b>2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) iguais. "
+        "O terceiro pode divergir — a diferença aparece na coluna Δ Domínio.",
+        "<b>Fornecedor + valor</b>: valor exato E (CNPJ ou nome do "
+        "fornecedor bate). Data pode divergir — útil pra parcelas "
+        "renegociadas / vencimento prorrogado.",
+        "<b>NF + fornecedor</b> (valor livre): Nº NF igual (obrigatório e "
+        "não-vazio) E (CNPJ ou nome do fornecedor bate). <b>Valor pode "
+        "divergir</b> — útil pra pagamentos com juros/multa/desconto.",
+    ]))
+    flow.append(caixa_dica(
+        "Cada parcela do Domínio só pode ser vinculada a <b>um "
+        "pagamento</b> — não gera duplicidade."
+    ))
+    flow.append(Spacer(1, 6))
     flow.append(Paragraph("Na aba Comparação você vê 6 cores:", H3))
     flow.append(tabela_simples(
         ["Cor", "Significado", "O que fazer"],

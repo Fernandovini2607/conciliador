@@ -207,6 +207,24 @@ Depois de conciliar planilha × OFX:
 1. Clique em **Comparar com Domínio** (barra do meio).
 2. Vai pra aba **Comparação** automaticamente.
 
+### Como o sistema decide que um pagamento bate com o Domínio
+
+Ele tenta **4 formas de match, uma depois da outra** (se casou numa,
+não passa pra próxima):
+
+1. **Match exato**: data de vencimento + valor + Nº NF iguais.
+2. **2 de 3**: pelo menos 2 dentre (CNPJ, data, valor) iguais. O
+   terceiro pode divergir — a diferença aparece na coluna Δ Domínio.
+3. **Fornecedor + valor**: valor exato E (CNPJ ou nome do fornecedor
+   bate). Data pode divergir — útil pra parcelas renegociadas /
+   vencimento prorrogado.
+4. **NF + fornecedor** (valor livre): Nº NF igual (obrigatório e
+   não-vazio) E (CNPJ ou nome do fornecedor bate). **Valor pode
+   divergir** — útil pra pagamentos com juros/multa/desconto.
+
+> Cada parcela do Domínio só pode ser vinculada a **um pagamento** —
+> não gera duplicidade.
+
 Na aba Comparação você vê **6 cores**:
 
 | Cor | Significado | O que fazer |

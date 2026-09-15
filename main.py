@@ -3163,7 +3163,7 @@ class App(tk.Tk):
         alvo.extras["dedup_enriquecida"] = True
 
     def _filtrar_conciliados_por_dominio(self) -> None:
-        """Match com Domínio em TRÊS fases, aplicado a TRÊS fontes:
+        """Match com Domínio em QUATRO fases, aplicado a TRÊS fontes:
         - pares_conciliados (Planilha×OFX) — atualiza par.dominio
         - pendentes_planilha_brutos (sem OFX = Caixa geral) — atualiza
           self.pendentes_planilha_dominio[id(t)]
@@ -3179,9 +3179,15 @@ class App(tk.Tk):
             usada apenas como desempate quando há vários candidatos —
             NÃO precisa bater. Útil quando o Domínio tem a mesma parcela
             mas com vencimento renegociado/prorrogado.
+        FASE 4 (NF + fornecedor, valor livre): Nº NF normalizado igual
+            (obrigatório e não-vazio dos dois lados) E (CNPJ bate OU
+            nome do fornecedor bate). Valor NÃO precisa bater — útil
+            quando a parcela do Domínio tem juros/multa/desconto que
+            fizeram o valor pago divergir da parcela original. Data
+            usada só como desempate.
 
         Ordem de prioridade (cada Transacao do Domínio só casa com 1 item):
-        pares > pendentes planilha > pendentes OFX (nas 3 fases).
+        pares > pendentes planilha > pendentes OFX (nas 4 fases).
         """
         from collections import defaultdict
         from decimal import Decimal
@@ -3426,8 +3432,18 @@ class App(tk.Tk):
                 }
                 usados.add(id(t_dom))
 
+        # Guarda quem sobrou depois da Fase 3 pra alimentar a Fase 4
+        pares_sem_match_f4: list[Par] = [
+            par for par in pares_sem_match_f3 if par.dominio is None
+        ]
+        pendentes_sem_match_f4: list[Transacao] = [
+            t for t in pendentes_sem_match_f3
+            if id(t) not in self.pendentes_planilha_dominio
+        ]
+
         # Pendentes OFX — FASE 3 (pega quando OFX foi enriquecido por PDF
         # e ganhou fornecedor/CNPJ, mesmo que a data diverja do Domínio)
+        pendentes_ofx_sem_match_f4: list[Transacao] = []
         for t_o in pendentes_ofx_sem_match_f3:
             cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
             nome_o = self._normaliza_nome_fornecedor(
@@ -3435,6 +3451,108 @@ class App(tk.Tk):
             )
             idx, dd, dv = _melhor_match_fase3(
                 cnpj_o, nome_o, _quant(t_o.valor), t_o.data,
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                self.pendentes_ofx_dominio[id(t_o)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                usados.add(id(t_dom))
+            else:
+                pendentes_ofx_sem_match_f4.append(t_o)
+
+        # ---------- FASE 4: NF + fornecedor batem, valor pode divergir
+        # Útil quando o Domínio registrou juros/multa/desconto e o valor
+        # pago no OFX ficou diferente do valor original da parcela — mas
+        # a NF continua a mesma. Exige NF não-vazia dos dois lados pra
+        # evitar match espúrio "sem NF ↔ sem NF" (que casaria qualquer
+        # pagamento sem NF com qualquer parcela sem NF do Domínio).
+        def _melhor_match_fase4(
+            nf_p_norm: str, cnpj_p_norm: str, nome_p_norm: str,
+            valor_p, data_p,
+        ) -> tuple[int | None, int, Decimal]:
+            """Fase 4: exige NF igual (não-vazia) E (CNPJ ou nome bate).
+            Valor livre. Data usada só pra desempate."""
+            if not nf_p_norm:
+                return None, 0, Decimal("0")
+            melhor_idx: int | None = None
+            melhor_score: tuple | None = None
+            melhor_d = 0
+            melhor_v = Decimal("0")
+            for i, t in enumerate(dominio_disponivel):
+                nf_d = self._normaliza_nf(t.extras.get("numero_nf", ""))
+                if not nf_d or nf_p_norm != nf_d:
+                    continue  # NF tem que bater exato e não pode ser vazia
+                cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
+                nome_d = self._normaliza_nome_fornecedor(
+                    t.extras.get("fornecedor", "")
+                )
+                bate_cnpj = bool(cnpj_p_norm) and cnpj_p_norm == cnpj_d
+                bate_nome = self._nomes_batem(nome_p_norm, nome_d)
+                if not (bate_cnpj or bate_nome):
+                    continue
+                dd = abs((data_p - t.data).days)
+                dv = abs(valor_p - _quant(t.valor))
+                # Prioridade: CNPJ > nome; depois menor diff de dias
+                prioridade = 0 if bate_cnpj else 1
+                score = (prioridade, dd, dv)
+                if melhor_score is None or score < melhor_score:
+                    melhor_score = score
+                    melhor_idx = i
+                    melhor_d = dd
+                    melhor_v = dv
+            return melhor_idx, melhor_d, melhor_v
+
+        # Pares P×OFX — FASE 4
+        for par in pares_sem_match_f4:
+            nf_p = self._normaliza_nf(par.planilha.extras.get("numero_nf", ""))
+            cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
+            nome_p = self._normaliza_nome_fornecedor(
+                par.planilha.extras.get("fornecedor", "")
+            )
+            idx, dd, dv = _melhor_match_fase4(
+                nf_p, cnpj_p, nome_p,
+                _quant(par.planilha.valor), par.planilha.data,
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                par.dominio = t_dom
+                par.diff_dias_dominio = dd
+                par.diff_valor_dominio = dv
+                usados.add(id(t_dom))
+
+        # Pendentes planilha (Caixa geral) — FASE 4
+        for t_p in pendentes_sem_match_f4:
+            nf_p = self._normaliza_nf(t_p.extras.get("numero_nf", ""))
+            cnpj_p = self._normaliza_cnpj(t_p.extras.get("cnpj", ""))
+            nome_p = self._normaliza_nome_fornecedor(
+                t_p.extras.get("fornecedor", "")
+            )
+            idx, dd, dv = _melhor_match_fase4(
+                nf_p, cnpj_p, nome_p, _quant(t_p.valor), t_p.data,
+            )
+            if idx is not None:
+                t_dom = dominio_disponivel.pop(idx)
+                self.pendentes_planilha_dominio[id(t_p)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                usados.add(id(t_dom))
+
+        # Pendentes OFX — FASE 4 (funciona quando OFX foi enriquecido
+        # por PDF e ganhou NF+fornecedor; sem enriquecimento, OFX quase
+        # nunca tem NF, então dificilmente casa aqui)
+        for t_o in pendentes_ofx_sem_match_f4:
+            nf_o = self._normaliza_nf(t_o.extras.get("numero_nf", ""))
+            cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
+            nome_o = self._normaliza_nome_fornecedor(
+                t_o.extras.get("fornecedor", "")
+            )
+            idx, dd, dv = _melhor_match_fase4(
+                nf_o, cnpj_o, nome_o, _quant(t_o.valor), t_o.data,
             )
             if idx is not None:
                 t_dom = dominio_disponivel.pop(idx)

@@ -447,10 +447,10 @@ def construir() -> list:
         "duplicados foram ignorados, pra visibilidade.",
     ]))
 
-    flow.append(Paragraph("Nível 2 — Comparação com Domínio (3 fases)", H2))
+    flow.append(Paragraph("Nível 2 — Comparação com Domínio (4 fases)", H2))
     flow.append(bullets([
         "<i>_filtrar_conciliados_por_dominio</i> processa <b>3 fontes</b> "
-        "(pares P×OFX, pendentes planilha, pendentes OFX) em <b>3 fases</b> "
+        "(pares P×OFX, pendentes planilha, pendentes OFX) em <b>4 fases</b> "
         "hierárquicas. Cada Transacao do Domínio só casa com 1 item.",
         "<b>Fase 1 — Exata</b>: data_vencimento + valor + NF iguais.",
         "<b>Fase 2 — 2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) "
@@ -460,7 +460,13 @@ def construir() -> list:
         "OU nome bate por substring normalizada). Data usada apenas como "
         "desempate — NÃO precisa bater. Útil quando o Domínio tem a "
         "mesma parcela mas com vencimento renegociado/prorrogado.",
-        "Prioridade nas 3 fases: pares > pendentes planilha > pendentes OFX.",
+        "<b>Fase 4 — NF + Fornecedor (valor livre)</b>: Nº NF normalizado "
+        "igual (obrigatório e não-vazio dos dois lados) E (CNPJ bate OU "
+        "nome bate). Valor <b>NÃO</b> precisa bater — cobre pagamentos com "
+        "juros/multa/desconto onde o valor divergiu da parcela original "
+        "mas a NF é a mesma. Data como desempate. Δ dias e Δ valor ficam "
+        "visíveis na coluna Δ Domínio.",
+        "Prioridade nas 4 fases: pares > pendentes planilha > pendentes OFX.",
     ]))
 
     flow.append(Paragraph("Comparação OFX × Domínio direta (sem planilha)", H2))
@@ -468,7 +474,7 @@ def construir() -> list:
         "Cenário útil quando o operador só tem OFX e Domínio (não recebeu "
         "planilha de contas a pagar).",
         "Botão 'Conciliar' habilita com planilha OU OFX (não exige os dois).",
-        "Match OFX × Domínio segue as mesmas 3 fases.",
+        "Match OFX × Domínio segue as mesmas 4 fases.",
         "Pendentes OFX que casarem com Domínio somem da aba Pendentes e "
         "aparecem em Conciliados × Domínio com 'Origem = banco do OFX'.",
     ]))
