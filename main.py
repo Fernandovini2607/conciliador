@@ -3188,7 +3188,13 @@ class App(tk.Tk):
 
         Ordem de prioridade (cada Transacao do Domínio só casa com 1 item):
         pares > pendentes planilha > pendentes OFX (nas 4 fases).
+
+        Depuração: se a variável de ambiente ``DEBUG_NF`` estiver setada
+        (ex: DEBUG_NF=171255), grava em ``debug_dominio.log`` cada evento
+        envolvendo essa NF nas 4 fases — útil pra investigar quando uma
+        linha não casou como esperado.
         """
+        import os
         from collections import defaultdict
         from decimal import Decimal
 
@@ -3205,6 +3211,36 @@ class App(tk.Tk):
 
         def _quant(v: Decimal) -> Decimal:
             return v.quantize(Decimal("0.01"))
+
+        # ---------- Depuração opcional
+        _nf_debug = os.environ.get("DEBUG_NF", "").strip()
+        _log_lines: list[str] = []
+
+        def _log(msg: str) -> None:
+            if _nf_debug:
+                _log_lines.append(msg)
+
+        def _tem_nf_debug(t) -> bool:
+            if not _nf_debug:
+                return False
+            nf = self._normaliza_nf(t.extras.get("numero_nf", ""))
+            return nf == _nf_debug
+
+        if _nf_debug:
+            _log(f"=== DEBUG NF {_nf_debug} ===")
+            _log(f"Transacoes Dominio com essa NF:")
+            for i, t in enumerate(self.transacoes_dominio):
+                if _tem_nf_debug(t):
+                    _log(
+                        f"  [{i}] data={t.data} valor={t.valor} "
+                        f"CNPJ={t.extras.get('cnpj','')} "
+                        f"forn={t.extras.get('fornecedor','')}"
+                    )
+            _log(
+                f"Pares conciliados: {len(self.pares_conciliados)}, "
+                f"pend planilha: {len(self.pendentes_planilha_brutos)}, "
+                f"pend OFX: {len(self.pendentes_ofx_brutos)}"
+            )
 
         # ---------- FASE 1: match exato (data + valor + NF)
         indice: dict[tuple, list[Transacao]] = defaultdict(list)
@@ -3230,8 +3266,23 @@ class App(tk.Tk):
             if candidatos:
                 par.dominio = candidatos[0]
                 usados.add(id(par.dominio))
+                if _tem_nf_debug(par.planilha) or _tem_nf_debug(par.dominio):
+                    _log(
+                        f"[F1 par] CASOU par(data={par.planilha.data} "
+                        f"valor={par.planilha.valor} NF="
+                        f"{par.planilha.extras.get('numero_nf','')}) "
+                        f"<-> dominio(data={par.dominio.data} "
+                        f"valor={par.dominio.valor} NF="
+                        f"{par.dominio.extras.get('numero_nf','')})"
+                    )
             else:
                 pares_sem_match.append(par)
+                if _tem_nf_debug(par.planilha):
+                    _log(
+                        f"[F1 par] SEM MATCH par(data={par.planilha.data} "
+                        f"valor={par.planilha.valor} NF="
+                        f"{par.planilha.extras.get('numero_nf','')})"
+                    )
 
         # Pendentes da planilha (Caixa geral) — FASE 1 nos restantes
         pendentes_sem_match: list[Transacao] = []
@@ -3249,6 +3300,12 @@ class App(tk.Tk):
                     "diff_valor": Decimal("0"),
                 }
                 usados.add(id(candidatos[0]))
+                if _tem_nf_debug(t_p) or _tem_nf_debug(candidatos[0]):
+                    _log(
+                        f"[F1 pend_plan] CASOU planilha(data={t_p.data} "
+                        f"valor={t_p.valor} NF="
+                        f"{t_p.extras.get('numero_nf','')}) <-> dominio"
+                    )
             else:
                 pendentes_sem_match.append(t_p)
 
@@ -3322,6 +3379,14 @@ class App(tk.Tk):
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
                 usados.add(id(t_dom))
+                if _tem_nf_debug(par.planilha) or _tem_nf_debug(t_dom):
+                    _log(
+                        f"[F2 par] CASOU par(NF="
+                        f"{par.planilha.extras.get('numero_nf','')}) "
+                        f"<-> dominio(NF={t_dom.extras.get('numero_nf','')} "
+                        f"valor={t_dom.valor} data={t_dom.data}) "
+                        f"dd={dd} dv={dv}"
+                    )
             else:
                 pares_sem_match_f3.append(par)
 
@@ -3340,6 +3405,15 @@ class App(tk.Tk):
                     "diff_valor": dv,
                 }
                 usados.add(id(t_dom))
+                if _tem_nf_debug(t_p) or _tem_nf_debug(t_dom):
+                    _log(
+                        f"[F2 pend_plan] CASOU planilha(data={t_p.data} "
+                        f"valor={t_p.valor} NF="
+                        f"{t_p.extras.get('numero_nf','')}) <-> dominio"
+                        f"(NF={t_dom.extras.get('numero_nf','')} "
+                        f"valor={t_dom.valor} data={t_dom.data}) "
+                        f"dd={dd} dv={dv}"
+                    )
             else:
                 pendentes_sem_match_f3.append(t_p)
 
@@ -3541,6 +3615,48 @@ class App(tk.Tk):
                     "diff_valor": dv,
                 }
                 usados.add(id(t_dom))
+                if _tem_nf_debug(t_p) or _tem_nf_debug(t_dom):
+                    _log(
+                        f"[F4 pend_plan] CASOU planilha(NF={nf_p} "
+                        f"cnpj={cnpj_p} nome={nome_p}) <-> dominio(NF="
+                        f"{t_dom.extras.get('numero_nf','')} valor="
+                        f"{t_dom.valor}) dd={dd} dv={dv}"
+                    )
+            elif _tem_nf_debug(t_p):
+                # Diagnóstico: por que Fase 4 não achou nada?
+                nf_p_str = str(nf_p)
+                candidatos_por_nf = [
+                    (i, t) for i, t in enumerate(dominio_disponivel)
+                    if self._normaliza_nf(t.extras.get("numero_nf", ""))
+                    == nf_p_str
+                ]
+                _log(
+                    f"[F4 pend_plan] SEM MATCH planilha(NF={nf_p} "
+                    f"cnpj={cnpj_p} nome={nome_p!r} valor={t_p.valor})"
+                )
+                if not candidatos_por_nf:
+                    _log(
+                        f"  -> nenhuma parcela do Dominio com NF {nf_p} "
+                        "esta DISPONIVEL (todas ja consumidas em fases "
+                        "anteriores ou a NF nao existe no Dominio)."
+                    )
+                else:
+                    for i, t in candidatos_por_nf:
+                        cnpj_d = self._normaliza_cnpj(
+                            t.extras.get("cnpj", "")
+                        )
+                        nome_d = self._normaliza_nome_fornecedor(
+                            t.extras.get("fornecedor", "")
+                        )
+                        bate_cnpj = (
+                            bool(cnpj_p) and cnpj_p == cnpj_d
+                        )
+                        bate_nome = self._nomes_batem(nome_p, nome_d)
+                        _log(
+                            f"  -> candidata idx={i} CNPJ={cnpj_d} "
+                            f"nome={nome_d!r}: bate_cnpj={bate_cnpj}, "
+                            f"bate_nome={bate_nome}"
+                        )
 
         # Pendentes OFX — FASE 4 (funciona quando OFX foi enriquecido
         # por PDF e ganhou NF+fornecedor; sem enriquecimento, OFX quase
@@ -3562,6 +3678,15 @@ class App(tk.Tk):
                     "diff_valor": dv,
                 }
                 usados.add(id(t_dom))
+
+        # Dump do log de debug (se ativado via DEBUG_NF)
+        if _nf_debug and _log_lines:
+            _log("=== FIM ===")
+            try:
+                with open("debug_dominio.log", "w", encoding="utf-8") as f:
+                    f.write("\n".join(_log_lines) + "\n")
+            except Exception:
+                pass
 
     def _atualiza_resumo(self) -> None:
         self.lbl_resumo.config(
