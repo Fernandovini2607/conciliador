@@ -164,7 +164,9 @@ SERVICOS"):
    - **Padrão**: o texto que identifica (ex: `TARIFA PACOTE`)
    - **Banco** (opcional): o nome do banco (evita confusão se banco
      diferente tem tarifa com nome parecido)
-   - **Histórico contábil**: como quer que apareça no lançamento
+   - **Histórico contábil**: como quer que apareça no lançamento.
+     **Pode deixar em branco** — nesse caso, cada lançamento vai
+     usar o **Memo do OFX** da linha como histórico.
    - **Conta contábil**: escolha da lista
 4. Clique OK. Todas as tarifas iguais viram lançamento automático
    agora e nas próximas conciliações.
@@ -182,7 +184,9 @@ SERVICOS"):
 2. Clique em **Criar regra (fornecedor)**.
 3. Preencha (o padrão vem preenchido com o Tipo/CNPJ/nome):
    - Confira o padrão
-   - Ajuste o histórico
+   - Ajuste o histórico. **Pode deixar em branco** — nesse caso,
+     cada lançamento vai usar o **Histórico da planilha** da linha
+     como histórico contábil.
    - Escolha a conta contábil
 4. OK. Casos iguais viram lançamento automático.
 

@@ -52,10 +52,28 @@ class DialogoNovaRegra(tk.Toplevel):
 
         ttk.Label(
             self,
-            text="Histórico contábil (texto que vai no lançamento):",
+            text="Histórico contábil (texto que vai no lançamento — opcional):",
         ).grid(row=2, column=0, padx=10, pady=(10, 2), sticky="w")
-        self.entry_historico = ttk.Entry(self, width=60)
-        self.entry_historico.grid(row=3, column=0, padx=10, pady=2, sticky="we")
+        # Frame pra empilhar o Entry e uma label de dica embaixo, sem
+        # atrapalhar o resto da grid da janela.
+        hist_frame = ttk.Frame(self)
+        hist_frame.grid(row=3, column=0, padx=10, pady=2, sticky="we")
+        self.entry_historico = ttk.Entry(hist_frame, width=60)
+        self.entry_historico.pack(fill="x")
+        if self.tipo == "memo":
+            dica_hist = (
+                "Deixe em branco pra usar o Memo do OFX de cada "
+                "lançamento como histórico."
+            )
+        else:
+            dica_hist = (
+                "Deixe em branco pra usar o Histórico da planilha de "
+                "cada lançamento como histórico."
+            )
+        ttk.Label(
+            hist_frame, text=dica_hist,
+            foreground="#666", font=("TkDefaultFont", 8, "italic"),
+        ).pack(anchor="w", pady=(2, 0))
 
         rotulo_conta = (
             "Conta contábil (digite parte do código ou descrição — selecione no dropdown):"
@@ -141,11 +159,9 @@ class DialogoNovaRegra(tk.Toplevel):
         if not padrao:
             messagebox.showwarning("Campo vazio", "Informe o padrão do memo.", parent=self)
             return
-        if not historico:
-            messagebox.showwarning(
-                "Campo vazio", "Informe o histórico contábil.", parent=self,
-            )
-            return
+        # Histórico é opcional: quando vazio, o lançamento herda o memo do
+        # OFX (regra memo) ou o histórico da planilha (regra fornecedor).
+        # Ver lancamentos._historico_final.
         self.regra = {
             "tipo": self.tipo,
             "padrao": padrao,

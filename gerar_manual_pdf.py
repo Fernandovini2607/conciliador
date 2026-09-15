@@ -358,7 +358,9 @@ def construir():
         "&nbsp;&nbsp;<b>Padrão</b>: o texto que identifica (ex: TARIFA PACOTE)",
         "&nbsp;&nbsp;<b>Banco</b> (opcional): nome do banco (evita confusão "
         "com tarifas de nome parecido de outros bancos)",
-        "&nbsp;&nbsp;<b>Histórico contábil</b>: como quer que apareça",
+        "&nbsp;&nbsp;<b>Histórico contábil</b>: como quer que apareça "
+        "no lançamento — <b>pode deixar em branco</b>, nesse caso "
+        "cada lançamento vai usar o <b>Memo do OFX</b> como histórico.",
         "&nbsp;&nbsp;<b>Conta contábil</b>: escolha da lista",
         "Clique OK. Todas as tarifas iguais viram lançamento automático "
         "agora e nas próximas conciliações.",
@@ -382,7 +384,9 @@ def construir():
         "Selecione a linha.",
         "Clique em <b>Criar regra (fornecedor)</b>.",
         "O padrão já vem preenchido com Tipo/CNPJ/nome. Confira, ajuste o "
-        "histórico e escolha a conta contábil.",
+        "histórico (<b>pode deixar em branco</b> — nesse caso cada "
+        "lançamento vai usar o <b>Histórico da planilha</b> da linha) "
+        "e escolha a conta contábil.",
         "OK. Casos iguais viram lançamento automático.",
     ]))
 

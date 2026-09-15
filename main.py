@@ -4273,11 +4273,13 @@ class App(tk.Tk):
 
         # Sugestão do histórico contábil da regra: prefixo fixo "PAGAMENTO
         # REF. A " + o que estiver na coluna Histórico da planilha.
-        # (Se histórico vazio, o prefixo fica sozinho pra usuário completar.)
+        # Se histórico vazio, deixa em branco pra que o próprio diálogo
+        # exiba a dica "vazio = usa o Histórico da planilha" e o operador
+        # decida se quer texto fixo ou fallback dinâmico linha-a-linha.
         if historico:
             sugestao_hist = f"PAGAMENTO REF. A {historico}"
         else:
-            sugestao_hist = "PAGAMENTO REF. A "
+            sugestao_hist = ""
         regra_inicial = {
             "padrao": sugestao,
             "historico": sugestao_hist,

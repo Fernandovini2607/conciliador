@@ -563,6 +563,12 @@ def construir() -> list:
         "Regras salvas por empresa em <i>regra_taxa.codi_emp</i>.",
         "<b>Atalhos contextuais na aba Pendentes</b>: pré-populam a regra "
         "com dados da linha selecionada.",
+        "<b>Histórico contábil é opcional</b>: quando o campo Histórico "
+        "da regra fica em branco, o lançamento gerado herda o texto bruto "
+        "da origem — <i>memo do OFX</i> para regras <b>memo</b>, "
+        "<i>histórico da planilha</i> para regras <b>fornecedor</b>. "
+        "Implementado em <i>lancamentos._historico_final</i>. Útil quando "
+        "cada linha tem descritivo próprio e não faz sentido padronizar.",
     ]))
 
     flow.append(Paragraph("Editar e excluir lançamentos", H2))

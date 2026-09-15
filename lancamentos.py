@@ -45,6 +45,20 @@ def _tipo_regra(regra: dict[str, Any]) -> str:
     return (regra.get("tipo") or "memo").strip().lower()
 
 
+def _historico_final(regra: dict[str, Any], fallback: str) -> str:
+    """Devolve o histórico contábil do lançamento gerado pela regra.
+
+    Se o campo ``historico`` da regra estiver preenchido, ele vence.
+    Se estiver em branco, usa o ``fallback`` — que é o **memo do OFX**
+    para regras tipo ``memo`` e o **histórico da planilha** para regras
+    tipo ``fornecedor``. Isso permite criar regras que só definem
+    a conta contábil e deixam o texto do lançamento herdado do dado
+    bruto (útil quando cada linha tem um descritivo diferente e não
+    faz sentido padronizar o histórico)."""
+    h = (regra.get("historico") or "").strip()
+    return h if h else (fallback or "").strip()
+
+
 def _gerar_de_pendentes_ofx(
     pendentes_ofx: list[Transacao],
     regras_memo: list[dict[str, Any]],
@@ -76,7 +90,8 @@ def _gerar_de_pendentes_ofx(
                 continue
             lancamentos.append(LancamentoContabil(
                 data=t.data,
-                historico=(regra.get("historico") or "").strip(),
+                # Fallback: memo do OFX se a regra não definir histórico
+                historico=_historico_final(regra, memo),
                 valor=t.valor,
                 banco=banco_t,
                 memo_original=memo,
@@ -112,7 +127,8 @@ def _gerar_de_pares_sem_dominio(
                 # efetiva no banco, é o que vai no lançamento contábil).
                 lancamentos.append(LancamentoContabil(
                     data=par.ofx.data,
-                    historico=(regra.get("historico") or "").strip(),
+                    # Fallback: histórico da planilha se a regra deixar vazio
+                    historico=_historico_final(regra, historico),
                     valor=par.planilha.valor,
                     banco=par.ofx.extras.get("banco", "") or "",
                     memo_original=par.ofx.descricao or "",
@@ -150,7 +166,8 @@ def _gerar_de_pendentes_planilha(
                 lancamentos.append(LancamentoContabil(
                     # Data: prioriza data de pagamento da planilha, senão vencimento
                     data=t.data_pagamento or t.data,
-                    historico=(regra.get("historico") or "").strip(),
+                    # Fallback: histórico da planilha se a regra deixar vazio
+                    historico=_historico_final(regra, historico),
                     valor=t.valor,
                     banco="Caixa geral",  # sem OFX correspondente
                     memo_original="",
