@@ -399,6 +399,9 @@ def construir() -> list:
         "<i>listar_filiais(conn, cnpj_matriz)</i> descobre empresas do "
         "mesmo grupo via <b>CNPJ raiz</b> (primeiros 8 dígitos): útil "
         "quando a matriz paga boletos das filiais.",
+        "<i>encontrar_matriz(conn, cnpj)</i> identifica a matriz do "
+        "grupo pelo sufixo <b>/0001-XX</b> do CNPJ (regra Receita "
+        "Federal). Fallback: menor <i>codi_emp</i> do grupo.",
     ]))
 
     flow.append(Paragraph("SQL recomendado — plano de contas", H2))
@@ -523,9 +526,17 @@ def construir() -> list:
         "Ao carregar, aparece dialog listando as empresas incluídas.",
         "<b>Fallback</b>: sem CNPJ da matriz, sem raiz válida, ou grupo "
         "com só 1 empresa, comportamento é idêntico ao anterior.",
-        "<b>Plano de contas</b> continua vindo <b>só da matriz</b> "
-        "(<i>emp['codi_emp']</i>), como definido pela regra contábil. "
-        "As parcelas das filiais lançam nas contas da matriz.",
+        "<b>Plano de contas</b> continua vindo <b>só da matriz</b>, "
+        "como definido pela regra contábil. Se o operador seleciona uma "
+        "filial no combo de empresa, o app usa <i>encontrar_matriz</i> "
+        "pra achar o <i>codi_emp</i> da matriz (sufixo /0001) e chama "
+        "<i>extrair_plano_contas</i> com esse código — o messagebox "
+        "informa qual matriz foi usada.",
+        "<b>Regras de taxa por empresa</b> continuam separadas: cada "
+        "empresa do grupo tem suas próprias regras salvas em "
+        "<i>regra_taxa.codi_emp</i>. Isso é intencional — filiais têm "
+        "contas bancárias diferentes, então as regras que apontam pra "
+        "essas contas ficam por empresa.",
     ]))
 
     # ============================ 6

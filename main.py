@@ -2159,11 +2159,14 @@ class App(tk.Tk):
             messagebox.showinfo(
                 "Grupo empresarial detectado",
                 f"Identifiquei {len(empresas_pra_carregar)} empresa(s) com "
-                f"mesmo CNPJ raiz da matriz.\n\n"
+                f"o mesmo CNPJ raiz da empresa selecionada.\n\n"
                 f"Parcelas carregadas de TODAS:\n{resumo}\n\n"
                 f"Total: {len(self.transacoes_dominio)} parcela(s).\n\n"
                 "Isso permite conciliar boletos que a matriz pagou pelas "
-                "filiais. O plano de contas continua sendo o da matriz."
+                "filiais (ou vice-versa). O plano de contas do grupo é "
+                "sempre o da matriz — se você selecionou uma filial, o "
+                "sistema puxa o plano da matriz ao clicar em "
+                "'Carregar plano contas'."
             )
 
         self._atualiza_label_dominio()
@@ -2187,6 +2190,23 @@ class App(tk.Tk):
             return
         emp = self._empresa_selecionada() or {}
         codi_emp = emp.get("codi_emp")
+        cnpj_sel = emp.get("cnpj", "")
+
+        # Se a empresa selecionada é filial, o plano de contas contábil
+        # tem que ser o da MATRIZ (mesmo plano pra todo o grupo, apenas
+        # as contas bancárias mudam por filial nas regras de taxa).
+        matriz_usada = None
+        if codi_emp is not None and cnpj_sel:
+            try:
+                matriz = parser_dominio.encontrar_matriz(
+                    self.conn_dominio, cnpj_sel,
+                )
+                if matriz and matriz.get("codi_emp") != codi_emp:
+                    matriz_usada = matriz
+                    codi_emp = matriz.get("codi_emp")
+            except Exception:
+                pass
+
         try:
             self.plano_contas = parser_dominio.extrair_plano_contas(
                 self.conn_dominio, fonte, codi_emp=codi_emp,
@@ -2196,6 +2216,20 @@ class App(tk.Tk):
             return
         self._render_aba_plano_contas()
         self._atualiza_label_dominio()
+
+        if matriz_usada is not None:
+            messagebox.showinfo(
+                "Plano de contas — matriz do grupo",
+                f"A empresa selecionada é filial ({emp.get('razao', '')}).\n\n"
+                f"Carreguei o plano de contas da matriz:\n"
+                f"[{matriz_usada['codi_emp']}] "
+                f"{matriz_usada.get('razao', '')}\n"
+                f"CNPJ {matriz_usada.get('cnpj', '')}\n\n"
+                f"Total: {len(self.plano_contas)} conta(s) analítica(s).\n\n"
+                "Isso garante que os lançamentos usem o mesmo plano contábil "
+                "do grupo. Ajuste as regras de taxa por empresa se as "
+                "contas bancárias forem diferentes."
+            )
 
     def _atualiza_botao_comparar(self) -> None:
         """Mantido por compatibilidade — botão Comparar agora fica sempre

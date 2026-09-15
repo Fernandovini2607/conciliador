@@ -215,6 +215,48 @@ def listar_filiais(
     return [e for e in todas if _cnpj_raiz(e.get("cnpj", "")) == raiz]
 
 
+def _sufixo_filial(cnpj: str) -> str:
+    """Devolve os 4 dígitos do sufixo do CNPJ (posições 9-12) — no
+    Brasil, '0001' identifica a matriz e '0002+' as filiais. String
+    vazia se o CNPJ não tem os 12 dígitos exigidos."""
+    digitos = "".join(c for c in str(cnpj or "") if c.isdigit())
+    return digitos[8:12] if len(digitos) >= 12 else ""
+
+
+def encontrar_matriz(
+    conn: pyodbc.Connection,
+    cnpj_qualquer_do_grupo: str,
+) -> dict[str, Any] | None:
+    """Encontra a matriz do grupo empresarial que contém ``cnpj``.
+
+    Recebe o CNPJ de QUALQUER empresa do grupo (matriz ou filial) e
+    retorna a que tem sufixo /0001-XX (a matriz oficial pela regra da
+    Receita Federal).
+
+    Fallback: se nenhuma empresa do grupo tem sufixo 0001 (grupo
+    incompleto no Domínio), retorna a de menor ``codi_emp`` — que
+    normalmente é a mais antiga cadastrada e tende a ser a matriz.
+
+    Devolve ``None`` quando o CNPJ é inválido, não há grupo, ou não dá
+    pra decidir. O chamador deve interpretar ``None`` como "usa a
+    empresa selecionada mesmo".
+    """
+    grupo = listar_filiais(conn, cnpj_qualquer_do_grupo)
+    if not grupo:
+        return None
+    for e in grupo:
+        if _sufixo_filial(e.get("cnpj", "")) == "0001":
+            return e
+    # Fallback: menor codi_emp
+    def _key(e: dict[str, Any]) -> int:
+        c = e.get("codi_emp")
+        try:
+            return int(c) if c is not None else 10**9
+        except (TypeError, ValueError):
+            return 10**9
+    return min(grupo, key=_key)
+
+
 def listar_empresas(conn: pyodbc.Connection) -> list[dict[str, Any]]:
     """Lista empresas cadastradas em ``bethadba.geempre``.
 

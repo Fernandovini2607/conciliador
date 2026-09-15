@@ -95,6 +95,15 @@ vez. O popup avisa quantos entraram e quantos foram ignorados.
 - Ele traz todas as contas analíticas da empresa (pra usar nos
   lançamentos contábeis).
 
+> 💡 **Selecionou uma filial?** O sistema busca automaticamente a
+> **matriz do grupo** (a que tem CNPJ terminando em `/0001-XX`) e
+> carrega o **plano de contas da matriz** — porque o plano contábil
+> é o mesmo pro grupo todo.
+> - Uma mensagem aparece dizendo qual matriz foi usada.
+> - As **regras de taxa continuam separadas por empresa** (contas
+>   bancárias mudam por filial, então cada uma pode ter suas próprias
+>   regras de conta bancária).
+
 ---
 
 ## 🔗 Passo 4 — Conciliar planilha × OFX

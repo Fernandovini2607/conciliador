@@ -268,6 +268,17 @@ def construir():
         "Ele traz todas as contas <b>analíticas</b> da empresa "
         "(pra usar nos lançamentos contábeis).",
     ]))
+    flow.append(caixa_dica(
+        "<b>Selecionou uma filial?</b> O sistema busca automaticamente "
+        "a <b>matriz do grupo</b> (a que tem CNPJ terminando em "
+        "<b>/0001-XX</b>) e carrega o <b>plano de contas da matriz</b> "
+        "— porque o plano contábil é o mesmo pro grupo todo.<br/>"
+        "• Uma mensagem aparece dizendo qual matriz foi usada.<br/>"
+        "• As <b>regras de taxa continuam separadas por empresa</b> "
+        "(contas bancárias mudam por filial, então cada uma pode ter "
+        "suas próprias regras de conta bancária)."
+    ))
+    flow.append(Spacer(1, 6))
 
     # ============ Passo 4
     flow.append(PageBreak())
