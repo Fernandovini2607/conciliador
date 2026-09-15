@@ -79,6 +79,17 @@ vez. O popup avisa quantos entraram e quantos foram ignorados.
 - Clique em **Carregar pagamentos**.
 - Aguarde ele buscar as parcelas do Domínio da empresa.
 
+> 💡 **Empresa matriz com filiais?** O sistema detecta automaticamente
+> pelo **CNPJ raiz** (primeiros 8 dígitos) e traz as parcelas de
+> **todas as empresas do grupo** — útil quando a matriz paga boletos
+> emitidos contra as filiais.
+> - Aparece uma mensagem listando quais empresas foram incluídas.
+> - A aba **Domínio dados** ganha a coluna **Empresa (código)**
+>   mostrando de onde veio cada parcela.
+> - O título da aba fica **"Domínio dados (N | X empresas)"**.
+> - O **plano de contas continua sendo o da matriz** — as parcelas
+>   das filiais são lançadas nas contas da matriz.
+
 ### 3.4 Plano de contas (só na primeira vez do dia)
 - Clique em **Carregar plano contas**.
 - Ele traz todas as contas analíticas da empresa (pra usar nos

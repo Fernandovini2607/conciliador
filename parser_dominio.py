@@ -186,6 +186,35 @@ def executar_query(
 
 # ---------------------------------------------------------- empresas
 
+def _cnpj_raiz(cnpj: str) -> str:
+    """Devolve os 8 primeiros dígitos do CNPJ (a 'raiz' — comum a matriz
+    e filiais). String vazia se o CNPJ tem menos de 8 dígitos."""
+    digitos = "".join(c for c in str(cnpj or "") if c.isdigit())
+    return digitos[:8] if len(digitos) >= 8 else ""
+
+
+def listar_filiais(
+    conn: pyodbc.Connection,
+    cnpj_matriz: str,
+) -> list[dict[str, Any]]:
+    """Devolve todas as empresas do mesmo grupo (mesma raiz de CNPJ =
+    8 primeiros dígitos), INCLUINDO a matriz.
+
+    Devolve lista de {'codi_emp', 'razao', 'cnpj'}. Vazia se o
+    ``cnpj_matriz`` é inválido (< 8 dígitos), o que quer dizer que
+    não há grupo empresarial identificável.
+
+    Uso típico: pra empresas que são matriz, retorna [matriz, filial1,
+    filial2, ...]. Pra empresa sozinha, retorna [ela mesma] (só quando
+    o CNPJ é válido).
+    """
+    raiz = _cnpj_raiz(cnpj_matriz)
+    if not raiz:
+        return []
+    todas = listar_empresas(conn)
+    return [e for e in todas if _cnpj_raiz(e.get("cnpj", "")) == raiz]
+
+
 def listar_empresas(conn: pyodbc.Connection) -> list[dict[str, Any]]:
     """Lista empresas cadastradas em ``bethadba.geempre``.
 

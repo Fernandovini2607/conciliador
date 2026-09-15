@@ -1079,17 +1079,22 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
+        cols = (
+            "venc", "emis", "valor", "pago", "status",
+            "nf", "cnpj", "fornecedor", "empresa",
+        )
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
-            ("venc", "Vencimento", 105, "center"),
-            ("emis", "Emissão", 105, "center"),
-            ("valor", "Valor parcela", 110, "e"),
-            ("pago", "Valor pago", 105, "e"),
-            ("status", "Status", 90, "center"),
-            ("nf", "Nº NF", 85, "center"),
-            ("cnpj", "CNPJ", 140, "w"),
-            ("fornecedor", "Fornecedor", 250, "w"),
+            ("venc", "Vencimento", 95, "center"),
+            ("emis", "Emissão", 95, "center"),
+            ("valor", "Valor parcela", 100, "e"),
+            ("pago", "Valor pago", 95, "e"),
+            ("status", "Status", 80, "center"),
+            ("nf", "Nº NF", 75, "center"),
+            ("cnpj", "CNPJ", 130, "w"),
+            ("fornecedor", "Fornecedor", 200, "w"),
+            # Empresa: só populada quando grupo empresarial (matriz + filiais)
+            ("empresa", "Empresa (código)", 130, "w"),
         ]:
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
@@ -1106,6 +1111,13 @@ class App(tk.Tk):
     def _row_dominio(self, t) -> tuple:
         v_pago = t.extras.get("valor_pago")
         pago_txt = f"{v_pago:.2f}" if v_pago is not None else ""
+        # Empresa: "código - razao" quando marcada pelo grupo empresarial
+        codi = t.extras.get("codi_emp_origem")
+        razao = t.extras.get("razao_empresa", "")
+        if codi is not None:
+            empresa_txt = f"{codi} - {razao[:30]}" if razao else str(codi)
+        else:
+            empresa_txt = ""
         return (
             t.data.strftime("%d/%m/%Y"),
             self._fmt_data(t.extras.get("data_emissao")),
@@ -1115,13 +1127,18 @@ class App(tk.Tk):
             t.extras.get("numero_nf", "") or "",
             t.extras.get("cnpj", "") or "",
             t.extras.get("fornecedor", "") or "",
+            empresa_txt,
         )
 
-    COLS_DOMINIO = ("venc", "emis", "valor", "pago", "status", "nf", "cnpj", "fornecedor")
+    COLS_DOMINIO = (
+        "venc", "emis", "valor", "pago", "status",
+        "nf", "cnpj", "fornecedor", "empresa",
+    )
     LABELS_DOMINIO = {
         "venc": "Vencimento", "emis": "Emissão", "valor": "Valor parcela",
         "pago": "Valor pago", "status": "Status", "nf": "Nº NF",
         "cnpj": "CNPJ", "fornecedor": "Fornecedor",
+        "empresa": "Empresa (código)",
     }
 
     def _on_click_header_dominio(self, event: tk.Event) -> None:
@@ -2080,6 +2097,7 @@ class App(tk.Tk):
             return
         emp = self.cfg.get("dominio_empresa") or {}
         codi_emp = emp.get("codi_emp")
+        cnpj_matriz = emp.get("cnpj", "")
         if codi_emp is None and fonte.get("modo") == "tabela":
             if not messagebox.askyesno(
                 "Sem empresa selecionada",
@@ -2088,13 +2106,66 @@ class App(tk.Tk):
                 "Deseja continuar mesmo assim?",
             ):
                 return
+
+        # ---- Detecta filiais do mesmo grupo (mesmo CNPJ raiz)
+        # A matriz paga boletos das filiais frequentemente; se não
+        # carregarmos as parcelas de todas as empresas do grupo, muitas
+        # notas ficam como "falta no Domínio" (amarelo) sem motivo.
+        empresas_pra_carregar: list[dict] = []
+        if codi_emp is not None and cnpj_matriz:
+            try:
+                filiais = parser_dominio.listar_filiais(
+                    self.conn_dominio, cnpj_matriz,
+                )
+                if filiais:
+                    empresas_pra_carregar = filiais
+            except Exception:
+                pass
+
+        # Fallback: se não achou filiais (ou sem CNPJ da matriz),
+        # carrega só a empresa selecionada
+        if not empresas_pra_carregar:
+            empresas_pra_carregar = [{
+                "codi_emp": codi_emp,
+                "razao": emp.get("razao", ""),
+                "cnpj": cnpj_matriz,
+            }]
+
+        # ---- Carrega parcelas de cada empresa e marca a origem
         try:
-            self.transacoes_dominio = parser_dominio.extrair_pagamentos(
-                self.conn_dominio, fonte, codi_emp=codi_emp,
-            )
+            todas_transacoes: list[Transacao] = []
+            for e in empresas_pra_carregar:
+                codi = e.get("codi_emp")
+                txs = parser_dominio.extrair_pagamentos(
+                    self.conn_dominio, fonte, codi_emp=codi,
+                )
+                # Marca cada Transacao com a empresa de origem
+                for t in txs:
+                    t.extras["codi_emp_origem"] = codi
+                    t.extras["razao_empresa"] = e.get("razao", "")
+                todas_transacoes.extend(txs)
+            self.transacoes_dominio = todas_transacoes
         except Exception as e:
             messagebox.showerror("Erro ao ler Domínio", str(e))
             return
+
+        # Se carregou de várias empresas, avisa
+        if len(empresas_pra_carregar) > 1:
+            resumo = "\n".join(
+                f"• [{e['codi_emp']}] {e.get('razao','')[:60]} — "
+                f"CNPJ {e.get('cnpj','')}"
+                for e in empresas_pra_carregar
+            )
+            messagebox.showinfo(
+                "Grupo empresarial detectado",
+                f"Identifiquei {len(empresas_pra_carregar)} empresa(s) com "
+                f"mesmo CNPJ raiz da matriz.\n\n"
+                f"Parcelas carregadas de TODAS:\n{resumo}\n\n"
+                f"Total: {len(self.transacoes_dominio)} parcela(s).\n\n"
+                "Isso permite conciliar boletos que a matriz pagou pelas "
+                "filiais. O plano de contas continua sendo o da matriz."
+            )
+
         self._atualiza_label_dominio()
         self._render_aba_dominio_dados()
         # Se já houver conciliação P×O feita, refiltra e atualiza a aba Conciliados
@@ -3889,7 +3960,18 @@ class App(tk.Tk):
             )
             mostradas += 1
         total = len(self.transacoes_dominio)
-        self.notebook.tab(2, text=f"Domínio dados ({total})")
+        # Detecta se veio de grupo empresarial (múltiplas empresas)
+        empresas_unicas = {
+            t.extras.get("codi_emp_origem")
+            for t in self.transacoes_dominio
+            if t.extras.get("codi_emp_origem") is not None
+        }
+        if len(empresas_unicas) > 1:
+            self.notebook.tab(
+                2, text=f"Domínio dados ({total} | {len(empresas_unicas)} empresas)",
+            )
+        else:
+            self.notebook.tab(2, text=f"Domínio dados ({total})")
         if hasattr(self, "lbl_filtro_dominio"):
             tem_filtro = termo or status_pedido != "Todos" or tem_filtro_col
             self.lbl_filtro_dominio.config(

@@ -248,6 +248,19 @@ def construir():
         "Clique em <b>Carregar pagamentos</b>.",
         "Aguarde ele buscar as parcelas do Domínio da empresa.",
     ]))
+    flow.append(caixa_dica(
+        "<b>Empresa matriz com filiais?</b> O sistema detecta "
+        "automaticamente pelo <b>CNPJ raiz</b> (primeiros 8 dígitos) e "
+        "traz as parcelas de <b>todas as empresas do grupo</b> — útil "
+        "quando a matriz paga boletos emitidos contra as filiais.<br/>"
+        "• Aparece uma mensagem listando quais empresas foram incluídas.<br/>"
+        "• A aba <b>Domínio dados</b> ganha a coluna <b>Empresa (código)</b> "
+        "mostrando de onde veio cada parcela.<br/>"
+        "• O título da aba fica <b>'Domínio dados (N | X empresas)'</b>.<br/>"
+        "• O <b>plano de contas continua sendo o da matriz</b> — as "
+        "parcelas das filiais são lançadas nas contas da matriz."
+    ))
+    flow.append(Spacer(1, 6))
 
     flow.append(Paragraph("3.4 Plano de contas (só na primeira vez do dia)", H3))
     flow.append(bullets([

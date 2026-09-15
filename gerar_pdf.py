@@ -396,6 +396,9 @@ def construir() -> list:
         "analíticas</b> (tipo A). Reconhece a coluna de tipo pelo nome "
         "(TIPO_CTA, CTRG_CTA, etc.) ou mapeamento explícito.",
         "Injeção automática de <i>CODI_EMP = ?</i> quando o SQL tem <i>?</i>.",
+        "<i>listar_filiais(conn, cnpj_matriz)</i> descobre empresas do "
+        "mesmo grupo via <b>CNPJ raiz</b> (primeiros 8 dígitos): útil "
+        "quando a matriz paga boletos das filiais.",
     ]))
 
     flow.append(Paragraph("SQL recomendado — plano de contas", H2))
@@ -496,6 +499,33 @@ def construir() -> list:
         "OFX/planilha importado.",
         "Trocar de empresa continua fazendo <b>reset total</b> (dados "
         "são específicos por empresa).",
+    ]))
+
+    flow.append(Paragraph(
+        "Grupo matriz + filiais — carregamento consolidado", H2,
+    ))
+    flow.append(bullets([
+        "<b>Problema real</b>: matriz frequentemente paga boletos "
+        "emitidos contra filiais. Se o app só puxa parcelas do "
+        "<i>codi_emp</i> da matriz, as notas ficam órfãs (amarelo — "
+        "'falta no Domínio') sem motivo.",
+        "<b>Detecção automática</b>: no clique de 'Carregar pagamentos', "
+        "<i>listar_filiais</i> compara o CNPJ raiz (8 primeiros dígitos) "
+        "da matriz com todas as empresas cadastradas no Domínio e "
+        "retorna as que casam.",
+        "<b>Carregamento</b>: chama <i>extrair_pagamentos</i> uma vez "
+        "por <i>codi_emp</i> encontrado. Cada Transacao recebe "
+        "<i>extras['codi_emp_origem']</i> e <i>extras['razao_empresa']</i>, "
+        "então dá pra identificar de qual filial veio a parcela.",
+        "<b>Interface</b>: aba <i>Domínio dados</i> ganha coluna "
+        "<b>'Empresa (código)'</b>. Título da aba mostra "
+        "'<i>Domínio dados (N | X empresas)</i>' quando grupo detectado. "
+        "Ao carregar, aparece dialog listando as empresas incluídas.",
+        "<b>Fallback</b>: sem CNPJ da matriz, sem raiz válida, ou grupo "
+        "com só 1 empresa, comportamento é idêntico ao anterior.",
+        "<b>Plano de contas</b> continua vindo <b>só da matriz</b> "
+        "(<i>emp['codi_emp']</i>), como definido pela regra contábil. "
+        "As parcelas das filiais lançam nas contas da matriz.",
     ]))
 
     # ============================ 6
