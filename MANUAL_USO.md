@@ -51,11 +51,17 @@ Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo:
 > Da próxima vez que abrir uma planilha da mesma empresa, o sistema já
 > lembra o mapeamento — vai direto sem perguntar.
 
-> **Colunas Juros e Desconto na aba Planilha**: quando a linha vem de
-> um comprovante PDF do Sicoob ou Bradesco, o sistema preenche
-> automaticamente as colunas **Juros** e **Desconto** a partir do
-> comprovante. Linhas que vieram só da planilha .xlsx ficam com essas
-> colunas em branco (a planilha nem sempre traz esses campos separados).
+> **Colunas Valor, Valor pago, Juros e Desconto na aba Planilha**:
+> quando a linha vem de um comprovante PDF do Sicoob ou Bradesco, o
+> sistema preenche automaticamente:
+> - **Valor** = valor original da parcela (o "Documento" do comprovante).
+> - **Valor pago** = quanto foi debitado do banco (com juros / menos
+>   desconto). Diferente do "Valor" quando houve encargos.
+> - **Juros** e **Desconto** = os valores explícitos do comprovante.
+>
+> Linhas que vieram só da planilha .xlsx mostram o mesmo número em
+> Valor e Valor pago (fallback pro valor único), e Juros/Desconto ficam
+> em branco.
 
 ### 3.1.b Comprovantes PDF de pagamento (alternativa/complemento)
 
@@ -236,6 +242,13 @@ não passa pra próxima):
 4. **NF + fornecedor** (valor livre): Nº NF igual (obrigatório e
    não-vazio) E (CNPJ ou nome do fornecedor bate). **Valor pode
    divergir** — útil pra pagamentos com juros/multa/desconto.
+   - **Se pago > parcela e a diferença é ≤ 10%**: casa
+     automaticamente e a diferença vai pra coluna **Juros** (juros
+     implícito).
+   - **Se pago > parcela e a diferença passa de 10%**: NÃO casa
+     automaticamente. A linha aparece na aba **Aprovações** pra você
+     revisar e decidir se aprova (casa com juros implícito) ou rejeita
+     (deixa pendente).
 
 > Cada parcela do Domínio só pode ser vinculada a **um pagamento** —
 > não gera duplicidade.
@@ -282,6 +295,34 @@ das 6 cores (ou "Todos") pra ver **só os lançamentos daquela cor** —
 
 ---
 
+## ✅ Passo 7.5 — Aba Aprovações (revisões manuais)
+
+Quando o sistema encontra um pagamento onde o **valor pago passa de 10%
+acima da parcela do Domínio** (NF e fornecedor batem, mas a diferença é
+grande — pode ser juros alto, multa pesada ou pagamento errado), ele
+**não casa automaticamente**. A linha vai pra aba **Aprovações**.
+
+Nessa aba você vê:
+- Nº NF
+- Fornecedor
+- Valor da parcela (Domínio) vs Valor pago
+- Diferença em R$ e em % 
+- Origem (par, pendente planilha, pendente OFX)
+- Empresa (código) do Domínio
+
+Ações:
+- **✓ Aprovar selecionada**: casa com o Domínio, a diferença vira juros
+  implícito na coluna Juros (Conciliados × Domínio).
+- **✗ Rejeitar selecionada**: deixa a linha como pendente (não casa).
+- **Limpar decisões**: descarta aprovações/rejeições anteriores; itens
+  voltam pra fila.
+
+> As decisões ficam salvas durante a sessão. Se você fechar o
+> Conciliador e abrir de novo, todas as revisões voltam a pedir
+> aprovação (não persiste em disco).
+
+---
+
 ## 📒 Passo 8 — Revisar os lançamentos contábeis
 
 Aba **Lançamentos contábeis** mostra tudo que vai virar lançamento
@@ -314,9 +355,11 @@ Você pode exportar em várias abas pra revisar ou entregar pra alguém:
   - A tabela tem uma coluna **Empresa (código)** — mostra em qual
     empresa do grupo cada parcela foi lançada (útil quando a matriz
     paga boletos das filiais). A coluna também sai no Excel.
-  - As colunas **Juros** e **Desconto** também aparecem aqui, com o
-    valor extraído do comprovante PDF (Sicoob/Bradesco) — vazio para
-    linhas sem comprovante correspondente. Também saem no Excel.
+  - As colunas **Valor** / **Valor pago** / **Juros** / **Desconto**
+    também aparecem aqui, com os valores extraídos do comprovante PDF
+    (Sicoob/Bradesco) — mesmo comportamento da aba Planilha. Valor pago
+    é o que casa com o OFX; Valor é o que casa com o Domínio. Também
+    saem no Excel.
 - **Aba Lançamentos contábeis** → botão *Exportar para Excel*: os
   lançamentos que vão pro Domínio, com totalização.
 - **Aba Comparação** → botão *Exportar pendências*: só o que falta

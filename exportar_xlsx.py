@@ -112,7 +112,10 @@ def exportar_conciliados_dominio(
         ("Origem", 22),
         ("Vencimento", 12),
         ("Pagamento", 12),
+        # Valor: parcela original (t.valor ou extras['valor_parcela']).
+        # Valor pago: o efetivamente debitado (extras['valor_pago'] ou fallback).
         ("Valor", 14),
+        ("Valor pago", 14),
         # Juros e Desconto: vêm dos comprovantes PDF (Sicoob/Bradesco).
         # Vazios quando a linha não tem comprovante correspondente.
         ("Juros", 10),
@@ -140,9 +143,22 @@ def exportar_conciliados_dominio(
         return f"{codi} - {razao[:40]}" if razao else str(codi)
 
     def _num(extras: dict, chave: str):
-        """Devolve float pro Excel formatar como número, ou '' se ausente."""
+        """Devolve float pro Excel formatar como número, ou '' se ausente.
+        Para 'juros', cai em 'juros_implicito' como fallback (Fase 4)."""
         v = extras.get(chave)
+        if v is None and chave == "juros":
+            v = extras.get("juros_implicito")
         return float(v) if v is not None else ""
+
+    def _valor_par(t):
+        """Valor da parcela original: extras['valor_parcela'] ou t.valor."""
+        v = t.extras.get("valor_parcela")
+        return float(v if v is not None else t.valor)
+
+    def _valor_pg(t):
+        """Valor pago: extras['valor_pago'] ou t.valor."""
+        v = t.extras.get("valor_pago")
+        return float(v if v is not None else t.valor)
 
     linha = 2
 
@@ -170,7 +186,8 @@ def exportar_conciliados_dominio(
             origem,
             _fmt_data(par.planilha.data),
             _fmt_data(pagto),
-            float(par.planilha.valor),
+            _valor_par(par.planilha),
+            _valor_pg(par.planilha),
             _num(p_extras, "juros"),
             _num(p_extras, "desconto"),
             _fmt_data(emissao) if hasattr(emissao, "strftime") else str(emissao or ""),
@@ -185,7 +202,7 @@ def exportar_conciliados_dominio(
         for i, v in enumerate(valores, start=1):
             cell = ws.cell(row=linha, column=i, value=v)
             cell.font = FONTE_CELULA
-            if i in (5, 6, 7):  # Valor, Juros, Desconto
+            if i in (5, 6, 7, 8):  # Valor, Valor pago, Juros, Desconto
                 cell.number_format = '#,##0.00'
         _pinta_linha(ws, linha, len(colunas), _tag_status(status))
         linha += 1
@@ -219,7 +236,8 @@ def exportar_conciliados_dominio(
             "Caixa geral",
             _fmt_data(t_p.data),
             _fmt_data(pagto),
-            float(t_p.valor),
+            _valor_par(t_p),
+            _valor_pg(t_p),
             _num(p_extras, "juros"),
             _num(p_extras, "desconto"),
             _fmt_data(emissao) if hasattr(emissao, "strftime") else str(emissao or ""),
@@ -234,7 +252,7 @@ def exportar_conciliados_dominio(
         for i, v in enumerate(valores, start=1):
             cell = ws.cell(row=linha, column=i, value=v)
             cell.font = FONTE_CELULA
-            if i in (5, 6, 7):  # Valor, Juros, Desconto
+            if i in (5, 6, 7, 8):  # Valor, Valor pago, Juros, Desconto
                 cell.number_format = '#,##0.00'
         _pinta_linha(ws, linha, len(colunas), _tag_status(status))
         linha += 1
@@ -265,7 +283,8 @@ def exportar_conciliados_dominio(
                 origem,
                 _fmt_data(t_o.data),
                 _fmt_data(t_o.data),
-                float(t_o.valor),
+                _valor_par(t_o),
+                _valor_pg(t_o),
                 _num(o_extras, "juros"),
                 _num(o_extras, "desconto"),
                 _fmt_data(emissao) if hasattr(emissao, "strftime") else "",
@@ -280,7 +299,7 @@ def exportar_conciliados_dominio(
             for i, v in enumerate(valores, start=1):
                 cell = ws.cell(row=linha, column=i, value=v)
                 cell.font = FONTE_CELULA
-                if i in (5, 6, 7):  # Valor, Juros, Desconto
+                if i in (5, 6, 7, 8):  # Valor, Valor pago, Juros, Desconto
                     cell.number_format = '#,##0.00'
             _pinta_linha(ws, linha, len(colunas), _tag_status(status))
             linha += 1

@@ -107,11 +107,18 @@ def _parsear_sicoob(texto: str, arquivo: str) -> list[Transacao]:
 
 
 def _extrair_transacao_sicoob(bloco: str, arquivo: str, ordem: int) -> Transacao | None:
-    # Valor pago
+    # Valor pago (o que foi debitado do banco, com juros e menos desconto)
     m_valor = re.search(r"Pago:\s*R\$\s*([\d.,]+)", bloco)
     valor = _para_valor(m_valor.group(1)) if m_valor else None
     if valor is None:
         return None
+
+    # Valor da parcela original ("Documento") — antes de juros/desconto.
+    # É o valor que casa com o Domínio (que guarda parcela original em
+    # Transacao.valor). Ex.: comprovante mostra Documento=R$216,11 e
+    # Pago=R$219,35 quando houve R$3,24 de juros.
+    m_doc = re.search(r"Documento:\s*R\$\s*([\d.,]+)", bloco)
+    valor_parcela = _para_valor(m_doc.group(1)) if m_doc else None
 
     # Juros/Multa e Desconto/Abatimento — o comprovante Sicoob traz esses
     # campos explícitos abaixo do bloco "Valores:". Preservados como
@@ -174,7 +181,13 @@ def _extrair_transacao_sicoob(bloco: str, arquivo: str, ordem: int) -> Transacao
         "historico": f"Boleto Sicoob {doc}".strip(),
         "arquivo": arquivo,
         "banco_pdf": "Sicoob",
+        # Sempre guarda o pago separadamente pra manter a semântica clara
+        # na UI (coluna "Valor pago"). t.valor mantém compatibilidade:
+        # continua sendo o valor pago (o que casa com OFX).
+        "valor_pago": valor,
     }
+    if valor_parcela is not None:
+        extras["valor_parcela"] = valor_parcela
     if juros is not None:
         extras["juros"] = juros
     if desconto is not None:
@@ -222,13 +235,24 @@ def _parsear_bradesco(texto: str, arquivo: str) -> list[Transacao]:
 
 
 def _extrair_transacao_bradesco(bloco: str, arquivo: str, ordem: int) -> Transacao | None:
-    # Valor total
+    # Valor total (o pago; se não tem "total", cai no "Valor" simples)
     m_valor = re.search(r"Valor total:\s*R\$\s*([\d.,]+)", bloco)
     if not m_valor:
         m_valor = re.search(r"Valor\s+R\$\s*([\d.,]+)", bloco)
     valor = _para_valor(m_valor.group(1)) if m_valor else None
     if valor is None:
         return None
+
+    # Valor da parcela original — quando o comprovante traz "Valor" E
+    # "Valor total" separadamente, o primeiro é a parcela (antes de
+    # juros/desconto). Se não tem essa separação, deixa None e a UI
+    # cai pro fallback t.valor.
+    valor_parcela = None
+    m_val_orig = re.search(r"\bValor\s+R\$\s*([\d.,]+)", bloco)
+    if m_val_orig:
+        candidato = _para_valor(m_val_orig.group(1))
+        if candidato is not None and candidato != valor:
+            valor_parcela = candidato
 
     # Data de débito (a real de pagamento no banco)
     m_data = re.search(r"Data de d[e\u00e9\ufffd]bito:\s*(\d{2}/\d{2}/\d{4})", bloco)
@@ -294,7 +318,10 @@ def _extrair_transacao_bradesco(bloco: str, arquivo: str, ordem: int) -> Transac
         "historico": f"Boleto Bradesco {doc}".strip(),
         "arquivo": arquivo,
         "banco_pdf": "Bradesco",
+        "valor_pago": valor,  # ver comentário no parser Sicoob
     }
+    if valor_parcela is not None:
+        extras["valor_parcela"] = valor_parcela
     if juros is not None:
         extras["juros"] = juros
     if desconto is not None:

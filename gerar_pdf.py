@@ -471,7 +471,12 @@ def construir() -> list:
         "nome bate). Valor <b>NÃO</b> precisa bater — cobre pagamentos com "
         "juros/multa/desconto onde o valor divergiu da parcela original "
         "mas a NF é a mesma. Data como desempate. Δ dias e Δ valor ficam "
-        "visíveis na coluna Δ Domínio.",
+        "visíveis na coluna Δ Domínio. "
+        "<b>Regra dos 10%</b>: quando pago > parcela e a diferença é "
+        "≤ 10% do valor da parcela, casa automaticamente e a diferença "
+        "vira <b>juros implícito</b> na coluna Juros. Quando a diferença "
+        "passa de 10%, o casamento não é feito automaticamente — vai pra "
+        "aba <b>Aprovações</b> pra o operador decidir Aprovar/Rejeitar.",
         "<b>Reuso de parcela 'Parcial' na Fase 4</b>: quando o Domínio "
         "marca a parcela com status <i>Parcial</i> (parcela que recebe "
         "vários pagamentos parciais), a Fase 4 permite vincular a mesma "

@@ -472,6 +472,15 @@ class App(tk.Tk):
         # Match no Domínio dos pendentes do OFX (comparação OFX×Domínio sem
         # planilha): id(t_ofx) → {dominio, diff_dias, diff_valor}
         self.pendentes_ofx_dominio: dict[int, dict] = {}
+        # Fase 5 — Fila de aprovação manual. Casamentos NF+fornecedor
+        # onde o valor pago é MAIS QUE 10% acima da parcela do Domínio.
+        # Cada item: {tipo: 'par' | 'pend_planilha' | 'pend_ofx',
+        #             fonte: Transacao|Par, dominio: Transacao,
+        #             diff_dias, diff_valor, diff_pct}
+        self.aprovacoes_pendentes: list[dict] = []
+        # Decisões tomadas na sessão. id(fonte) → 'aprovado' | 'rejeitado'.
+        # Persiste entre execuções de Comparar (sem re-perguntar).
+        self.aprovacoes_decididas: dict[int, str] = {}
         self.pendentes_ofx: list[Transacao] = []
         # "brutos": pendentes OFX sem desconto dos que viraram lançamentos
         # contábeis. self.pendentes_ofx (visível) = brutos - classificados.
@@ -747,6 +756,7 @@ class App(tk.Tk):
         self._monta_aba_sugestoes()
         self._monta_aba_conciliados_dominio()
         self._monta_aba_dominio()
+        self._monta_aba_aprovacoes()
         self._monta_aba_lancamentos()
         self._monta_aba_plano_contas()
 
@@ -838,7 +848,8 @@ class App(tk.Tk):
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
         cols = (
-            "linha", "venc", "pagto", "emis", "valor", "juros", "desconto",
+            "linha", "venc", "pagto", "emis",
+            "valor", "valor_pago", "juros", "desconto",
             "nf", "cnpj", "fornecedor", "historico", "tipo",
         )
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
@@ -847,7 +858,12 @@ class App(tk.Tk):
             ("venc", "Vencimento", 100, "center"),
             ("pagto", "Pagamento", 100, "center"),
             ("emis", "Emissão", 100, "center"),
-            ("valor", "Valor", 105, "e"),
+            # Valor: parcela original (do PDF "Documento" ou coluna
+            # mapeada da xlsx). Valor pago: quanto saiu do banco (do PDF
+            # "Pago" ou fallback ao próprio Valor). Diferentes quando há
+            # juros/desconto — iguais no caso comum.
+            ("valor", "Valor", 100, "e"),
+            ("valor_pago", "Valor pago", 100, "e"),
             # Juros e Desconto — populados dos comprovantes PDF (Sicoob
             # traz explícito; Bradesco tenta rótulos comuns). Vazio quando
             # a linha vem só de planilha xlsx ou o PDF não traz o campo.
@@ -869,14 +885,26 @@ class App(tk.Tk):
         tree.bind("<Button-1>", self._on_click_header_planilha)
 
     def _row_planilha(self, t) -> tuple:
+        # Juros: prefere o explícito do PDF; fallback pro implícito
+        # injetado pela Fase 4 (pago > parcela e diff ≤ 10%).
         juros = t.extras.get("juros")
+        if juros is None:
+            juros = t.extras.get("juros_implicito")
         desconto = t.extras.get("desconto")
+        # Valor: prefere a parcela original (extras['valor_parcela']),
+        # cai no t.valor quando não há distinção.
+        # Valor pago: prefere extras['valor_pago'], cai no t.valor.
+        valor_parcela = t.extras.get("valor_parcela")
+        valor_pago = t.extras.get("valor_pago")
+        valor_txt = f"{(valor_parcela if valor_parcela is not None else t.valor):.2f}"
+        valor_pago_txt = f"{(valor_pago if valor_pago is not None else t.valor):.2f}"
         return (
             str(t.linha) if t.linha is not None else "",
             t.data.strftime("%d/%m/%Y"),
             self._fmt_data(t.data_pagamento),
             self._fmt_data(t.extras.get("data_emissao")),
-            f"{t.valor:.2f}",
+            valor_txt,
+            valor_pago_txt,
             f"{juros:.2f}" if juros is not None else "",
             f"{desconto:.2f}" if desconto is not None else "",
             t.extras.get("numero_nf", "") or "",
@@ -887,12 +915,13 @@ class App(tk.Tk):
         )
 
     COLS_PLANILHA = (
-        "linha", "venc", "pagto", "emis", "valor", "juros", "desconto",
+        "linha", "venc", "pagto", "emis",
+        "valor", "valor_pago", "juros", "desconto",
         "nf", "cnpj", "fornecedor", "historico", "tipo",
     )
     LABELS_PLANILHA = {
         "linha": "Linha", "venc": "Vencimento", "pagto": "Pagamento",
-        "emis": "Emissão", "valor": "Valor",
+        "emis": "Emissão", "valor": "Valor", "valor_pago": "Valor pago",
         "juros": "Juros", "desconto": "Desconto",
         "nf": "Nº NF",
         "cnpj": "CNPJ", "fornecedor": "Fornecedor",
@@ -1421,7 +1450,8 @@ class App(tk.Tk):
         instr.pack(side="top", fill="x", padx=6, pady=(6, 0))
 
         cols = (
-            "tipo", "origem", "data", "pagto", "valor", "juros", "desconto",
+            "tipo", "origem", "data", "pagto",
+            "valor", "valor_pago", "juros", "desconto",
             "emissao", "nf", "cnpj", "fornecedor", "empresa", "memo_ofx",
             "diff_dom", "status_dom",
         )
@@ -1430,7 +1460,10 @@ class App(tk.Tk):
         tree.heading("origem", text="Origem")
         tree.heading("data", text="Vencimento")
         tree.heading("pagto", text="Pagamento")
+        # Valor: parcela original (do PDF/planilha). Valor pago: o que
+        # foi debitado no banco (com juros e menos desconto).
         tree.heading("valor", text="Valor")
+        tree.heading("valor_pago", text="Valor pago")
         # Juros e Desconto: vêm dos comprovantes PDF (Sicoob/Bradesco).
         # Vazios pra linhas sem comprovante correspondente.
         tree.heading("juros", text="Juros")
@@ -1450,6 +1483,7 @@ class App(tk.Tk):
         tree.column("data", width=85, anchor="center")
         tree.column("pagto", width=85, anchor="center")
         tree.column("valor", width=90, anchor="e")
+        tree.column("valor_pago", width=90, anchor="e")
         tree.column("juros", width=75, anchor="e")
         tree.column("desconto", width=75, anchor="e")
         tree.column("emissao", width=85, anchor="center")
@@ -1853,6 +1887,177 @@ class App(tk.Tk):
         self._set_regras_empresa(regras)
         self._gerar_lancamentos_contabeis()
         self._comparar_com_dominio()  # re-renderiza tirando o par classificado
+
+    def _monta_aba_aprovacoes(self) -> None:
+        """Aba que lista casamentos NF+fornecedor rejeitados pela Fase 4
+        por terem valor pago > 10% acima da parcela do Domínio. Operador
+        aprova (casa como Conciliados × Domínio, injeta juros implícito)
+        ou rejeita (linha continua pendente)."""
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Aprovações (0)")
+        self._aba_aprovacoes = aba
+
+        instr = ttk.Label(
+            aba,
+            text=(
+                "Casamentos com NF e fornecedor batendo, mas com "
+                "valor pago mais de 10% acima da parcela do Domínio. "
+                "A conciliação exige sua confirmação antes de virar "
+                "Conciliados × Domínio."
+            ),
+            foreground="#1f3a68",
+            font=("TkDefaultFont", 9, "italic"),
+            wraplength=900,
+        )
+        instr.pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        cols = (
+            "nf", "fornecedor", "valor_parcela", "valor_pago",
+            "diff_valor", "diff_pct", "tipo", "empresa",
+        )
+        tree = ttk.Treeview(aba, columns=cols, show="headings", selectmode="browse")
+        tree.heading("nf", text="Nº NF")
+        tree.heading("fornecedor", text="Fornecedor")
+        tree.heading("valor_parcela", text="Valor parcela")
+        tree.heading("valor_pago", text="Valor pago")
+        tree.heading("diff_valor", text="Diferença")
+        tree.heading("diff_pct", text="Diff %")
+        tree.heading("tipo", text="Origem")
+        tree.heading("empresa", text="Empresa (Domínio)")
+        tree.column("nf", width=110, anchor="center")
+        tree.column("fornecedor", width=240, anchor="w")
+        tree.column("valor_parcela", width=100, anchor="e")
+        tree.column("valor_pago", width=100, anchor="e")
+        tree.column("diff_valor", width=100, anchor="e")
+        tree.column("diff_pct", width=70, anchor="e")
+        tree.column("tipo", width=130, anchor="w")
+        tree.column("empresa", width=180, anchor="w")
+
+        sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+
+        # iid → índice em self.aprovacoes_pendentes
+        self._itens_aprovacoes: dict[str, int] = {}
+        self.tree_aprovacoes = tree
+
+        # Botões antes do tree pra ficarem sempre visíveis embaixo
+        botoes = ttk.Frame(aba)
+        botoes.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            botoes, text="✓ Aprovar selecionada (casa com Domínio)",
+            command=self._aprovar_aprovacao_selecionada,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            botoes, text="✗ Rejeitar selecionada (deixa pendente)",
+            command=self._rejeitar_aprovacao_selecionada,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            botoes, text="Limpar decisões (reavaliar tudo)",
+            command=self._limpar_decisoes_aprovacoes,
+        ).pack(side="right", padx=2)
+
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+
+    def _render_aba_aprovacoes(self) -> None:
+        """Popula a treeview com os itens de self.aprovacoes_pendentes."""
+        if not hasattr(self, "tree_aprovacoes"):
+            return
+        for item in self.tree_aprovacoes.get_children():
+            self.tree_aprovacoes.delete(item)
+        self._itens_aprovacoes.clear()
+
+        tipo_lbl = {
+            "par": "Par Planilha×OFX",
+            "pend_planilha": "Pendente planilha",
+            "pend_ofx": "Pendente OFX",
+        }
+        for idx, item in enumerate(self.aprovacoes_pendentes):
+            fonte = item["fonte"]
+            t_dom = item["dominio"]
+            fonte_dados = fonte.planilha if item["tipo"] == "par" else fonte
+            nf = fonte_dados.extras.get("numero_nf", "") or ""
+            forn = fonte_dados.extras.get("fornecedor", "") or ""
+            valor_parc = f"{t_dom.valor:.2f}"
+            valor_pago = f"{fonte_dados.valor:.2f}"
+            diff = f"{item['diff_valor']:.2f}"
+            diff_pct = f"{item['diff_pct']:.1f}%"
+            emp_codi = t_dom.extras.get("codi_emp_origem")
+            emp_razao = t_dom.extras.get("razao_empresa", "") or ""
+            empresa = (
+                f"{emp_codi} - {emp_razao[:24]}" if emp_codi is not None
+                else ""
+            )
+            iid = self.tree_aprovacoes.insert(
+                "", "end",
+                values=(
+                    nf, forn, valor_parc, valor_pago,
+                    diff, diff_pct, tipo_lbl.get(item["tipo"], item["tipo"]),
+                    empresa,
+                ),
+            )
+            self._itens_aprovacoes[iid] = idx
+        self.notebook.tab(
+            self._aba_aprovacoes,
+            text=f"Aprovações ({len(self.aprovacoes_pendentes)})",
+        )
+
+    def _aprovar_aprovacao_selecionada(self) -> None:
+        """Marca decisão='aprovado' pra linha selecionada e re-executa
+        a comparação — o item vai casar via _decide_f4 e sair da fila."""
+        sel = self.tree_aprovacoes.selection() if hasattr(self, "tree_aprovacoes") else ()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha na aba Aprovações pra aprovar.",
+            )
+            return
+        idx = self._itens_aprovacoes.get(sel[0])
+        if idx is None or idx >= len(self.aprovacoes_pendentes):
+            return
+        fonte = self.aprovacoes_pendentes[idx]["fonte"]
+        self.aprovacoes_decididas[id(fonte)] = "aprovado"
+        self._filtrar_conciliados_por_dominio()
+        self._render_aba_conciliados_dominio()
+        self._render_aba_aprovacoes()
+        self._renderizar_comparacao()
+
+    def _rejeitar_aprovacao_selecionada(self) -> None:
+        """Marca decisão='rejeitado': o item sai da fila e não casa."""
+        sel = self.tree_aprovacoes.selection() if hasattr(self, "tree_aprovacoes") else ()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha na aba Aprovações pra rejeitar.",
+            )
+            return
+        idx = self._itens_aprovacoes.get(sel[0])
+        if idx is None or idx >= len(self.aprovacoes_pendentes):
+            return
+        fonte = self.aprovacoes_pendentes[idx]["fonte"]
+        self.aprovacoes_decididas[id(fonte)] = "rejeitado"
+        self._filtrar_conciliados_por_dominio()
+        self._render_aba_conciliados_dominio()
+        self._render_aba_aprovacoes()
+        self._renderizar_comparacao()
+
+    def _limpar_decisoes_aprovacoes(self) -> None:
+        """Descarta todas as decisões prévias: itens antes aprovados/
+        rejeitados voltam pra fila (se ainda batem NF+fornecedor)."""
+        if not self.aprovacoes_decididas:
+            return
+        if not messagebox.askyesno(
+            "Limpar decisões",
+            f"Vai limpar {len(self.aprovacoes_decididas)} decisão(ões) prévia(s) "
+            "(aprovar/rejeitar). Todos os casamentos > 10% voltam a pedir "
+            "aprovação. Continuar?",
+        ):
+            return
+        self.aprovacoes_decididas.clear()
+        self._filtrar_conciliados_por_dominio()
+        self._render_aba_conciliados_dominio()
+        self._render_aba_aprovacoes()
+        self._renderizar_comparacao()
 
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self.notebook)
@@ -3782,6 +3987,55 @@ class App(tk.Tk):
                 pass  # já não estava em disponivel (era parcial reutilizada)
             usados.add(id(t_dom))
 
+        # Reseta a fila de aprovações a cada Comparar. Decisões prévias
+        # do operador (aprovacoes_decididas) persistem — o mesmo item
+        # não volta a pedir aprovação, e itens já aprovados casam
+        # automaticamente na próxima passada.
+        self.aprovacoes_pendentes = []
+
+        def _decide_f4(fonte, t_dom, dd, dv, tipo: str) -> bool:
+            """Regra dos 10% aplicada aos matches da Fase 4:
+
+            * pago > parcela e diff > 10% → NÃO casa; adiciona em
+              ``aprovacoes_pendentes`` pra aparecer na aba Aprovações.
+            * pago > parcela e diff ≤ 10% → casa + injeta juros
+              implícito (a diferença aparece na coluna Juros da aba
+              Conciliados × Domínio se não veio juros explícito do PDF).
+            * pago ≤ parcela → casa como antes (comportamento existente
+              da Fase 4: aceita valor divergente pra menos sem exigir
+              nada — é caso de desconto, fora do escopo dos 10%).
+
+            Decisões prévias do operador vencem: 'aprovado' casa mesmo
+            > 10%; 'rejeitado' pula.
+            """
+            if t_dom is None:
+                return False
+            fonte_dados = fonte.planilha if tipo == "par" else fonte
+            valor_pago = _quant(fonte_dados.valor)
+            valor_parcela = _quant(t_dom.valor)
+            if valor_pago <= valor_parcela:
+                return True
+            diff = valor_pago - valor_parcela
+            diff_pct = (
+                float(diff / valor_parcela) * 100 if valor_parcela > 0 else 0
+            )
+            decisao = self.aprovacoes_decididas.get(id(fonte))
+            if decisao == "rejeitado":
+                return False
+            if diff_pct <= 10 or decisao == "aprovado":
+                if fonte_dados.extras.get("juros") is None:
+                    fonte_dados.extras["juros_implicito"] = diff
+                return True
+            self.aprovacoes_pendentes.append({
+                "tipo": tipo,
+                "fonte": fonte,
+                "dominio": t_dom,
+                "diff_dias": dd,
+                "diff_valor": diff,
+                "diff_pct": diff_pct,
+            })
+            return False
+
         # Pares P×OFX — FASE 4
         for par in pares_sem_match_f4:
             nf_p = self._normaliza_nf(par.planilha.extras.get("numero_nf", ""))
@@ -3793,7 +4047,7 @@ class App(tk.Tk):
                 nf_p, cnpj_p, nome_p,
                 _quant(par.planilha.valor), par.planilha.data,
             )
-            if t_dom is not None:
+            if t_dom is not None and _decide_f4(par, t_dom, dd, dv, "par"):
                 par.dominio = t_dom
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
@@ -3818,7 +4072,7 @@ class App(tk.Tk):
             t_dom, dd, dv = _melhor_match_fase4(
                 nf_p, cnpj_p, nome_p, _quant(t_p.valor), t_p.data,
             )
-            if t_dom is not None:
+            if t_dom is not None and _decide_f4(t_p, t_dom, dd, dv, "pend_planilha"):
                 self.pendentes_planilha_dominio[id(t_p)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
@@ -3882,7 +4136,7 @@ class App(tk.Tk):
             t_dom, dd, dv = _melhor_match_fase4(
                 nf_o, cnpj_o, nome_o, _quant(t_o.valor), t_o.data,
             )
-            if t_dom is not None:
+            if t_dom is not None and _decide_f4(t_o, t_dom, dd, dv, "pend_ofx"):
                 self.pendentes_ofx_dominio[id(t_o)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
@@ -4175,9 +4429,27 @@ class App(tk.Tk):
         def _fmt_extra_decimal(extras: dict, chave: str) -> str:
             """Formata juros/desconto (Decimal em extras) como '3.24'.
             Vazio quando ausente — mantém a coluna limpa pra linhas que
-            não vieram de comprovante PDF."""
+            não vieram de comprovante PDF.
+
+            Fallback especial para a chave 'juros': quando ausente,
+            devolve extras['juros_implicito'] se estiver preenchido
+            (Fase 4 injeta esse valor quando pago > parcela e diff ≤ 10%).
+            """
             v = extras.get(chave)
+            if v is None and chave == "juros":
+                v = extras.get("juros_implicito")
             return f"{v:.2f}" if v is not None else ""
+
+        def _valor_e_pago(t) -> tuple[str, str]:
+            """Devolve ('valor formatado', 'valor pago formatado').
+            Valor prefere extras['valor_parcela']; pago prefere
+            extras['valor_pago']. Ambos caem em t.valor quando não há
+            distinção — mesmo comportamento da aba Planilha."""
+            vp = t.extras.get("valor_parcela")
+            vpg = t.extras.get("valor_pago")
+            valor_txt = f"{(vp if vp is not None else t.valor):.2f}"
+            pago_txt = f"{(vpg if vpg is not None else t.valor):.2f}"
+            return valor_txt, pago_txt
 
         # 1) Pares P×OFX triple-matched
         # PRIORIDADE de dados: Domínio > planilha/PDF > OFX
@@ -4211,6 +4483,7 @@ class App(tk.Tk):
                 diff_dom = (
                     f"Δ {par.diff_dias_dominio}d, R$ {par.diff_valor_dominio:.2f}"
                 )
+            valor_txt, pago_txt = _valor_e_pago(par.planilha)
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
@@ -4218,7 +4491,8 @@ class App(tk.Tk):
                     origem,
                     par.planilha.data.strftime("%d/%m/%Y"),
                     pagto_txt,
-                    f"{par.planilha.valor:.2f}",
+                    valor_txt,
+                    pago_txt,
                     _fmt_extra_decimal(p_extras, "juros"),
                     _fmt_extra_decimal(p_extras, "desconto"),
                     emissao_txt,
@@ -4271,6 +4545,7 @@ class App(tk.Tk):
                 if t_p.extras.get("historico") else "(sem OFX)"
             )
 
+            valor_txt, pago_txt = _valor_e_pago(t_p)
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
@@ -4278,7 +4553,8 @@ class App(tk.Tk):
                     "Caixa geral",                        # Origem
                     t_p.data.strftime("%d/%m/%Y"),
                     pagto_txt,
-                    f"{t_p.valor:.2f}",
+                    valor_txt,
+                    pago_txt,
                     _fmt_extra_decimal(p_extras, "juros"),
                     _fmt_extra_decimal(p_extras, "desconto"),
                     emissao_txt,
@@ -4328,6 +4604,7 @@ class App(tk.Tk):
             if d_d or d_v:
                 diff_dom = f"Δ {d_d}d, R$ {d_v:.2f}"
 
+            valor_txt, pago_txt = _valor_e_pago(t_o)
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
@@ -4335,7 +4612,8 @@ class App(tk.Tk):
                     origem,                               # Origem = banco do OFX
                     t_o.data.strftime("%d/%m/%Y"),
                     pagto_txt,
-                    f"{t_o.valor:.2f}",
+                    valor_txt,
+                    pago_txt,
                     # OFX puro raramente traz juros/desconto separados;
                     # deixa vazio (usa o_extras se algum dia vier enriquecido)
                     _fmt_extra_decimal(o_extras, "juros"),
@@ -4354,6 +4632,9 @@ class App(tk.Tk):
 
         total = len(pares) + len(caixa_dominio) + len(ofx_dominio)
         self.notebook.tab(6, text=f"Conciliados × Domínio ({total})")
+
+        # Reflete a fila de aprovações que a filtragem construiu.
+        self._render_aba_aprovacoes()
 
     # ---------------- Abas de dados crus (origem) ----------------
 

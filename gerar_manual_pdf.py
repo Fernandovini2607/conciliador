@@ -245,11 +245,17 @@ def construir():
     ))
     flow.append(Spacer(1, 4))
     flow.append(caixa_dica(
-        "<b>Colunas Juros e Desconto na aba Planilha</b>: quando a linha "
-        "vem de um comprovante PDF do Sicoob ou Bradesco, o sistema "
-        "preenche automaticamente essas colunas a partir do comprovante. "
-        "Linhas que vieram só da planilha .xlsx ficam com essas colunas "
-        "em branco."
+        "<b>Colunas Valor, Valor pago, Juros e Desconto na aba "
+        "Planilha</b>: quando a linha vem de um comprovante PDF do "
+        "Sicoob ou Bradesco, o sistema preenche automaticamente:<br/>"
+        "• <b>Valor</b> = valor original da parcela (o \"Documento\" do "
+        "comprovante).<br/>"
+        "• <b>Valor pago</b> = quanto foi debitado do banco (com juros "
+        "ou menos desconto). Diferente do Valor quando houve encargos.<br/>"
+        "• <b>Juros</b> e <b>Desconto</b> = os valores explícitos do "
+        "comprovante.<br/>"
+        "Linhas que vieram só da planilha .xlsx mostram o mesmo número "
+        "em Valor e Valor pago, e Juros/Desconto ficam em branco."
     ))
 
     flow.append(Paragraph("3.2 Extrato bancário OFX", H3))
@@ -447,7 +453,10 @@ def construir():
         "renegociadas / vencimento prorrogado.",
         "<b>NF + fornecedor</b> (valor livre): Nº NF igual (obrigatório e "
         "não-vazio) E (CNPJ ou nome do fornecedor bate). <b>Valor pode "
-        "divergir</b> — útil pra pagamentos com juros/multa/desconto.",
+        "divergir</b> — útil pra pagamentos com juros/multa/desconto. "
+        "<b>Regra dos 10%</b>: se pago > parcela e diff ≤ 10%, casa "
+        "auto + juros implícito na coluna Juros; se diff > 10%, vai pra "
+        "aba <b>Aprovações</b> pra você revisar.",
     ]))
     flow.append(caixa_dica(
         "Cada parcela do Domínio só pode ser vinculada a <b>um "
@@ -504,6 +513,38 @@ def construir():
         "<b>Exportar pendências</b>: gera Excel com todas as linhas <b>falta</b> "
         "(amarelas, cinzas, laranjas) — útil pra revisar ou mandar pra alguém.",
     ]))
+
+    # ============ Passo 7.5 — Aba Aprovações
+    flow.append(Paragraph("Passo 7.5 — Aba Aprovações (revisões manuais)", PASSO))
+    flow.append(Paragraph(
+        "Quando o sistema encontra um pagamento onde o <b>valor pago passa "
+        "de 10% acima da parcela do Domínio</b> (NF e fornecedor batem, mas "
+        "a diferença é grande — pode ser juros alto, multa pesada ou "
+        "pagamento errado), ele <b>não casa automaticamente</b>. A linha "
+        "vai pra aba <b>Aprovações</b>.", TEXTO,
+    ))
+    flow.append(Paragraph("A aba mostra:", TEXTO))
+    flow.append(bullets([
+        "Nº NF e Fornecedor",
+        "Valor da parcela (Domínio) vs Valor pago",
+        "Diferença em R$ e em %",
+        "Origem (par, pendente planilha, pendente OFX)",
+        "Empresa (código) do Domínio",
+    ]))
+    flow.append(Paragraph("Ações:", TEXTO))
+    flow.append(bullets([
+        "<b>✓ Aprovar selecionada</b>: casa com o Domínio; a diferença "
+        "vira juros implícito na coluna Juros (Conciliados × Domínio).",
+        "<b>✗ Rejeitar selecionada</b>: deixa a linha como pendente "
+        "(não casa).",
+        "<b>Limpar decisões</b>: descarta aprovações/rejeições anteriores; "
+        "itens voltam pra fila.",
+    ]))
+    flow.append(caixa_dica(
+        "As decisões ficam salvas <b>durante a sessão</b>. Se você fechar "
+        "o Conciliador e abrir de novo, todas as revisões voltam a pedir "
+        "aprovação (não persiste em disco)."
+    ))
 
     # ============ Passo 8
     flow.append(Paragraph("Passo 8 — Revisar os lançamentos contábeis", PASSO))
