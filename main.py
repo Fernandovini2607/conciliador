@@ -1421,8 +1421,8 @@ class App(tk.Tk):
         instr.pack(side="top", fill="x", padx=6, pady=(6, 0))
 
         cols = (
-            "tipo", "origem", "data", "pagto", "valor", "emissao",
-            "nf", "cnpj", "fornecedor", "empresa", "memo_ofx",
+            "tipo", "origem", "data", "pagto", "valor", "juros", "desconto",
+            "emissao", "nf", "cnpj", "fornecedor", "empresa", "memo_ofx",
             "diff_dom", "status_dom",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
@@ -1431,6 +1431,10 @@ class App(tk.Tk):
         tree.heading("data", text="Vencimento")
         tree.heading("pagto", text="Pagamento")
         tree.heading("valor", text="Valor")
+        # Juros e Desconto: vêm dos comprovantes PDF (Sicoob/Bradesco).
+        # Vazios pra linhas sem comprovante correspondente.
+        tree.heading("juros", text="Juros")
+        tree.heading("desconto", text="Desconto")
         tree.heading("emissao", text="Emissão")
         tree.heading("nf", text="Nº NF")
         tree.heading("cnpj", text="CNPJ")
@@ -1446,6 +1450,8 @@ class App(tk.Tk):
         tree.column("data", width=85, anchor="center")
         tree.column("pagto", width=85, anchor="center")
         tree.column("valor", width=90, anchor="e")
+        tree.column("juros", width=75, anchor="e")
+        tree.column("desconto", width=75, anchor="e")
         tree.column("emissao", width=85, anchor="center")
         tree.column("nf", width=70, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
@@ -4166,6 +4172,13 @@ class App(tk.Tk):
             razao = t_dom.extras.get("razao_empresa", "") or ""
             return f"{codi} - {razao[:30]}" if razao else str(codi)
 
+        def _fmt_extra_decimal(extras: dict, chave: str) -> str:
+            """Formata juros/desconto (Decimal em extras) como '3.24'.
+            Vazio quando ausente — mantém a coluna limpa pra linhas que
+            não vieram de comprovante PDF."""
+            v = extras.get(chave)
+            return f"{v:.2f}" if v is not None else ""
+
         # 1) Pares P×OFX triple-matched
         # PRIORIDADE de dados: Domínio > planilha/PDF > OFX
         # (Domínio é a fonte mais confiável — planilhas e comprovantes
@@ -4206,6 +4219,8 @@ class App(tk.Tk):
                     par.planilha.data.strftime("%d/%m/%Y"),
                     pagto_txt,
                     f"{par.planilha.valor:.2f}",
+                    _fmt_extra_decimal(p_extras, "juros"),
+                    _fmt_extra_decimal(p_extras, "desconto"),
                     emissao_txt,
                     numero_nf,
                     cnpj,
@@ -4264,6 +4279,8 @@ class App(tk.Tk):
                     t_p.data.strftime("%d/%m/%Y"),
                     pagto_txt,
                     f"{t_p.valor:.2f}",
+                    _fmt_extra_decimal(p_extras, "juros"),
+                    _fmt_extra_decimal(p_extras, "desconto"),
                     emissao_txt,
                     numero_nf,
                     cnpj,
@@ -4319,6 +4336,10 @@ class App(tk.Tk):
                     t_o.data.strftime("%d/%m/%Y"),
                     pagto_txt,
                     f"{t_o.valor:.2f}",
+                    # OFX puro raramente traz juros/desconto separados;
+                    # deixa vazio (usa o_extras se algum dia vier enriquecido)
+                    _fmt_extra_decimal(o_extras, "juros"),
+                    _fmt_extra_decimal(o_extras, "desconto"),
                     emissao_txt,
                     numero_nf,
                     cnpj,

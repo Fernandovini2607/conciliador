@@ -314,6 +314,9 @@ Você pode exportar em várias abas pra revisar ou entregar pra alguém:
   - A tabela tem uma coluna **Empresa (código)** — mostra em qual
     empresa do grupo cada parcela foi lançada (útil quando a matriz
     paga boletos das filiais). A coluna também sai no Excel.
+  - As colunas **Juros** e **Desconto** também aparecem aqui, com o
+    valor extraído do comprovante PDF (Sicoob/Bradesco) — vazio para
+    linhas sem comprovante correspondente. Também saem no Excel.
 - **Aba Lançamentos contábeis** → botão *Exportar para Excel*: os
   lançamentos que vão pro Domínio, com totalização.
 - **Aba Comparação** → botão *Exportar pendências*: só o que falta

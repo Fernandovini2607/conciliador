@@ -539,7 +539,9 @@ def construir():
         "<b>Aba Conciliados × Domínio</b> → tudo que já está fechado "
         "com o Domínio. Inclui a coluna <b>Empresa (código)</b> mostrando "
         "em qual empresa do grupo cada parcela foi lançada (útil quando "
-        "a matriz paga boletos das filiais). A coluna também sai no Excel.",
+        "a matriz paga boletos das filiais), e as colunas <b>Juros</b> "
+        "e <b>Desconto</b> extraídas dos comprovantes PDF. As três "
+        "colunas também saem no Excel.",
         "<b>Aba Lançamentos contábeis</b> → os lançamentos que vão pro "
         "Domínio, com totalização.",
         "<b>Aba Comparação</b> → botão <i>Exportar pendências</i>: só o "

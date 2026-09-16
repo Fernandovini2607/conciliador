@@ -113,6 +113,10 @@ def exportar_conciliados_dominio(
         ("Vencimento", 12),
         ("Pagamento", 12),
         ("Valor", 14),
+        # Juros e Desconto: vêm dos comprovantes PDF (Sicoob/Bradesco).
+        # Vazios quando a linha não tem comprovante correspondente.
+        ("Juros", 10),
+        ("Desconto", 10),
         ("Emissão", 12),
         ("Nº NF", 12),
         ("CNPJ", 20),
@@ -134,6 +138,11 @@ def exportar_conciliados_dominio(
             return ""
         razao = t_dom.extras.get("razao_empresa", "") or ""
         return f"{codi} - {razao[:40]}" if razao else str(codi)
+
+    def _num(extras: dict, chave: str):
+        """Devolve float pro Excel formatar como número, ou '' se ausente."""
+        v = extras.get(chave)
+        return float(v) if v is not None else ""
 
     linha = 2
 
@@ -162,6 +171,8 @@ def exportar_conciliados_dominio(
             _fmt_data(par.planilha.data),
             _fmt_data(pagto),
             float(par.planilha.valor),
+            _num(p_extras, "juros"),
+            _num(p_extras, "desconto"),
             _fmt_data(emissao) if hasattr(emissao, "strftime") else str(emissao or ""),
             str(numero_nf),
             str(cnpj),
@@ -174,7 +185,7 @@ def exportar_conciliados_dominio(
         for i, v in enumerate(valores, start=1):
             cell = ws.cell(row=linha, column=i, value=v)
             cell.font = FONTE_CELULA
-            if i == 5:  # coluna Valor
+            if i in (5, 6, 7):  # Valor, Juros, Desconto
                 cell.number_format = '#,##0.00'
         _pinta_linha(ws, linha, len(colunas), _tag_status(status))
         linha += 1
@@ -209,6 +220,8 @@ def exportar_conciliados_dominio(
             _fmt_data(t_p.data),
             _fmt_data(pagto),
             float(t_p.valor),
+            _num(p_extras, "juros"),
+            _num(p_extras, "desconto"),
             _fmt_data(emissao) if hasattr(emissao, "strftime") else str(emissao or ""),
             str(numero_nf),
             str(cnpj),
@@ -221,7 +234,7 @@ def exportar_conciliados_dominio(
         for i, v in enumerate(valores, start=1):
             cell = ws.cell(row=linha, column=i, value=v)
             cell.font = FONTE_CELULA
-            if i == 5:
+            if i in (5, 6, 7):  # Valor, Juros, Desconto
                 cell.number_format = '#,##0.00'
         _pinta_linha(ws, linha, len(colunas), _tag_status(status))
         linha += 1
@@ -253,6 +266,8 @@ def exportar_conciliados_dominio(
                 _fmt_data(t_o.data),
                 _fmt_data(t_o.data),
                 float(t_o.valor),
+                _num(o_extras, "juros"),
+                _num(o_extras, "desconto"),
                 _fmt_data(emissao) if hasattr(emissao, "strftime") else "",
                 str(numero_nf),
                 str(cnpj),
@@ -265,7 +280,7 @@ def exportar_conciliados_dominio(
             for i, v in enumerate(valores, start=1):
                 cell = ws.cell(row=linha, column=i, value=v)
                 cell.font = FONTE_CELULA
-                if i == 5:
+                if i in (5, 6, 7):  # Valor, Juros, Desconto
                     cell.number_format = '#,##0.00'
             _pinta_linha(ws, linha, len(colunas), _tag_status(status))
             linha += 1
