@@ -837,7 +837,10 @@ class App(tk.Tk):
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True)
-        cols = ("linha", "venc", "pagto", "emis", "valor", "nf", "cnpj", "fornecedor", "historico", "tipo")
+        cols = (
+            "linha", "venc", "pagto", "emis", "valor", "juros", "desconto",
+            "nf", "cnpj", "fornecedor", "historico", "tipo",
+        )
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("linha", "Linha", 55, "center"),
@@ -845,6 +848,11 @@ class App(tk.Tk):
             ("pagto", "Pagamento", 100, "center"),
             ("emis", "Emissão", 100, "center"),
             ("valor", "Valor", 105, "e"),
+            # Juros e Desconto — populados dos comprovantes PDF (Sicoob
+            # traz explícito; Bradesco tenta rótulos comuns). Vazio quando
+            # a linha vem só de planilha xlsx ou o PDF não traz o campo.
+            ("juros", "Juros", 85, "e"),
+            ("desconto", "Desconto", 85, "e"),
             ("nf", "Nº NF", 85, "center"),
             ("cnpj", "CNPJ", 130, "w"),
             ("fornecedor", "Fornecedor", 220, "w"),
@@ -861,12 +869,16 @@ class App(tk.Tk):
         tree.bind("<Button-1>", self._on_click_header_planilha)
 
     def _row_planilha(self, t) -> tuple:
+        juros = t.extras.get("juros")
+        desconto = t.extras.get("desconto")
         return (
             str(t.linha) if t.linha is not None else "",
             t.data.strftime("%d/%m/%Y"),
             self._fmt_data(t.data_pagamento),
             self._fmt_data(t.extras.get("data_emissao")),
             f"{t.valor:.2f}",
+            f"{juros:.2f}" if juros is not None else "",
+            f"{desconto:.2f}" if desconto is not None else "",
             t.extras.get("numero_nf", "") or "",
             t.extras.get("cnpj", "") or "",
             t.extras.get("fornecedor", "") or "",
@@ -875,12 +887,14 @@ class App(tk.Tk):
         )
 
     COLS_PLANILHA = (
-        "linha", "venc", "pagto", "emis", "valor",
+        "linha", "venc", "pagto", "emis", "valor", "juros", "desconto",
         "nf", "cnpj", "fornecedor", "historico", "tipo",
     )
     LABELS_PLANILHA = {
         "linha": "Linha", "venc": "Vencimento", "pagto": "Pagamento",
-        "emis": "Emissão", "valor": "Valor", "nf": "Nº NF",
+        "emis": "Emissão", "valor": "Valor",
+        "juros": "Juros", "desconto": "Desconto",
+        "nf": "Nº NF",
         "cnpj": "CNPJ", "fornecedor": "Fornecedor",
         "historico": "Histórico", "tipo": "Tipo",
     }

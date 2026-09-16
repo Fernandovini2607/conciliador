@@ -243,6 +243,14 @@ def construir():
         "Comprovantes PDF trazem CNPJ + nome, o que ajuda muito a "
         "conciliação com o Domínio."
     ))
+    flow.append(Spacer(1, 4))
+    flow.append(caixa_dica(
+        "<b>Colunas Juros e Desconto na aba Planilha</b>: quando a linha "
+        "vem de um comprovante PDF do Sicoob ou Bradesco, o sistema "
+        "preenche automaticamente essas colunas a partir do comprovante. "
+        "Linhas que vieram só da planilha .xlsx ficam com essas colunas "
+        "em branco."
+    ))
 
     flow.append(Paragraph("3.2 Extrato bancário OFX", H3))
     flow.append(bullets([

@@ -51,6 +51,12 @@ Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo:
 > Da próxima vez que abrir uma planilha da mesma empresa, o sistema já
 > lembra o mapeamento — vai direto sem perguntar.
 
+> **Colunas Juros e Desconto na aba Planilha**: quando a linha vem de
+> um comprovante PDF do Sicoob ou Bradesco, o sistema preenche
+> automaticamente as colunas **Juros** e **Desconto** a partir do
+> comprovante. Linhas que vieram só da planilha .xlsx ficam com essas
+> colunas em branco (a planilha nem sempre traz esses campos separados).
+
 ### 3.1.b Comprovantes PDF de pagamento (alternativa/complemento)
 
 Se a empresa **não tem planilha de controle** mas você tem

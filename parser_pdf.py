@@ -113,6 +113,15 @@ def _extrair_transacao_sicoob(bloco: str, arquivo: str, ordem: int) -> Transacao
     if valor is None:
         return None
 
+    # Juros/Multa e Desconto/Abatimento — o comprovante Sicoob traz esses
+    # campos explícitos abaixo do bloco "Valores:". Preservados como
+    # Decimal em extras pra aparecer nas colunas Juros/Desconto da aba
+    # Planilha. Valem 0 quando não há juros/desconto no comprovante.
+    m_juros = re.search(r"Juros/Multa:\s*R\$\s*([\d.,]+)", bloco)
+    juros = _para_valor(m_juros.group(1)) if m_juros else None
+    m_desc = re.search(r"Desconto/Abatimento:\s*R\$\s*([\d.,]+)", bloco)
+    desconto = _para_valor(m_desc.group(1)) if m_desc else None
+
     # Data de pagamento
     m_data = re.search(r"Pagamento:\s*(\d{2}/\d{2}/\d{4})", bloco)
     if not m_data:
@@ -158,20 +167,26 @@ def _extrair_transacao_sicoob(bloco: str, arquivo: str, ordem: int) -> Transacao
     m_doc = re.search(r"N[u\u00fa\ufffd]mero do documento:\s*(\S+)", bloco)
     doc = m_doc.group(1).strip() if m_doc else ""
 
+    extras = {
+        "fornecedor": fornecedor,
+        "cnpj": cnpj,
+        "numero_nf": doc,
+        "historico": f"Boleto Sicoob {doc}".strip(),
+        "arquivo": arquivo,
+        "banco_pdf": "Sicoob",
+    }
+    if juros is not None:
+        extras["juros"] = juros
+    if desconto is not None:
+        extras["desconto"] = desconto
+
     return Transacao(
         data=data_venc,
         valor=valor,
         descricao="",
         origem="pdf",
         linha=ordem,
-        extras={
-            "fornecedor": fornecedor,
-            "cnpj": cnpj,
-            "numero_nf": doc,
-            "historico": f"Boleto Sicoob {doc}".strip(),
-            "arquivo": arquivo,
-            "banco_pdf": "Sicoob",
-        },
+        extras=extras,
         data_pagamento=data_pagto,
     )
 
@@ -247,20 +262,51 @@ def _extrair_transacao_bradesco(bloco: str, arquivo: str, ordem: int) -> Transac
     m_doc = re.search(r"Documento:\s*(\d+)", bloco)
     doc = m_doc.group(1).strip() if m_doc else ""
 
+    # Juros/Multa e Desconto/Abatimento — Bradesco não padroniza
+    # exatamente os rótulos; tenta variações comuns. Se não achar, deixa
+    # vazio (a coluna simplesmente não aparece pra essa linha).
+    juros = None
+    for pat in (
+        r"Juros/Multa:?\s*R?\$?\s*([\d.,]+)",
+        r"(?:Juros|Multa):?\s*R?\$?\s*([\d.,]+)",
+        r"Encargos:?\s*R?\$?\s*([\d.,]+)",
+    ):
+        m = re.search(pat, bloco)
+        if m:
+            juros = _para_valor(m.group(1))
+            if juros is not None:
+                break
+    desconto = None
+    for pat in (
+        r"Desconto/Abatimento:?\s*R?\$?\s*([\d.,]+)",
+        r"(?:Desconto|Abatimento):?\s*R?\$?\s*([\d.,]+)",
+    ):
+        m = re.search(pat, bloco)
+        if m:
+            desconto = _para_valor(m.group(1))
+            if desconto is not None:
+                break
+
+    extras = {
+        "fornecedor": fornecedor,
+        "cnpj": cnpj,
+        "numero_nf": doc,
+        "historico": f"Boleto Bradesco {doc}".strip(),
+        "arquivo": arquivo,
+        "banco_pdf": "Bradesco",
+    }
+    if juros is not None:
+        extras["juros"] = juros
+    if desconto is not None:
+        extras["desconto"] = desconto
+
     return Transacao(
         data=data_venc,
         valor=valor,
         descricao="",
         origem="pdf",
         linha=ordem,
-        extras={
-            "fornecedor": fornecedor,
-            "cnpj": cnpj,
-            "numero_nf": doc,
-            "historico": f"Boleto Bradesco {doc}".strip(),
-            "arquivo": arquivo,
-            "banco_pdf": "Bradesco",
-        },
+        extras=extras,
         data_pagamento=data_pagto,
     )
 
