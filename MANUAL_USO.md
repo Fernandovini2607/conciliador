@@ -226,7 +226,7 @@ Depois de conciliar planilha × OFX:
 
 ### Como o sistema decide que um pagamento bate com o Domínio
 
-Ele tenta **4 formas de match, uma depois da outra** (se casou numa,
+Ele tenta **5 formas de match, uma depois da outra** (se casou numa,
 não passa pra próxima):
 
 1. **Match exato**: data de vencimento + valor + Nº NF iguais. O
@@ -244,6 +244,13 @@ não passa pra próxima):
    **Valor pode divergir** — útil pra pagamentos com juros/multa/desconto,
    ou quando o boleto foi emitido pra matriz e a parcela ficou na filial
    (ou vice-versa).
+5. **Fornecedor + valor próximo + data exata** (sem NF): quando a NF
+   não bate (ex.: "Nº NF" da planilha/OFX é o Nosso Número do banco e
+   o Domínio guardou a Nota Fiscal — números sempre diferentes),
+   ainda casa se **CNPJ exato ou CNPJ raiz** bate E **valor está
+   dentro de 5%** da parcela E **data é exatamente igual**. Nome
+   sozinho não vale nessa fase (mais conservador pra evitar falso
+   positivo).
    - **Se pago > parcela e a diferença é ≤ 10%**: casa
      automaticamente e a diferença vai pra coluna **Juros** (juros
      implícito).

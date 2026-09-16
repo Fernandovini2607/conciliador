@@ -460,6 +460,12 @@ def construir():
         "<b>Regra dos 10%</b>: se pago > parcela e diff ≤ 10%, casa "
         "auto + juros implícito na coluna Juros; se diff > 10%, vai pra "
         "aba <b>Aprovações</b> pra você revisar.",
+        "<b>Fornecedor + valor próximo + data exata</b> (sem NF): quando "
+        "a NF não bate (ex.: 'Nº NF' da planilha/OFX é o Nosso Número do "
+        "banco e o Domínio guardou a Nota Fiscal — números sempre "
+        "diferentes), ainda casa se <b>CNPJ exato ou CNPJ raiz</b> bate "
+        "E <b>valor está dentro de 5%</b> E <b>data é exatamente igual</b>. "
+        "Nome sozinho não vale aqui (mais conservador).",
     ]))
     flow.append(caixa_dica(
         "Cada parcela do Domínio só pode ser vinculada a <b>um "

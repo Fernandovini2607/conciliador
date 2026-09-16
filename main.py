@@ -3549,10 +3549,16 @@ class App(tk.Tk):
             múltiplos pagamentos — não é consumida ao casar. Isso
             reflete a realidade contábil de uma parcela que é quitada
             por vários lançamentos bancários.
+        FASE 6 (fornecedor forte + valor ≤5% + data exata): SEM exigir
+            NF. Cobre casos onde o "Nº NF" da planilha/OFX é o Nosso
+            Número do banco e o Domínio guardou a Nota Fiscal —
+            números diferentes por natureza. Exige CNPJ exato ou CNPJ
+            raiz (não nome), diferença de valor ≤ 5% da parcela e data
+            EXATA. Aplica a mesma regra dos juros implícitos.
 
         Ordem de prioridade (cada Transacao do Domínio 'Aberto' só casa
         com 1 item; parcelas 'Parcial' podem casar com vários na Fase 4):
-        pares > pendentes planilha > pendentes OFX (nas 4 fases).
+        pares > pendentes planilha > pendentes OFX (em todas as fases).
 
         Depuração: se a variável de ambiente ``DEBUG_NF`` estiver setada
         (ex: DEBUG_NF=171255), grava em ``debug_dominio.log`` cada evento
@@ -4159,6 +4165,113 @@ class App(tk.Tk):
             )
             t_dom, dd, dv = _melhor_match_fase4(
                 nf_o, cnpj_o, nome_o, _quant(t_o.valor), t_o.data,
+            )
+            if t_dom is not None and _decide_f4(t_o, t_dom, dd, dv, "pend_ofx"):
+                self.pendentes_ofx_dominio[id(t_o)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                _consome_dominio_f4(t_dom)
+
+        # ---------- FASE 6: fornecedor forte + valor ≤5% + data exata
+        # Sem exigir NF. Cobre casos onde "Nº NF" da planilha/OFX é
+        # Nosso Número do banco e o Domínio guardou a Nota Fiscal
+        # (números diferentes por natureza). Restritivo pra evitar
+        # falso positivo:
+        # - Fornecedor: exige CNPJ EXATO ou CNPJ raiz (não nome).
+        # - Valor: diff ≤ 5% da parcela do Domínio.
+        # - Data: EXATAMENTE igual (sem tolerância de dias).
+        # Depois de casar, aplica a mesma regra dos juros implícitos
+        # da Fase 4 (pago > parcela: injeta a diff em juros_implicito).
+        def _melhor_match_fase6(cnpj_p_norm, valor_p, data_p):
+            """Retorna (Transacao_dominio ou None, dd, dv). Considera
+            os disponíveis + parciais reutilizáveis (igual à Fase 4)."""
+            if not cnpj_p_norm:
+                return None, 0, Decimal("0")
+            raiz_p = parser_dominio._cnpj_raiz(cnpj_p_norm)
+            ids_disp = {id(t) for t in dominio_disponivel}
+            candidatos = list(dominio_disponivel)
+            for t in self.transacoes_dominio:
+                if id(t) not in ids_disp and _eh_parcial(t):
+                    candidatos.append(t)
+            melhor_t = None
+            melhor_score = None
+            melhor_dv = Decimal("0")
+            for t in candidatos:
+                if t.data != data_p:
+                    continue  # data tem que ser exata
+                valor_d = _quant(t.valor)
+                if valor_d <= 0:
+                    continue
+                diff_abs = abs(valor_p - valor_d)
+                # Toleração: 5% em relação à parcela do Domínio
+                if diff_abs > valor_d * Decimal("0.05"):
+                    continue
+                cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
+                bate_cnpj = bool(cnpj_p_norm) and cnpj_p_norm == cnpj_d
+                raiz_d = parser_dominio._cnpj_raiz(cnpj_d)
+                bate_raiz = bool(raiz_p) and raiz_p == raiz_d
+                if not (bate_cnpj or bate_raiz):
+                    continue
+                # Prioridade: CNPJ exato > raiz; depois menor diff de valor
+                prioridade = 0 if bate_cnpj else 1
+                score = (prioridade, diff_abs)
+                if melhor_score is None or score < melhor_score:
+                    melhor_score = score
+                    melhor_t = t
+                    melhor_dv = diff_abs
+            return melhor_t, 0, melhor_dv
+
+        # Quem sobrou da Fase 4 (não casou, não está na fila)
+        ids_em_aprovacao = {id(a["fonte"]) for a in self.aprovacoes_pendentes}
+        pares_sem_match_f6 = [
+            p for p in self.pares_conciliados
+            if p.dominio is None and id(p) not in ids_em_aprovacao
+        ]
+        pendentes_sem_match_f6 = [
+            t for t in self.pendentes_planilha_brutos
+            if id(t) not in self.pendentes_planilha_dominio
+            and id(t) not in ids_em_aprovacao
+        ]
+        pendentes_ofx_sem_match_f6 = [
+            t for t in self.pendentes_ofx_brutos
+            if id(t) not in self.pendentes_ofx_dominio
+            and id(t) not in ids_em_aprovacao
+        ]
+
+        # Pares P×OFX — Fase 6
+        for par in pares_sem_match_f6:
+            cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
+            t_dom, dd, dv = _melhor_match_fase6(
+                cnpj_p, _quant(par.planilha.valor), par.planilha.data,
+            )
+            if t_dom is not None and _decide_f4(par, t_dom, dd, dv, "par"):
+                par.dominio = t_dom
+                par.diff_dias_dominio = dd
+                par.diff_valor_dominio = dv
+                _consome_dominio_f4(t_dom)
+
+        # Pendentes planilha — Fase 6
+        for t_p in pendentes_sem_match_f6:
+            cnpj_p = self._normaliza_cnpj(t_p.extras.get("cnpj", ""))
+            t_dom, dd, dv = _melhor_match_fase6(
+                cnpj_p, _quant(t_p.valor), t_p.data,
+            )
+            if t_dom is not None and _decide_f4(t_p, t_dom, dd, dv, "pend_planilha"):
+                self.pendentes_planilha_dominio[id(t_p)] = {
+                    "dominio": t_dom,
+                    "diff_dias": dd,
+                    "diff_valor": dv,
+                }
+                _consome_dominio_f4(t_dom)
+
+        # Pendentes OFX — Fase 6 (raramente casa; OFX raramente traz CNPJ
+        # exceto quando enriquecido por PDF)
+        for t_o in pendentes_ofx_sem_match_f6:
+            cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
+            t_dom, dd, dv = _melhor_match_fase6(
+                cnpj_o, _quant(t_o.valor), t_o.data,
             )
             if t_dom is not None and _decide_f4(t_o, t_dom, dd, dv, "pend_ofx"):
                 self.pendentes_ofx_dominio[id(t_o)] = {

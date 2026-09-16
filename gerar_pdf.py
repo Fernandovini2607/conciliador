@@ -447,7 +447,7 @@ def construir() -> list:
         "duplicados foram ignorados, pra visibilidade.",
     ]))
 
-    flow.append(Paragraph("Nível 2 — Comparação com Domínio (4 fases)", H2))
+    flow.append(Paragraph("Nível 2 — Comparação com Domínio (5 fases)", H2))
     flow.append(bullets([
         "<i>_filtrar_conciliados_por_dominio</i> processa <b>3 fontes</b> "
         "(pares P×OFX, pendentes planilha, pendentes OFX) em <b>4 fases</b> "
@@ -485,7 +485,14 @@ def construir() -> list:
         "parcela a <b>múltiplos pagamentos</b> — não é consumida ao casar. "
         "Reflete a realidade contábil de uma parcela quitada por vários "
         "lançamentos bancários. Parcelas <i>Aberto</i> continuam exclusivas.",
-        "Prioridade nas 4 fases: pares > pendentes planilha > pendentes OFX.",
+        "<b>Fase 6 — Fornecedor forte + valor ≤5% + data exata (sem "
+        "NF)</b>: última tentativa quando as fases anteriores não casaram. "
+        "Cobre casos onde o 'Nº NF' da planilha/OFX é o <b>Nosso Número "
+        "do banco</b> e o Domínio guardou a <b>Nota Fiscal</b> — números "
+        "sempre diferentes. Exige CNPJ <b>exato</b> ou <b>CNPJ raiz</b> "
+        "(nome não vale), diff de valor ≤ <b>5%</b> da parcela, data "
+        "<b>exata</b>. Aplica a mesma regra dos juros implícitos.",
+        "Prioridade nas 5 fases: pares > pendentes planilha > pendentes OFX.",
     ]))
 
     flow.append(Paragraph("Comparação OFX × Domínio direta (sem planilha)", H2))
