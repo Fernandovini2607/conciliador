@@ -3111,6 +3111,52 @@ class App(tk.Tk):
         return str(v).strip() if v is not None else ""
 
     @staticmethod
+    def _digitos_nf(v) -> str:
+        """Só os dígitos da NF, sem zeros à esquerda.
+
+        Ex.: ``'000388339004'`` → ``'388339004'``
+             ``'364916-9002'``  → ``'3649169002'``
+             ``'  0123  '``     → ``'123'``
+
+        Base de comparação flexível (ver :meth:`_nfs_batem`).
+        """
+        digitos = "".join(c for c in str(v or "") if c.isdigit())
+        return digitos.lstrip("0")
+
+    @classmethod
+    def _nfs_batem(cls, a, b) -> bool:
+        """Compara dois números de NF com tolerância a prefixos/sufixos
+        e zeros à esquerda.
+
+        Casos reais que motivaram essa comparação:
+
+        * Domínio guarda ``'388339'`` mas comprovante veio como
+          ``'000388339004'`` → a Receita registrou só o número da nota,
+          o comprovante trouxe zeros + série no final.
+        * Planilha traz ``'364916-9002'`` mas Domínio tem ``'364916'``
+          → hífen + série/parcela adicional no comprovante.
+
+        Regra (após reduzir aos dígitos e remover zeros à esquerda):
+
+        1. Se qualquer um dos lados fica sem dígito, não bate.
+        2. Se o mais curto tem menos de 5 dígitos, exige igualdade
+           exata (números curtos tipo ``'1'``, ``'123'`` são genéricos
+           demais — casariam com qualquer NF que começa com eles).
+        3. Caso contrário, casa se o mais curto é **prefixo** do mais
+           longo. Prefixo é mais seguro que substring qualquer:
+           evita que ``'339'`` case com ``'12339045'``.
+        """
+        da, db = cls._digitos_nf(a), cls._digitos_nf(b)
+        if not da or not db:
+            return False
+        if da == db:
+            return True
+        curto, longo = (da, db) if len(da) <= len(db) else (db, da)
+        if len(curto) < 5:
+            return False
+        return longo.startswith(curto)
+
+    @staticmethod
     def _normaliza_cnpj(v) -> str:
         """Mantém só dígitos pra comparação robusta (ignora pontuação)."""
         return "".join(c for c in str(v or "") if c.isdigit())
@@ -3337,26 +3383,39 @@ class App(tk.Tk):
             )
 
         # ---------- FASE 1: match exato (data + valor + NF)
+        # Índice por (data, valor) para lookup rápido; a NF é comparada
+        # com tolerância (_nfs_batem) entre os candidatos, então uma NF
+        # "388339" na planilha casa com a mesma no Domínio mesmo quando
+        # o comprovante veio como "000388339004" ou "364916-9002" e o
+        # Domínio guardou o número enxuto ("388339" / "364916").
         indice: dict[tuple, list[Transacao]] = defaultdict(list)
         for t in self.transacoes_dominio:
-            chave = (
-                t.data,
-                _quant(t.valor),
-                self._normaliza_nf(t.extras.get("numero_nf", "")),
-            )
+            chave = (t.data, _quant(t.valor))
             indice[chave].append(t)
 
         usados: set[int] = set()
 
+        def _filtra_por_nf(candidatos: list[Transacao], nf_alvo: str) -> list[Transacao]:
+            """Dos candidatos com mesma data+valor, mantém só os que
+            têm NF batendo (tolerante). Se NF alvo vazia, exige NF
+            vazia dos dois lados — evita match espúrio."""
+            resultado = []
+            for t in candidatos:
+                if id(t) in usados:
+                    continue
+                nf_d = self._normaliza_nf(t.extras.get("numero_nf", ""))
+                if not nf_alvo and not nf_d:
+                    resultado.append(t)
+                elif nf_alvo and nf_d and self._nfs_batem(nf_alvo, nf_d):
+                    resultado.append(t)
+            return resultado
+
         # Pares têm prioridade na FASE 1
         pares_sem_match: list[Par] = []
         for par in self.pares_conciliados:
-            chave = (
-                par.planilha.data,
-                _quant(par.planilha.valor),
-                self._normaliza_nf(par.planilha.extras.get("numero_nf", "")),
-            )
-            candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
+            chave = (par.planilha.data, _quant(par.planilha.valor))
+            nf_p = self._normaliza_nf(par.planilha.extras.get("numero_nf", ""))
+            candidatos = _filtra_por_nf(indice.get(chave, []), nf_p)
             if candidatos:
                 par.dominio = candidatos[0]
                 usados.add(id(par.dominio))
@@ -3381,12 +3440,9 @@ class App(tk.Tk):
         # Pendentes da planilha (Caixa geral) — FASE 1 nos restantes
         pendentes_sem_match: list[Transacao] = []
         for t_p in self.pendentes_planilha_brutos:
-            chave = (
-                t_p.data,
-                _quant(t_p.valor),
-                self._normaliza_nf(t_p.extras.get("numero_nf", "")),
-            )
-            candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
+            chave = (t_p.data, _quant(t_p.valor))
+            nf_p = self._normaliza_nf(t_p.extras.get("numero_nf", ""))
+            candidatos = _filtra_por_nf(indice.get(chave, []), nf_p)
             if candidatos:
                 self.pendentes_planilha_dominio[id(t_p)] = {
                     "dominio": candidatos[0],
@@ -3408,12 +3464,9 @@ class App(tk.Tk):
         # essencialmente (data, valor) com NF vazio dos dois lados.
         pendentes_ofx_sem_match: list[Transacao] = []
         for t_o in self.pendentes_ofx_brutos:
-            chave = (
-                t_o.data,
-                _quant(t_o.valor),
-                self._normaliza_nf(t_o.extras.get("numero_nf", "")),
-            )
-            candidatos = [t for t in indice.get(chave, []) if id(t) not in usados]
+            chave = (t_o.data, _quant(t_o.valor))
+            nf_o = self._normaliza_nf(t_o.extras.get("numero_nf", ""))
+            candidatos = _filtra_por_nf(indice.get(chave, []), nf_o)
             if candidatos:
                 self.pendentes_ofx_dominio[id(t_o)] = {
                     "dominio": candidatos[0],
@@ -3675,8 +3728,8 @@ class App(tk.Tk):
             melhor_v = Decimal("0")
             for t in candidatos:
                 nf_d = self._normaliza_nf(t.extras.get("numero_nf", ""))
-                if not nf_d or nf_p_norm != nf_d:
-                    continue  # NF tem que bater exato e não pode ser vazia
+                if not nf_d or not self._nfs_batem(nf_p_norm, nf_d):
+                    continue  # NF tem que bater (tolerante) e não pode ser vazia
                 cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
                 nome_d = self._normaliza_nome_fornecedor(
                     t.extras.get("fornecedor", "")

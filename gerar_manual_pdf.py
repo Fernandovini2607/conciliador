@@ -427,7 +427,11 @@ def construir():
         "(se casou numa, não passa pra próxima):", TEXTO,
     ))
     flow.append(bullets([
-        "<b>Match exato</b>: data de vencimento + valor + Nº NF iguais.",
+        "<b>Match exato</b>: data de vencimento + valor + Nº NF iguais. "
+        "A NF é comparada com <b>tolerância</b> — <i>388339</i> no "
+        "Domínio casa com <i>000388339004</i> na planilha/comprovante, e "
+        "<i>364916</i> casa com <i>364916-9002</i>. A regra ignora zeros "
+        "à esquerda e casa por prefixo dos dígitos.",
         "<b>2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) iguais. "
         "O terceiro pode divergir — a diferença aparece na coluna Δ Domínio.",
         "<b>Fornecedor + valor</b>: valor exato E (CNPJ ou nome do "

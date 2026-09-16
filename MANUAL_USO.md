@@ -217,7 +217,11 @@ Depois de conciliar planilha × OFX:
 Ele tenta **4 formas de match, uma depois da outra** (se casou numa,
 não passa pra próxima):
 
-1. **Match exato**: data de vencimento + valor + Nº NF iguais.
+1. **Match exato**: data de vencimento + valor + Nº NF iguais. O
+   Nº NF é comparado com **tolerância** — `388339` no Domínio casa
+   com `000388339004` na planilha/comprovante, e `364916` casa com
+   `364916-9002`. A regra ignora zeros à esquerda e casa por prefixo
+   dos dígitos.
 2. **2 de 3**: pelo menos 2 dentre (CNPJ, data, valor) iguais. O
    terceiro pode divergir — a diferença aparece na coluna Δ Domínio.
 3. **Fornecedor + valor**: valor exato E (CNPJ ou nome do fornecedor

@@ -452,7 +452,13 @@ def construir() -> list:
         "<i>_filtrar_conciliados_por_dominio</i> processa <b>3 fontes</b> "
         "(pares P×OFX, pendentes planilha, pendentes OFX) em <b>4 fases</b> "
         "hierárquicas. Cada Transacao do Domínio só casa com 1 item.",
-        "<b>Fase 1 — Exata</b>: data_vencimento + valor + NF iguais.",
+        "<b>Fase 1 — Exata</b>: data_vencimento + valor + NF iguais. "
+        "A NF é comparada com <b>tolerância a prefixos/sufixos e zeros "
+        "à esquerda</b> — <i>'388339'</i> no Domínio casa com "
+        "<i>'000388339004'</i> no comprovante, e <i>'364916'</i> casa com "
+        "<i>'364916-9002'</i>. Regra: comparação por prefixo dos dígitos "
+        "(sem zeros à esquerda), exigindo pelo menos 5 dígitos no lado "
+        "mais curto pra evitar falso positivo com NFs muito genéricas.",
         "<b>Fase 2 — 2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) "
         "iguais. O campo restante pode divergir; a diferença aparece na "
         "coluna Δ Domínio.",
