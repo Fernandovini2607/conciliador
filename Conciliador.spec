@@ -37,6 +37,7 @@ hidden_imports = [
     "pdfminer",
     "pdfminer.high_level",
     "pdfminer.pdfparser",
+    "versao",
 ]
 
 # Arquivos de dados a incluir no build

@@ -4,6 +4,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import config
 import parser_dominio
+import versao
 from dialogos_dominio import DialogoConexao, DialogoFonte, DialogoSelecionarEmpresa
 from dialogos_taxas import (
     DialogoConfigurarTaxas,
@@ -420,7 +421,7 @@ class DialogoMapeamento(tk.Toplevel):
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Conciliador OFX × Planilha")
+        self.title(f"Conciliador OFX × Planilha — {versao.rotulo()}")
         self.geometry("1200x720")
 
         # Mostra a janela principal já visível (com placeholder) — assim
@@ -628,6 +629,14 @@ class App(tk.Tk):
             foreground="#1f3a68",
             font=("TkDefaultFont", 9, "bold"),
         ).pack(side="left")
+        # Versão da build: o operador lê pro suporte saber se a máquina
+        # está na última publicada (ver versao.py).
+        ttk.Label(
+            topo_user,
+            text=versao.rotulo(),
+            foreground="#6b7280",
+            font=("TkDefaultFont", 8),
+        ).pack(side="left", padx=(10, 0))
         ttk.Button(
             topo_user, text="Trocar usuário",
             command=self._trocar_usuario,

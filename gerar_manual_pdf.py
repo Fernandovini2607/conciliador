@@ -157,6 +157,15 @@ def construir():
         "Se o sistema ainda não está instalado na sua máquina, "
         "fale com o administrador antes de continuar."
     ))
+    flow.append(Spacer(1, 0.3 * cm))
+    flow.append(caixa_dica(
+        "<b>Qual versão está aberta?</b> No topo da janela, ao lado do "
+        "seu nome, aparece um número cinza como <b>v2026.09.15</b>. É a "
+        "data da build que está na sua máquina. O suporte usa esse "
+        "número pra confirmar se você está na última versão publicada. "
+        "Veja a seção <i>Atualizar o Conciliador</i> pra saber como "
+        "atualizar."
+    ))
     flow.append(PageBreak())
 
     # ============ Passo 1
@@ -516,7 +525,9 @@ def construir():
         "<b>Aba Pendentes</b> → botão <i>Exportar para Excel</i>: 2 abas "
         "(planilha e OFX pendentes).",
         "<b>Aba Conciliados × Domínio</b> → tudo que já está fechado "
-        "com o Domínio.",
+        "com o Domínio. Inclui a coluna <b>Empresa (código)</b> mostrando "
+        "em qual empresa do grupo cada parcela foi lançada (útil quando "
+        "a matriz paga boletos das filiais). A coluna também sai no Excel.",
         "<b>Aba Lançamentos contábeis</b> → os lançamentos que vão pro "
         "Domínio, com totalização.",
         "<b>Aba Comparação</b> → botão <i>Exportar pendências</i>: só o "
@@ -530,6 +541,42 @@ def construir():
         "Exemplo: lancamentos_55_2026-09-14.xlsx",
         CODIGO,
     ))
+
+    # ============ Atualizar o Conciliador
+    flow.append(PageBreak())
+    flow.append(Paragraph("Atualizar o Conciliador", PASSO))
+    flow.append(Paragraph(
+        "O administrador publica novas versões numa <b>pasta de rede "
+        "compartilhada</b>. Pra atualizar sua máquina:", TEXTO,
+    ))
+    flow.append(bullets([
+        "<b>Feche o Conciliador</b> (se estiver aberto).",
+        "Vá até a pasta onde o Conciliador está instalado (normalmente "
+        "<b>C:\\Conciliador</b>).",
+        "Duplo-clique em <b>Atualizar Conciliador.bat</b>.",
+        "O script baixa a versão nova da pasta de rede, <b>preserva "
+        "sua configuração do Domínio</b> (data\\dominio_config.json) e "
+        "substitui o resto.",
+        "Abre o Conciliador — a versão no topo deve estar atualizada.",
+    ]))
+    flow.append(Paragraph(
+        "<b>Como saber se estou desatualizado?</b>", TEXTO,
+    ))
+    flow.append(bullets([
+        "No topo do app, ao lado do seu nome, tem um número tipo "
+        "<b>v2026.09.15</b>.",
+        "Se um colega abriu junto e o número dele está maior "
+        "(por exemplo v2026.09.20), você precisa rodar o atualizador.",
+    ]))
+    flow.append(Paragraph(
+        "<b>Deu erro no atualizador?</b>", TEXTO,
+    ))
+    flow.append(bullets([
+        "<i>Feche o Conciliador antes</i> → é isso mesmo, feche e "
+        "tente de novo.",
+        "<i>Não conseguiu ler a pasta de rede</i> → sua máquina não "
+        "está enxergando o servidor. Chame o administrador.",
+    ]))
 
     # ============ Fluxo típico
     flow.append(PageBreak())

@@ -3,6 +3,11 @@
 Guia passo a passo para operar o sistema. Não é sobre instalar — é
 sobre **usar** depois de instalado.
 
+> **Qual versão está aberta?** No topo da janela, ao lado do seu nome,
+> aparece um número cinza como `v2026.09.15`. É a data da build que está
+> na sua máquina. O suporte usa esse número pra confirmar se você está
+> na última versão publicada.
+
 ---
 
 ## 🔑 Passo 1 — Entrar no sistema
@@ -296,6 +301,9 @@ Você pode exportar em várias abas pra revisar ou entregar pra alguém:
   abas (planilha e OFX pendentes).
 - **Aba Conciliados × Domínio** → botão *Exportar para Excel*: tudo
   que já está fechado com o Domínio.
+  - A tabela tem uma coluna **Empresa (código)** — mostra em qual
+    empresa do grupo cada parcela foi lançada (útil quando a matriz
+    paga boletos das filiais). A coluna também sai no Excel.
 - **Aba Lançamentos contábeis** → botão *Exportar para Excel*: os
   lançamentos que vão pro Domínio, com totalização.
 - **Aba Comparação** → botão *Exportar pendências*: só o que falta
@@ -357,6 +365,32 @@ já fez conciliação em cima:
 
 **Popup de confirmação** te avisa quantas conciliações e lançamentos
 serão preservados antes de aplicar.
+
+---
+
+## 🔄 Atualizar o Conciliador
+
+O administrador publica novas versões numa **pasta de rede compartilhada**.
+Pra atualizar sua máquina:
+
+1. **Feche o Conciliador** (se estiver aberto).
+2. Vá até a pasta onde o Conciliador está instalado (normalmente
+   `C:\Conciliador`).
+3. Duplo-clique em **`Atualizar Conciliador.bat`**.
+4. O script baixa a versão nova da pasta de rede, **preserva sua
+   configuração do Domínio** (`data\dominio_config.json`) e substitui
+   o resto.
+5. Abre o Conciliador — a versão no topo deve estar atualizada.
+
+**Como saber se estou desatualizado?**
+- No topo do app, ao lado do seu nome, tem um número tipo `v2026.09.15`.
+- Se você abriu junto com um colega e o número dele está maior (por
+  exemplo `v2026.09.20`), você precisa rodar o atualizador.
+
+**Deu erro no atualizador?**
+- "Feche o Conciliador antes" → é isso mesmo, feche e tenta de novo.
+- "Não conseguiu ler `\\10.0.1.47\conciliador\atual`" → sua máquina não
+  está enxergando a pasta de rede. Chame o admin.
 
 ---
 

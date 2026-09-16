@@ -7,8 +7,12 @@ sem Git, sem pip.
 **Estimativa:** 5–10 minutos por máquina.
 
 **Arquivo de distribuição:**
-`Conciliador_2026-09-14.zip` (25 MB) — gerado em
+`Conciliador_2026-09-15.zip` (39 MB) — gerado pelo `publicar.bat` em
 `C:\Users\PC\Projetos\conciliador\dist\`.
+
+> O pacote passou de 25 MB para 39 MB quando entrou a leitura de
+> comprovantes em PDF. **Não cabe mais em anexo de e-mail** — use a pasta
+> de rede, pen drive ou nuvem.
 
 ---
 
@@ -54,12 +58,14 @@ Escolha uma das opções:
 Estrutura extraída:
 ```
 C:\Conciliador\
-├── Conciliador.exe          ← duplo-clique pra abrir
-├── LEIA-ME.txt              ← instruções resumidas
+├── Conciliador.exe              ← duplo-clique pra abrir
+├── Atualizar Conciliador.bat    ← duplo-clique pra atualizar depois
+├── LEIA-ME.txt                  ← instruções resumidas
+├── VERSAO.txt                   ← versão instalada nesta máquina
 ├── data\
-│   ├── db_config.json       ← já vem preenchido (servidor 10.0.1.47)
+│   ├── db_config.json           ← já vem preenchido (servidor 10.0.1.47)
 │   └── dominio_config.json.EXEMPLO
-└── _internal\               ← libs (não mexer)
+└── _internal\                   ← libs (não mexer)
 ```
 
 ### 2.3 Configurar credenciais do Domínio da pessoa
@@ -133,24 +139,69 @@ precisa cadastrá-la no sistema:
 
 ## Como atualizar quando sair uma versão nova
 
-Quando o Vinicius gerar uma versão nova:
+### Na máquina do operador (rotina normal)
 
-1. Ele avisa que tem `Conciliador_YYYY-MM-DD.zip` novo (pasta
-   compartilhada, email, etc.).
-2. Na máquina do operador:
-   - **Fechar o app** se estiver aberto.
-   - Renomear a pasta atual (backup): `C:\Conciliador` → `C:\Conciliador.bak`
-   - Extrair o novo ZIP em `C:\Conciliador`
-   - **Copiar** o arquivo `data\dominio_config.json` do backup pra pasta
-     nova (pra não perder as credenciais do Domínio da pessoa).
-   - Rodar de novo.
-   - Se tudo funcionar, deletar o `.bak`.
+1. **Fechar o Conciliador.**
+2. Duplo-clique em **`Atualizar Conciliador.bat`**, dentro de
+   `C:\Conciliador`.
+3. Esperar o `[OK] Atualizado.` — a mensagem já mostra qual versão ficou
+   instalada.
+4. Abrir o programa normalmente.
 
-Alternativa mais simples (se o admin distribuir só a nova `Conciliador.exe`
-sem tocar em `data/`):
+O atualizador copia a versão publicada na pasta de rede
+(`\10.0.1.47\conciliador\atual`) por cima da instalação local:
 
-- **Substituir apenas o `Conciliador.exe` e a pasta `_internal/`** na
-  pasta existente. Os arquivos em `data/` ficam intocados.
+- **preserva** o `data\dominio_config.json` (credenciais do Domínio da
+  pessoa);
+- **apaga** arquivos que saíram da versão nova — evita DLL velha
+  sobrando, causa clássica de "funcionava ontem";
+- **recusa rodar** com o app aberto, porque o Windows trava o `.exe` em
+  uso e a cópia sairia pela metade.
+
+Se aparecer `[ERRO]`, a atualização não foi concluída: chame o
+administrador em vez de apagar pastas por conta própria.
+
+### Do lado do administrador (publicar a versão)
+
+No projeto, com o código já commitado:
+
+```
+publicar.bat
+```
+
+O script carimba a versão do dia em `versao.py` (é o número que aparece
+na tela do app), roda o PyInstaller, monta o pacote — `data\` no nível do
+`.exe`, `LEIA-ME.txt`, `VERSAO.txt` e o atualizador —, gera
+`dist\Conciliador_AAAA-MM-DD.zip`, espelha tudo em
+`\10.0.1.47\conciliador\atual` e guarda uma cópia do ZIP em
+`\10.0.1.47\conciliador\historico\` para rollback.
+
+Para publicar em outro lugar: `publicar.bat "\servidor\pasta\atual"`.
+Se a pasta de rede não estiver acessível, o ZIP é gerado do mesmo jeito e
+o script avisa.
+
+> O endereço da pasta de rede está fixo em duas linhas: `DESTINO` no
+> `publicar.bat` e `ORIGEM` no `pacote\Atualizar Conciliador.bat`. Se o
+> servidor mudar, edite as duas e publique de novo — as máquinas recebem
+> o atualizador corrigido junto com a versão.
+
+### Sem pasta de rede (fallback manual)
+
+1. **Fechar o app.**
+2. Renomear a pasta atual: `C:\Conciliador` → `C:\Conciliador.bak`
+3. Extrair o ZIP novo em `C:\Conciliador`
+4. **Copiar** o `data\dominio_config.json` do backup pra pasta nova (pra
+   não perder as credenciais do Domínio da pessoa).
+5. Conferir que abre e deletar o `.bak`.
+
+### Qual versão está rodando numa máquina
+
+- No app: número cinza no topo, ao lado do nome do usuário — também no
+  título da janela.
+- Fora do app: `VERSAO.txt`, dentro de `C:\Conciliador`.
+
+Se o número for menor que o publicado na rede, aquela máquina não rodou o
+atualizador.
 
 ---
 
@@ -178,6 +229,12 @@ em vermelho)
 - Testar a DSN no Painel de Controle → ODBC → seleciona "Contabil" →
   **Configurar** → **Testar Conexão**.
 
+**Atualizei, mas a versão na tela continua a mesma**
+→ O `Atualizar Conciliador.bat` foi rodado noutra pasta, ou a pasta de
+rede ainda tem a versão antiga. Confira o `VERSAO.txt` da máquina contra
+o de `\10.0.1.47\conciliador\atual`; se a rede estiver atrasada, o
+administrador precisa rodar o `publicar.bat`.
+
 **Login diz "Usuário ou senha inválidos"**
 → Confirmar com o admin (Vinicius) que o cadastro foi feito e qual é a
 senha inicial. Case-sensitive (Aline ≠ aline).
@@ -200,6 +257,8 @@ Conciliador.exe
 - [ ] Usuário cadastrado no app (via Vinicius no "Gerenciar usuários")
 - [ ] Login testado com sucesso
 - [ ] Senha trocada em "Minha senha"
+- [ ] Máquina enxerga `\10.0.1.47\conciliador\atual` (é de onde vem a
+      atualização; testar rodando o `Atualizar Conciliador.bat` uma vez)
 
 ---
 
@@ -214,5 +273,5 @@ Conciliador.exe
 | Configurar db_config | Manual | ✅ Já vem no ZIP |
 | Configurar dominio_config | Manual | Manual (idem) |
 | DSN "Contabil" | Manual | Manual (idem) |
-| Updates | `git pull` automático | Substituir a pasta manualmente |
+| Updates | `git pull` automático | `Atualizar Conciliador.bat` (1 clique) |
 | Tempo instalação | 15–30 min | 5–10 min |

@@ -126,20 +126,30 @@ def _extrair_transacao_sicoob(bloco: str, arquivo: str, ordem: int) -> Transacao
     data_venc = _para_data(m_venc.group(1)) if m_venc else data_pagto
 
     # Beneficiário — bloco entre "Beneficiário:" e "Pagador:"
-    m_bloco_benef = re.search(
-        r"Benefici[a\u00e1\ufffd]rio:(.*?)Pagador:", bloco, re.DOTALL,
-    )
+    # Prioridade: quando o comprovante traz "Benefici\u00e1rio final:" (boleto
+    # que passou por intermedi\u00e1rio / agente de cobran\u00e7a), esse \u00e9 o
+    # fornecedor real. Quando n\u00e3o traz, cai no bloco "Benefici\u00e1rio:".
     fornecedor = ""
     cnpj = ""
-    if m_bloco_benef:
-        bloco_benef = m_bloco_benef.group(1)
+    m_bloco_final = re.search(
+        r"Benefici[a\u00e1\ufffd]rio final:(.*?)Datas:", bloco, re.DOTALL,
+    )
+    bloco_benef_usado = m_bloco_final.group(1) if m_bloco_final else None
+    if bloco_benef_usado is None:
+        m_bloco_benef = re.search(
+            r"Benefici[a\u00e1\ufffd]rio:(.*?)Pagador:", bloco, re.DOTALL,
+        )
+        if m_bloco_benef:
+            bloco_benef_usado = m_bloco_benef.group(1)
+    if bloco_benef_usado:
         m_nome = re.search(
-            r"Nome/Raz[a\u00e3\ufffd]{1,2}o Social:\s*(.+)", bloco_benef,
+            r"Nome/Raz[a\u00e3\ufffd]{1,2}o [Ss]ocial:\s*(.+)",
+            bloco_benef_usado,
         )
         if m_nome:
             fornecedor = _limpar_nome(m_nome.group(1).split("\n")[0])
         m_cnpj = re.search(
-            r"CPF/CNPJ:\s*([\d./\-]+)", bloco_benef,
+            r"CPF/CNPJ:\s*([\d./\-]+)", bloco_benef_usado,
         )
         if m_cnpj:
             cnpj = _limpar_cnpj(m_cnpj.group(1))

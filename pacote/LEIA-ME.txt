@@ -1,0 +1,49 @@
+CONCILIADOR - Janco Assessoria Contabil
+========================================
+
+Qual versao esta instalada aqui: veja "VERSAO.txt" nesta pasta, ou o
+numero cinza no canto superior esquerdo do programa, ao lado do seu nome.
+
+Como usar:
+
+1. Duplo-clique em "Conciliador.exe" para abrir.
+2. Faca login com o usuario e senha fornecidos pelo administrador.
+3. Na primeira vez, altere a senha em "Minha senha".
+
+Antes de usar pela primeira vez (configuracao unica):
+------------------------------------------------------
+
+A. Verificar conexao com o Dominio Contabil:
+   - Ter o driver ODBC do Dominio (SQL Anywhere 17) instalado.
+   - Ter uma DSN de sistema chamada "Contabil" configurada no
+     Painel de Controle > Fontes de Dados ODBC (64 bits).
+
+B. Configurar credenciais do Dominio (para carregar pagamentos):
+   - Abra a pasta "data" ao lado deste Conciliador.exe
+   - Copie "dominio_config.json.EXEMPLO" renomeando para
+     "dominio_config.json"
+   - Edite substituindo seu usuario e senha do Dominio Contabil.
+
+Como atualizar quando sair versao nova:
+---------------------------------------
+1. Feche o Conciliador.
+2. Duplo-clique em "Atualizar Conciliador.bat" (nesta mesma pasta).
+3. Espere a mensagem [OK] e abra o programa de novo.
+
+O atualizador busca a versao publicada na pasta de rede e PRESERVA suas
+credenciais do Dominio (data\dominio_config.json). Se ele reclamar de
+rede, chame o administrador - nao apague nada por conta propria.
+
+Onde ficam os dados:
+--------------------
+- Regras de taxa, mapeamentos, empresas: no servidor MariaDB
+  (10.0.1.47:3307) - compartilhado com todos os usuarios.
+- Suas escolhas pessoais (empresa selecionada): tambem no servidor,
+  vinculadas ao seu usuario.
+- Credenciais do banco: em "data/db_config.json" (NAO ALTERAR).
+- Credenciais do Dominio: em "data/dominio_config.json".
+
+Problemas?
+----------
+Contate o administrador (Vinicius). Diga qual versao aparece na tela -
+"VERSAO.txt" tem o numero exato.

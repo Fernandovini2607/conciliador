@@ -549,6 +549,25 @@ def construir() -> list:
         "<i>regra_taxa.codi_emp</i>. Isso é intencional — filiais têm "
         "contas bancárias diferentes, então as regras que apontam pra "
         "essas contas ficam por empresa.",
+        "<b>Coluna 'Empresa (código)' na aba Conciliados × Domínio</b>: "
+        "além da aba <i>Domínio dados</i>, a aba <i>Conciliados × "
+        "Domínio</i> ganhou a mesma coluna — mostra em qual empresa do "
+        "grupo cada parcela conciliada está lançada. Vazia quando só a "
+        "matriz foi carregada. Também aparece no Excel exportado.",
+    ]))
+
+    flow.append(Paragraph("Filtro por cor na aba Comparação", H2))
+    flow.append(bullets([
+        "Combobox <b>Filtrar por cor</b> no topo da aba Comparação com "
+        "as 6 cores + <i>Todos</i>: ao selecionar uma cor, o treeview "
+        "esconde as demais.",
+        "Botão <b>Limpar</b> volta o filtro pra <i>Todos</i>.",
+        "Filtro é <b>só visual</b> — os totais no título da aba refletem "
+        "sempre TODOS os lançamentos, independentemente do filtro. "
+        "Exportação, criação de regras e lançamento manual continuam "
+        "operando sobre o conjunto completo.",
+        "Rótulo ao lado mostra <i>Mostrando N de M</i> quando o filtro "
+        "está ativo, pra deixar claro que outras linhas estão ocultas.",
     ]))
 
     # ============================ 6
@@ -724,6 +743,54 @@ def construir() -> list:
         "ficam ao lado do .exe (editáveis) e não enterradas em _internal.",
         TEXTO,
     ))
+
+    flow.append(Paragraph("Versão da build (versao.py)", H2))
+    flow.append(bullets([
+        "<i>versao.py</i> é a fonte única da versão: constante <i>VERSAO</i> "
+        "no formato <i>AAAA.MM.DD</i> + helper <i>rotulo()</i>.",
+        "Exibida em <b>dois lugares</b> na UI: no título da janela "
+        "(<i>Conciliador OFX × Planilha — vAAAA.MM.DD</i>) e como rótulo "
+        "cinza ao lado do nome do usuário logado.",
+        "Objetivo: quando o suporte precisa saber se uma máquina rodou a "
+        "atualização, o operador lê a versão na tela — se estiver menor "
+        "que a publicada na rede, aquela máquina ainda não atualizou.",
+        "Empacotada via <i>hidden_imports</i> no <i>Conciliador.spec</i> "
+        "(o PyInstaller não detecta o import automaticamente).",
+    ]))
+
+    flow.append(Paragraph("Publicação automática (publicar.bat)", H2))
+    flow.append(Paragraph(
+        "<i>publicar.bat</i> automatiza o ciclo de release do administrador:", TEXTO,
+    ))
+    flow.append(bullets([
+        "1) Carimba a data do dia em <i>versao.py</i> (formato "
+        "<i>AAAA.MM.DD</i>) — reescreve a linha <i>VERSAO</i>.",
+        "2) Executa o PyInstaller com <i>Conciliador.spec</i>.",
+        "3) Monta o pacote em <i>dist/Conciliador/</i>: adiciona "
+        "<i>LEIA-ME.txt</i>, <i>VERSAO.txt</i>, <i>Atualizar "
+        "Conciliador.bat</i> e a pasta <i>data/</i> — tudo ao lado do .exe.",
+        "4) Gera <i>dist/Conciliador_AAAA-MM-DD.zip</i>.",
+        "5) Se a pasta de rede estiver acessível, copia o pacote pra "
+        "<i>DESTINO</i> (padrão <i>\\\\10.0.1.47\\conciliador\\atual</i>). "
+        "Aceita override na linha de comando.",
+    ]))
+    flow.append(Paragraph("Atualização automática nas máquinas", H2))
+    flow.append(bullets([
+        "<i>pacote/Atualizar Conciliador.bat</i> é distribuído junto com "
+        "o .exe. Duplo-clique nele copia o conteúdo mais recente da pasta "
+        "de rede (<i>ORIGEM</i>) por cima da instalação local.",
+        "<b>Preserva</b> <i>data/dominio_config.json</i> (credenciais "
+        "individuais do Domínio de cada operador não são sobrescritas).",
+        "<b>Remove</b> arquivos que sumiram da versão nova (evita "
+        "DLL/módulo velho conflitando).",
+        "<b>Exige</b> o Conciliador fechado — mostra mensagem clara se "
+        "estiver aberto.",
+        "Endereço da rede fixo em <b>duas linhas</b>: <i>DESTINO</i> em "
+        "<i>publicar.bat</i> e <i>ORIGEM</i> em "
+        "<i>pacote/Atualizar Conciliador.bat</i>. Ao mudar de servidor, "
+        "editar as duas e publicar de novo — as máquinas recebem o "
+        "atualizador corrigido junto com a versão nova.",
+    ]))
 
     # ============================ 12
     flow.append(Paragraph("12. Diagnóstico ODBC (testar_dominio.py)", H1))
