@@ -449,11 +449,14 @@ def construir():
         "<b>2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) iguais. "
         "O terceiro pode divergir — a diferença aparece na coluna Δ Domínio.",
         "<b>Fornecedor + valor</b>: valor exato E (CNPJ ou nome do "
-        "fornecedor bate). Data pode divergir — útil pra parcelas "
-        "renegociadas / vencimento prorrogado.",
+        "fornecedor ou <b>CNPJ raiz</b> — matriz/filial do mesmo grupo — "
+        "bate). Data pode divergir — útil pra parcelas renegociadas / "
+        "vencimento prorrogado.",
         "<b>NF + fornecedor</b> (valor livre): Nº NF igual (obrigatório e "
-        "não-vazio) E (CNPJ ou nome do fornecedor bate). <b>Valor pode "
-        "divergir</b> — útil pra pagamentos com juros/multa/desconto. "
+        "não-vazio) E (CNPJ ou nome do fornecedor ou <b>CNPJ raiz</b> "
+        "bate). <b>Valor pode divergir</b> — útil pra pagamentos com "
+        "juros/multa/desconto ou boleto emitido pra outra empresa do "
+        "grupo. "
         "<b>Regra dos 10%</b>: se pago > parcela e diff ≤ 10%, casa "
         "auto + juros implícito na coluna Juros; se diff > 10%, vai pra "
         "aba <b>Aprovações</b> pra você revisar.",

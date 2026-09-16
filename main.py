@@ -3832,11 +3832,23 @@ class App(tk.Tk):
                 )
                 bate_cnpj = bool(cnpj_p_norm) and cnpj_p_norm == cnpj_d
                 bate_nome = self._nomes_batem(nome_p_norm, nome_d)
-                if not (bate_cnpj or bate_nome):
+                # Fallback: mesmo grupo empresarial (matriz+filial). Casos
+                # comuns onde o boleto foi emitido pra uma empresa do grupo
+                # mas o Domínio lançou a parcela em outra (ex.: matriz paga
+                # boleto que veio pra filial). CNPJ raiz = 8 primeiros dígitos.
+                raiz_p = parser_dominio._cnpj_raiz(cnpj_p_norm)
+                raiz_d = parser_dominio._cnpj_raiz(cnpj_d)
+                bate_raiz = bool(raiz_p) and raiz_p == raiz_d
+                if not (bate_cnpj or bate_nome or bate_raiz):
                     continue
                 dd = abs((data_p - t.data).days)
-                # Prioridade: CNPJ > nome; menor diff de dias primeiro
-                prioridade = 0 if bate_cnpj else 1
+                # Prioridade: CNPJ exato > CNPJ raiz > nome
+                if bate_cnpj:
+                    prioridade = 0
+                elif bate_raiz:
+                    prioridade = 1
+                else:
+                    prioridade = 2
                 score = (prioridade, dd)
                 if melhor_score is None or score < melhor_score:
                     melhor_score = score
@@ -3961,12 +3973,24 @@ class App(tk.Tk):
                 )
                 bate_cnpj = bool(cnpj_p_norm) and cnpj_p_norm == cnpj_d
                 bate_nome = self._nomes_batem(nome_p_norm, nome_d)
-                if not (bate_cnpj or bate_nome):
+                # Fallback: mesmo grupo empresarial (matriz+filial). Ex.:
+                # boleto emitido pra matriz (CNPJ /0001) mas Domínio lançou
+                # a parcela pra filial (CNPJ /0027). NF+valor ajudam a evitar
+                # falso positivo com outras empresas do mesmo grupo.
+                raiz_p = parser_dominio._cnpj_raiz(cnpj_p_norm)
+                raiz_d = parser_dominio._cnpj_raiz(cnpj_d)
+                bate_raiz = bool(raiz_p) and raiz_p == raiz_d
+                if not (bate_cnpj or bate_nome or bate_raiz):
                     continue
                 dd = abs((data_p - t.data).days)
                 dv = abs(valor_p - _quant(t.valor))
-                # Prioridade: CNPJ > nome; depois menor diff de dias
-                prioridade = 0 if bate_cnpj else 1
+                # Prioridade: CNPJ exato > CNPJ raiz > nome
+                if bate_cnpj:
+                    prioridade = 0
+                elif bate_raiz:
+                    prioridade = 1
+                else:
+                    prioridade = 2
                 score = (prioridade, dd, dv)
                 if melhor_score is None or score < melhor_score:
                     melhor_score = score

@@ -463,12 +463,14 @@ def construir() -> list:
         "iguais. O campo restante pode divergir; a diferença aparece na "
         "coluna Δ Domínio.",
         "<b>Fase 3 — Fornecedor + Valor</b>: valor exato E (CNPJ bate "
-        "OU nome bate por substring normalizada). Data usada apenas como "
-        "desempate — NÃO precisa bater. Útil quando o Domínio tem a "
-        "mesma parcela mas com vencimento renegociado/prorrogado.",
+        "OU nome bate por substring normalizada OU <b>CNPJ raiz bate</b>). "
+        "Data usada apenas como desempate — NÃO precisa bater. Útil "
+        "quando o Domínio tem a mesma parcela mas com vencimento "
+        "renegociado/prorrogado, ou quando o boleto foi emitido pra uma "
+        "empresa do grupo (matriz/filial) mas o Domínio lançou em outra.",
         "<b>Fase 4 — NF + Fornecedor (valor livre)</b>: Nº NF normalizado "
         "igual (obrigatório e não-vazio dos dois lados) E (CNPJ bate OU "
-        "nome bate). Valor <b>NÃO</b> precisa bater — cobre pagamentos com "
+        "nome bate OU <b>CNPJ raiz bate</b>). Valor <b>NÃO</b> precisa bater — cobre pagamentos com "
         "juros/multa/desconto onde o valor divergiu da parcela original "
         "mas a NF é a mesma. Data como desempate. Δ dias e Δ valor ficam "
         "visíveis na coluna Δ Domínio. "

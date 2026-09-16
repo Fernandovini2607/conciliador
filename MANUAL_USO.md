@@ -237,11 +237,13 @@ não passa pra próxima):
 2. **2 de 3**: pelo menos 2 dentre (CNPJ, data, valor) iguais. O
    terceiro pode divergir — a diferença aparece na coluna Δ Domínio.
 3. **Fornecedor + valor**: valor exato E (CNPJ ou nome do fornecedor
-   bate). Data pode divergir — útil pra parcelas renegociadas /
-   vencimento prorrogado.
+   ou **CNPJ raiz** — matriz/filial do mesmo grupo — bate). Data pode
+   divergir — útil pra parcelas renegociadas / vencimento prorrogado.
 4. **NF + fornecedor** (valor livre): Nº NF igual (obrigatório e
-   não-vazio) E (CNPJ ou nome do fornecedor bate). **Valor pode
-   divergir** — útil pra pagamentos com juros/multa/desconto.
+   não-vazio) E (CNPJ ou nome do fornecedor ou **CNPJ raiz** bate).
+   **Valor pode divergir** — útil pra pagamentos com juros/multa/desconto,
+   ou quando o boleto foi emitido pra matriz e a parcela ficou na filial
+   (ou vice-versa).
    - **Se pago > parcela e a diferença é ≤ 10%**: casa
      automaticamente e a diferença vai pra coluna **Juros** (juros
      implícito).
