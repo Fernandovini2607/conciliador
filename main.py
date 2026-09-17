@@ -803,6 +803,49 @@ class App(tk.Tk):
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
+    def _carregando(self, titulo: str, texto_inicial: str = "Aguarde..."):
+        """Context manager: exibe um diálogo modal "Carregando..." com
+        progressbar indeterminada. Uso::
+
+            with self._carregando("Importando planilha...", "Lendo...") as lbl:
+                # trabalho pesado
+                lbl.config(text="Etapa 2 de 3...")
+
+        O ``lbl`` retornado é atualizável pra dar feedback. O diálogo
+        fecha automaticamente ao sair do bloco, mesmo com exceção."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _cm():
+            win = tk.Toplevel(self)
+            win.title(titulo)
+            win.geometry("420x110")
+            win.transient(self)
+            win.resizable(False, False)
+            try:
+                win.grab_set()
+            except tk.TclError:
+                pass  # se master destruído, ignora
+            lbl = ttk.Label(
+                win, text=texto_inicial, font=("TkDefaultFont", 10),
+                wraplength=380,
+            )
+            lbl.pack(padx=20, pady=(20, 8), fill="x")
+            pb = ttk.Progressbar(win, mode="indeterminate", length=380)
+            pb.pack(padx=20, pady=(0, 20))
+            pb.start(12)
+            win.update()
+            try:
+                yield lbl
+            finally:
+                pb.stop()
+                try:
+                    win.destroy()
+                except tk.TclError:
+                    pass
+
+        return _cm()
+
     def _toggle_sidebar(self) -> None:
         """Recolhe/expande a sidebar 'Fontes de dados' pra liberar espaço
         pras abas de dados. Útil depois de importar planilha/OFX/PDF —
@@ -2599,14 +2642,24 @@ class App(tk.Tk):
                 "4. Clicar em 'Carregar pagamentos'",
             )
             return
-        # Refiltra conciliados E pendentes pela regra triple
-        self._filtrar_conciliados_por_dominio()
-        # Regenera lançamentos: pares sem Domínio podem virar lançamento
-        self._gerar_lancamentos_contabeis()
-        self._render_conciliados()
-        self._redesenha_abas()
-        self._recalcular_comparacao()
-        self.notebook.select(self._aba_dominio)
+        with self._carregando(
+            "Comparando com o Domínio...",
+            f"Cruzando {len(self.transacoes_dominio)} parcelas do Domínio "
+            "com o resultado da conciliação...",
+        ) as lbl:
+            # Refiltra conciliados E pendentes pela regra triple
+            self._filtrar_conciliados_por_dominio()
+            lbl.config(text="Regenerando lançamentos contábeis...")
+            lbl.update()
+            self._gerar_lancamentos_contabeis()
+            lbl.config(text="Renderizando abas...")
+            lbl.update()
+            self._render_conciliados()
+            self._redesenha_abas()
+            self._recalcular_comparacao()
+        # Foca na aba Comparação (dentro do sub-notebook "Conciliados")
+        self.notebook.select(self._aba_conc_container)
+        self._notebook_conciliados.select(self._aba_dominio)
 
     def _recalcular_comparacao(self) -> None:
         """Recalcula e re-renderiza a aba Comparação. Diferente de
@@ -2817,7 +2870,11 @@ class App(tk.Tk):
         if not caminho:
             return
         try:
-            estrutura = descobrir_estrutura(caminho)
+            with self._carregando(
+                "Carregando planilha...",
+                f"Lendo {Path(caminho).name}...",
+            ):
+                estrutura = descobrir_estrutura(caminho)
         except Exception as e:
             messagebox.showerror("Erro ao ler planilha", str(e))
             return
@@ -2847,7 +2904,11 @@ class App(tk.Tk):
             mapeamento_final = dlg.mapeamento
 
         try:
-            transacoes = extrair_transacoes(estrutura, mapeamento_final)
+            with self._carregando(
+                "Processando planilha...",
+                "Convertendo linhas em lançamentos...",
+            ):
+                transacoes = extrair_transacoes(estrutura, mapeamento_final)
         except Exception as e:
             messagebox.showerror("Erro ao extrair dados", str(e))
             return
@@ -2897,36 +2958,22 @@ class App(tk.Tk):
         # Import tardio pra não travar o startup se pdfplumber não estiver ok
         import parser_pdf
 
-        # Progresso via label popup — bom pra PDFs grandes (500 pgs)
-        progresso_win = tk.Toplevel(self)
-        progresso_win.title("Processando PDFs...")
-        progresso_win.geometry("500x100")
-        progresso_win.transient(self)
-        progresso_win.resizable(False, False)
-        lbl = ttk.Label(
-            progresso_win, text="Iniciando...",
-            font=("TkDefaultFont", 10),
-        )
-        lbl.pack(padx=20, pady=20, fill="x")
-        progresso_win.update()
-
-        def _on_prog(atual: int, total: int, nome: str) -> None:
-            lbl.config(text=f"[{atual}/{total}] Lendo {nome}...")
-            progresso_win.update()
-
+        # Progresso via helper genérico + callback pra atualizar o label
+        # com o nome do arquivo atual (útil em PDFs grandes / lotes).
         try:
-            transacoes, relatorio = parser_pdf.ler_comprovantes_pdfs(
-                list(caminhos), progresso=_on_prog,
-            )
+            with self._carregando(
+                "Importando comprovantes PDF...", "Iniciando...",
+            ) as lbl:
+                def _on_prog(atual: int, total: int, nome: str) -> None:
+                    lbl.config(text=f"[{atual}/{total}] Lendo {nome}...")
+                    lbl.update()
+
+                transacoes, relatorio = parser_pdf.ler_comprovantes_pdfs(
+                    list(caminhos), progresso=_on_prog,
+                )
         except Exception as e:
-            progresso_win.destroy()
             messagebox.showerror("Erro ao ler PDFs", str(e))
             return
-        finally:
-            try:
-                progresso_win.destroy()
-            except tk.TclError:
-                pass
 
         if not transacoes:
             resumo = "\n".join(
@@ -3098,15 +3145,23 @@ class App(tk.Tk):
         total_ignorados = 0
         erros: list[str] = []
 
-        for caminho in caminhos:
-            try:
-                txs, ignorados = ler_ofx(caminho)
-            except Exception as e:
-                erros.append(f"{Path(caminho).name}: {e}")
-                continue
-            self.transacoes_ofx.extend(txs)
-            self.caminhos_ofx.append(Path(caminho))
-            total_ignorados += ignorados
+        with self._carregando(
+            "Importando OFX...",
+            f"Lendo {len(caminhos)} arquivo(s)...",
+        ) as lbl:
+            for i, caminho in enumerate(caminhos, 1):
+                lbl.config(
+                    text=f"[{i}/{len(caminhos)}] Lendo {Path(caminho).name}...",
+                )
+                lbl.update()
+                try:
+                    txs, ignorados = ler_ofx(caminho)
+                except Exception as e:
+                    erros.append(f"{Path(caminho).name}: {e}")
+                    continue
+                self.transacoes_ofx.extend(txs)
+                self.caminhos_ofx.append(Path(caminho))
+                total_ignorados += ignorados
 
         if erros:
             messagebox.showerror(
@@ -3321,26 +3376,38 @@ class App(tk.Tk):
             if id(t) not in ids_ofx_ja_pareado
         ]
 
-        novos_pares, pend_p, pend_o = conciliar_automatico(
-            planilha_pra_conciliar, ofx_pra_conciliar,
-        )
-        # Adiciona os NOVOS pares aos existentes (preservados)
-        self.pares_conciliados.extend(novos_pares)
-        # Brutos são a fonte da verdade; visível é derivado depois.
-        self.pendentes_planilha_brutos = list(pend_p)
-        self.pendentes_planilha = list(pend_p)
-        self.pendentes_ofx_brutos = list(pend_o)
-        self.pendentes_ofx = list(pend_o)
-        # Enriquece as Transacoes do OFX com CNPJ/nome/nº doc vindos dos
-        # comprovantes PDF (quando a Transacao da planilha foi importada
-        # de PDF). Faz aqui pra que o match com Domínio já use esses dados.
-        self._enriquecer_ofx_com_pdf()
-        # Primeiro classifica taxas (remove de pendentes_ofx visível)
-        self._gerar_lancamentos_contabeis()
-        # Sugestões usam pendentes_ofx visível (sem os classificados)
-        self._recalcula_sugestoes()
-        # Segunda fase: triple-match com Domínio
-        self._filtrar_conciliados_por_dominio()
+        with self._carregando(
+            "Conciliando...",
+            f"Processando {len(planilha_pra_conciliar)} da planilha × "
+            f"{len(ofx_pra_conciliar)} do OFX...",
+        ) as lbl:
+            novos_pares, pend_p, pend_o = conciliar_automatico(
+                planilha_pra_conciliar, ofx_pra_conciliar,
+            )
+            # Adiciona os NOVOS pares aos existentes (preservados)
+            self.pares_conciliados.extend(novos_pares)
+            # Brutos são a fonte da verdade; visível é derivado depois.
+            self.pendentes_planilha_brutos = list(pend_p)
+            self.pendentes_planilha = list(pend_p)
+            self.pendentes_ofx_brutos = list(pend_o)
+            self.pendentes_ofx = list(pend_o)
+            # Enriquece as Transacoes do OFX com CNPJ/nome/nº doc vindos
+            # dos comprovantes PDF (quando a planilha foi importada de PDF).
+            lbl.config(text="Enriquecendo OFX com dados dos PDFs...")
+            lbl.update()
+            self._enriquecer_ofx_com_pdf()
+            # Primeiro classifica taxas (remove de pendentes_ofx visível)
+            lbl.config(text="Gerando lançamentos contábeis automáticos...")
+            lbl.update()
+            self._gerar_lancamentos_contabeis()
+            # Sugestões usam pendentes_ofx visível (sem os classificados)
+            lbl.config(text="Calculando sugestões...")
+            lbl.update()
+            self._recalcula_sugestoes()
+            # Segunda fase: triple-match com Domínio
+            lbl.config(text="Cruzando com o Domínio...")
+            lbl.update()
+            self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
         self._atualiza_botao_comparar()

@@ -55,6 +55,12 @@ dados"), na ordem do fluxo diário: Selecionar empresa → Abrir planilha
 > some e você ganha ~200px de largura pras abas de dados. Pra abrir
 > de novo, clique no botão **▶** que fica na borda esquerda.
 
+> **Caixinha "Carregando…"**: sempre que você abrir uma planilha,
+> importar comprovantes PDF, importar OFX, clicar em **Conciliar** ou
+> **Comparar com Domínio**, aparece um popup com barra de progresso
+> pra você saber que o sistema está trabalhando. Ele fecha sozinho
+> quando termina.
+
 ### 3.1 Planilha de contas a pagar (opcional)
 - Clique em **Abrir planilha (.xlsx)** (sidebar esquerda) e escolha o
   arquivo.

@@ -223,6 +223,14 @@ def construir():
         "Ela some e você ganha ~200px de largura pras abas de dados. Pra "
         "abrir de novo, clique no botão <b>▶</b> que fica na borda esquerda."
     ))
+    flow.append(Spacer(1, 4))
+    flow.append(caixa_dica(
+        "<b>Caixinha \"Carregando…\"</b>: sempre que você abrir uma "
+        "planilha, importar comprovantes PDF, importar OFX, clicar em "
+        "<b>Conciliar</b> ou <b>Comparar com Domínio</b>, aparece um "
+        "popup com barra de progresso pra você saber que o sistema está "
+        "trabalhando. Ele fecha sozinho quando termina."
+    ))
 
     flow.append(Paragraph("3.1 Planilha de contas a pagar (opcional)", H3))
     flow.append(bullets([
