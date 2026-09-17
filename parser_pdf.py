@@ -5,7 +5,7 @@ gerados pelo internet banking. Suporta PDFs com múltiplos comprovantes
 por arquivo — cada comprovante vira uma Transacao no fluxo do app.
 
 Bancos suportados hoje:
-- Sicoob (SISBR / SISTEMA DE INFORMÁTICA DO SICOOB)
+- Sicoob (SISBR / SISTEMA DE INFORMÁTICA DO SICOOB) — boletos e PIX
 - Bradesco (Bradesco NET EMPRESA)
 
 Para adicionar um banco novo:
@@ -83,24 +83,47 @@ def _detectar_sicoob(texto: str) -> bool:
 
 
 def _parsear_sicoob(texto: str, arquivo: str) -> list[Transacao]:
-    """Sicoob: cada comprovante começa em 'COMPROVANTE DE ... PAGAMENTO DE BOLETO'
-    e termina em 'Autenticação:'. Split por marcador de início."""
-    marcador_inicio = "PAGAMENTO DE BOLETO"
-    blocos: list[str] = []
+    """Sicoob: aceita dois tipos de comprovante no mesmo PDF.
 
-    partes = texto.split(marcador_inicio)
-    # partes[0] é lixo antes do 1º comprovante; partes[1:] são conteúdos
-    for parte in partes[1:]:
-        # Cada bloco vai até "Autenticação:" (inclusive) ou até o próximo "COMPROVANTE DE"
-        m = re.search(r"Autentica[c\u00e7\ufffd]{1,3}o:\s*[\w-]+", parte)
-        if m:
-            blocos.append(parte[:m.end()])
-        else:
-            blocos.append(parte)
+    - BOLETO: cada comprovante começa em 'PAGAMENTO DE BOLETO' e termina
+      em 'Autenticação:'. Traz Documento, Beneficiário, número da NF.
+    - PIX: cada comprovante começa em 'PAGAMENTO PIX' e vai até
+      'OUVIDORIA SICOOB'. Traz Destinatário e ID Transação (sem NF).
+
+    Detecta ambos varrendo o texto na ordem que aparece — assim um PDF
+    com boletos + PIX misturados é importado numa só passada.
+    """
+    marcador_boleto = "PAGAMENTO DE BOLETO"
+    marcador_pix = "PAGAMENTO PIX"
+
+    # Coleta posições de cada tipo no texto (pode intercalar).
+    ocorrencias: list[tuple[int, str]] = []  # (pos, tipo)
+    for m in re.finditer(re.escape(marcador_boleto), texto):
+        ocorrencias.append((m.end(), "boleto"))
+    for m in re.finditer(re.escape(marcador_pix), texto):
+        ocorrencias.append((m.end(), "pix"))
+    ocorrencias.sort()
 
     transacoes: list[Transacao] = []
-    for i, bloco in enumerate(blocos, 1):
-        t = _extrair_transacao_sicoob(bloco, arquivo, ordem=i)
+    for ordem, (pos, tipo) in enumerate(ocorrencias, 1):
+        # Bloco vai até a próxima ocorrência (do que for) ou fim do texto.
+        prox = min(
+            (p for p, _ in ocorrencias if p > pos), default=len(texto),
+        )
+        bloco = texto[pos:prox]
+
+        if tipo == "boleto":
+            # Trunca no "Autenticação:" (final do bloco boleto)
+            m_fim = re.search(r"Autentica[c\u00e7\ufffd]{1,3}o:\s*[\w-]+", bloco)
+            if m_fim:
+                bloco = bloco[:m_fim.end()]
+            t = _extrair_transacao_sicoob(bloco, arquivo, ordem=ordem)
+        else:  # pix
+            # Trunca no rodapé "OUVIDORIA SICOOB"
+            m_fim = re.search(r"OUVIDORIA SICOOB", bloco)
+            if m_fim:
+                bloco = bloco[:m_fim.start()]
+            t = _extrair_transacao_sicoob_pix(bloco, arquivo, ordem=ordem)
         if t is not None:
             transacoes.append(t)
     return transacoes
@@ -202,6 +225,110 @@ def _extrair_transacao_sicoob(bloco: str, arquivo: str, ordem: int) -> Transacao
         extras=extras,
         data_pagamento=data_pagto,
     )
+
+
+def _extrair_transacao_sicoob_pix(
+    bloco: str, arquivo: str, ordem: int,
+) -> Transacao | None:
+    """Extrai UMA transação PIX Sicoob de um bloco de texto delimitado.
+
+    Formato típico:
+        Tipo Pagamento: Pix copia e cola / Pix via chave / Pix via manual
+        Pagador:
+          Instituição / Nome / CPF/CNPJ
+        Destinatário:
+          Nome: <fornecedor>            ← pode ter várias linhas
+          CPF/CNPJ: **.687.766/0001-**  ← geralmente mascarado
+          Instituição/Banco: <banco>    ← pode ter várias linhas
+        Dados do pagamento:
+          Data do pagamento: DD/MM/YYYY HH:MM:SS
+          Valor: R$ X.XXX,XX
+          Identificador: <opcional>
+          ID Transação: <id>
+          Situação do pagamento: Finalizado com sucesso
+
+    Diferente do boleto:
+    - Não tem número da NF/documento → numero_nf fica vazio
+    - Não tem valor de parcela separado (Documento vs Pago); PIX debita
+      exatamente o valor negociado → valor = valor_pago, sem juros/desc.
+    - CNPJ vem mascarado (**.687.766/0001-**) — preservado como está.
+    """
+    # Valor (único no PIX)
+    m_valor = re.search(r"\bValor:\s*R\$\s*([\d.,]+)", bloco)
+    valor = _para_valor(m_valor.group(1)) if m_valor else None
+    if valor is None:
+        return None
+
+    # Data do pagamento — pega só DD/MM/YYYY (ignora HH:MM:SS)
+    m_data = re.search(
+        r"Data do pagamento:\s*(\d{2}/\d{2}/\d{4})", bloco,
+    )
+    data_pagto = _para_data(m_data.group(1)) if m_data else None
+    if data_pagto is None:
+        return None
+
+    # Destinatário — bloco entre "Destinatário:" e "Dados do pagamento:"
+    fornecedor = ""
+    cnpj = ""
+    m_dest = re.search(
+        r"Destinat[a\u00e1\ufffd]rio:(.*?)Dados do pagamento:",
+        bloco, re.DOTALL,
+    )
+    if m_dest:
+        bloco_dest = m_dest.group(1)
+        # Nome: pode ter várias linhas até "CPF/CNPJ:". Junta em uma só.
+        m_nome = re.search(
+            r"Nome:\s*(.*?)\s*CPF/CNPJ:", bloco_dest, re.DOTALL,
+        )
+        if m_nome:
+            fornecedor = _limpar_nome(m_nome.group(1))
+        # CPF/CNPJ pode estar mascarado (**.687.766/0001-**)
+        m_cnpj = re.search(
+            r"CPF/CNPJ:\s*([\*\d./\-]+)", bloco_dest,
+        )
+        if m_cnpj:
+            cnpj = _limpar_cnpj_pix(m_cnpj.group(1))
+
+    # Tipo do PIX (só pra histórico)
+    m_tipo = re.search(r"Tipo Pagamento:\s*(Pix [^\n]+)", bloco)
+    tipo_pix = _limpar_nome(m_tipo.group(1)) if m_tipo else "Pix"
+
+    # ID da transação (sem NF, esse ID é a única "identidade")
+    m_id = re.search(r"ID Transa[c\u00e7\ufffd]{1,3}[a\u00e3\ufffd]o:\s*(\S+)", bloco)
+    id_tx = m_id.group(1).strip() if m_id else ""
+
+    hist = (
+        f"{tipo_pix} — {fornecedor}"
+        if fornecedor else f"{tipo_pix} {id_tx}".strip()
+    )
+
+    extras = {
+        "fornecedor": fornecedor,
+        "cnpj": cnpj,
+        "numero_nf": "",  # PIX não tem NF
+        "historico": hist,
+        "arquivo": arquivo,
+        "banco_pdf": "Sicoob PIX",
+        "valor_pago": valor,
+        "id_transacao_pix": id_tx,
+        "tipo_pix": tipo_pix,
+    }
+
+    return Transacao(
+        data=data_pagto,  # PIX não tem "vencimento" — usa a data do pagamento
+        valor=valor,
+        descricao="",
+        origem="pdf",
+        linha=ordem,
+        extras=extras,
+        data_pagamento=data_pagto,
+    )
+
+
+def _limpar_cnpj_pix(txt: str) -> str:
+    """Limpa CNPJ de PIX, preservando os asteriscos de mascaramento.
+    Ex.: '**.687.766/0001-**' → '**.687.766/0001-**' (mantém asteriscos)."""
+    return re.sub(r"[^\d.*/\-]", "", txt or "").strip()
 
 
 # -------------------------------------------------------- Bradesco
