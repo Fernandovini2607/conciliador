@@ -1,4 +1,5 @@
 import tkinter as tk
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -57,6 +58,128 @@ CAMPOS_OPCIONAIS = {
     "data_pagamento", "data_emissao",
     "numero_nf", "cnpj", "fornecedor", "historico", "tipo",
 }
+
+
+class DialogoPeriodo(tk.Toplevel):
+    """Diálogo simples que pede um intervalo de datas antes de importar
+    um arquivo (planilha, PDF, OFX). Formato DD/MM/YYYY.
+
+    Retorna em ``self.periodo`` uma tupla ``(data_ini, data_fim)`` de
+    ``datetime.date`` (ou None se cancelado). Deixar os dois campos
+    vazios equivale a "importar tudo" e devolve ``(None, None)`` —
+    o chamador não filtra."""
+
+    def __init__(self, master: tk.Misc, titulo: str, descricao: str) -> None:
+        super().__init__(master)
+        self.title(titulo)
+        self.transient(master)
+        self.grab_set()
+        self.geometry("440x230")
+        self.resizable(False, False)
+
+        self.periodo: tuple[date | None, date | None] | None = None
+
+        # Cabeçalho
+        ttk.Label(
+            self, text=titulo,
+            font=("TkDefaultFont", 10, "bold"), foreground="#1f3a68",
+        ).pack(padx=16, pady=(14, 4), anchor="w")
+        ttk.Label(
+            self, text=descricao,
+            wraplength=400, foreground="#555", justify="left",
+        ).pack(padx=16, pady=(0, 10), anchor="w")
+
+        # Campos de data
+        campos = ttk.Frame(self)
+        campos.pack(padx=16, pady=(2, 8), anchor="w")
+
+        # Sugere primeiro dia do mês corrente e hoje como default
+        hoje = date.today()
+        primeiro = hoje.replace(day=1)
+        self.var_ini = tk.StringVar(value=primeiro.strftime("%d/%m/%Y"))
+        self.var_fim = tk.StringVar(value=hoje.strftime("%d/%m/%Y"))
+
+        ttk.Label(campos, text="De:", width=6, anchor="w").grid(
+            row=0, column=0, sticky="w", pady=3,
+        )
+        self.ent_ini = ttk.Entry(campos, textvariable=self.var_ini, width=14)
+        self.ent_ini.grid(row=0, column=1, padx=(0, 12), pady=3)
+        ttk.Label(campos, text="Até:", width=6, anchor="w").grid(
+            row=0, column=2, sticky="w", pady=3,
+        )
+        self.ent_fim = ttk.Entry(campos, textvariable=self.var_fim, width=14)
+        self.ent_fim.grid(row=0, column=3, pady=3)
+
+        ttk.Label(
+            self, text="Formato: DD/MM/AAAA. Deixe em branco pra importar tudo.",
+            font=("TkDefaultFont", 8), foreground="#888",
+        ).pack(padx=16, pady=(0, 8), anchor="w")
+
+        # Botões
+        rodape = ttk.Frame(self)
+        rodape.pack(side="bottom", fill="x", padx=16, pady=(6, 12))
+        ttk.Button(rodape, text="Cancelar", command=self._cancelar).pack(
+            side="right", padx=(6, 0),
+        )
+        ttk.Button(
+            rodape, text="Importar tudo (sem filtro)",
+            command=self._sem_filtro,
+        ).pack(side="right", padx=(6, 0))
+        ttk.Button(
+            rodape, text="Confirmar", command=self._confirmar,
+        ).pack(side="right")
+
+        self.ent_ini.focus_set()
+        self.bind("<Return>", lambda _e: self._confirmar())
+        self.bind("<Escape>", lambda _e: self._cancelar())
+
+    def _parse(self, txt: str) -> date | None:
+        txt = (txt or "").strip()
+        if not txt:
+            return None
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(txt, fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    def _confirmar(self) -> None:
+        ini_txt = self.var_ini.get().strip()
+        fim_txt = self.var_fim.get().strip()
+        # Ambos vazios = importar tudo
+        if not ini_txt and not fim_txt:
+            self.periodo = (None, None)
+            self.destroy()
+            return
+        # Se preencheu algum, ambos precisam ser válidos
+        ini = self._parse(ini_txt)
+        fim = self._parse(fim_txt)
+        if ini is None or fim is None:
+            messagebox.showerror(
+                "Datas inválidas",
+                "Preencha as duas datas no formato DD/MM/AAAA.\n"
+                "Ou deixe os dois em branco pra importar tudo.",
+                parent=self,
+            )
+            return
+        if ini > fim:
+            messagebox.showerror(
+                "Datas inválidas",
+                "A data inicial não pode ser depois da data final.",
+                parent=self,
+            )
+            return
+        self.periodo = (ini, fim)
+        self.destroy()
+
+    def _sem_filtro(self) -> None:
+        self.periodo = (None, None)
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.periodo = None
+        self.destroy()
 
 
 class DialogoFiltroColuna(tk.Toplevel):
@@ -860,6 +983,41 @@ class App(tk.Tk):
         self._monta_aba_lancamentos()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
+
+    def _pedir_periodo(
+        self, titulo: str, descricao: str,
+    ) -> tuple[date | None, date | None] | None:
+        """Abre DialogoPeriodo e devolve (ini, fim) ou (None, None) se
+        o operador escolheu 'importar tudo'. Devolve ``None`` se cancelou
+        — nesse caso o handler chamador não deve importar."""
+        dlg = DialogoPeriodo(self, titulo, descricao)
+        self.wait_window(dlg)
+        return dlg.periodo
+
+    @staticmethod
+    def _dentro_periodo(
+        tx, ini: date | None, fim: date | None, usar_pagamento: bool,
+    ) -> bool:
+        """True se a Transacao está no período [ini, fim].
+
+        - Comprovantes/planilha: filtro por data de pagamento (com
+          fallback pra data quando não houver pagamento).
+        - OFX: filtro pela data da movimentação (t.data).
+        Sem ini nem fim: sempre True (importa tudo)."""
+        if ini is None and fim is None:
+            return True
+        d = None
+        if usar_pagamento:
+            d = getattr(tx, "data_pagamento", None) or tx.data
+        else:
+            d = tx.data
+        if d is None:
+            return False
+        if ini is not None and d < ini:
+            return False
+        if fim is not None and d > fim:
+            return False
+        return True
 
     def _carregando(self, titulo: str, texto_inicial: str = "Aguarde..."):
         """Context manager: exibe um diálogo modal "Carregando..." com
@@ -3237,6 +3395,15 @@ class App(tk.Tk):
     # ------------------------------------------------------ Carregar dados
 
     def _abrir_planilha(self) -> None:
+        # Pergunta o periodo antes de escolher o arquivo — filtra por
+        # data de pagamento.
+        periodo = self._pedir_periodo(
+            "Período da planilha",
+            "Só serão importadas linhas cuja data de pagamento cair "
+            "dentro desse intervalo. Deixe em branco pra importar tudo.",
+        )
+        if periodo is None:
+            return
         caminho = filedialog.askopenfilename(
             title="Selecione a planilha",
             filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
@@ -3252,6 +3419,8 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Erro ao ler planilha", str(e))
             return
+        # Guarda o periodo pra filtrar depois do extrair_transacoes
+        self._periodo_planilha = periodo
         if not estrutura.cabecalho:
             messagebox.showerror("Planilha vazia", "A planilha não contém dados.")
             return
@@ -3286,6 +3455,22 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Erro ao extrair dados", str(e))
             return
+
+        # Aplica filtro por data de pagamento (se o operador definiu período)
+        ini, fim = getattr(self, "_periodo_planilha", (None, None))
+        if ini is not None or fim is not None:
+            n_antes = len(transacoes)
+            transacoes = [
+                t for t in transacoes
+                if self._dentro_periodo(t, ini, fim, usar_pagamento=True)
+            ]
+            n_filtrados = n_antes - len(transacoes)
+            if n_filtrados:
+                messagebox.showinfo(
+                    "Filtro de período aplicado",
+                    f"{len(transacoes)} lançamento(s) dentro do período\n"
+                    f"{n_filtrados} lançamento(s) fora do período (ignorados)",
+                )
 
         if not transacoes:
             messagebox.showwarning(
@@ -3332,6 +3517,17 @@ class App(tk.Tk):
 
         ``modo`` só muda o título do diálogo de seleção — o parser é o
         mesmo pra boletos e PIX (detecta o tipo por marcador do texto)."""
+        # Pergunta o periodo antes de escolher os arquivos — filtra
+        # pela data de pagamento do comprovante.
+        rotulo = "PIX" if modo == "pix" else "PDF"
+        periodo = self._pedir_periodo(
+            f"Período dos comprovantes {rotulo}",
+            "Só serão importados comprovantes cuja data de pagamento "
+            "cair dentro desse intervalo. Deixe em branco pra importar "
+            "todos os comprovantes dos PDFs.",
+        )
+        if periodo is None:
+            return
         caminhos = filedialog.askopenfilenames(
             title=(
                 "Selecione um ou mais PDFs de comprovantes PIX"
@@ -3379,6 +3575,24 @@ class App(tk.Tk):
                 f"Relatório:\n{resumo}",
             )
             return
+
+        # Filtro de período — data de pagamento (comprovantes)
+        ini, fim = periodo
+        if ini is not None or fim is not None:
+            n_antes = len(transacoes)
+            transacoes = [
+                t for t in transacoes
+                if self._dentro_periodo(t, ini, fim, usar_pagamento=True)
+            ]
+            n_fora = n_antes - len(transacoes)
+            if not transacoes:
+                messagebox.showwarning(
+                    "Nenhum comprovante no período",
+                    f"Todos os {n_antes} comprovantes estão fora do "
+                    f"período {ini.strftime('%d/%m/%Y')} a "
+                    f"{fim.strftime('%d/%m/%Y')}.",
+                )
+                return
 
         # DEDUPLICAÇÃO: se já há transações na planilha (xlsx ou PDFs
         # anteriores), evita adicionar o mesmo lançamento duas vezes.
@@ -3526,6 +3740,16 @@ class App(tk.Tk):
         )
 
     def _abrir_ofx(self) -> None:
+        # Pergunta o período antes — filtra pela data da movimentação
+        # bancária (t.data). OFX é onde o dinheiro efetivamente saiu.
+        periodo = self._pedir_periodo(
+            "Período do extrato OFX",
+            "Só serão importadas movimentações cuja data (do lançamento "
+            "no banco) cair dentro desse intervalo. Deixe em branco pra "
+            "importar tudo do arquivo.",
+        )
+        if periodo is None:
+            return
         caminhos = filedialog.askopenfilenames(
             title="Selecione um ou mais OFX (Ctrl+clique pra vários)",
             filetypes=[("OFX", "*.ofx"), ("Todos", "*.*")],
@@ -3552,6 +3776,15 @@ class App(tk.Tk):
                 except Exception as e:
                     erros.append(f"{Path(caminho).name}: {e}")
                     continue
+                # Filtro por data de movimentação
+                ini, fim = periodo
+                if ini is not None or fim is not None:
+                    txs = [
+                        t for t in txs
+                        if self._dentro_periodo(
+                            t, ini, fim, usar_pagamento=False,
+                        )
+                    ]
                 self.transacoes_ofx.extend(txs)
                 self.caminhos_ofx.append(Path(caminho))
                 total_ignorados += ignorados
