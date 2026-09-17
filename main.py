@@ -109,7 +109,9 @@ class DialogoFiltroColuna(tk.Toplevel):
         lista_frame.pack(fill="both", expand=True, padx=8, pady=4)
         canvas = tk.Canvas(lista_frame, highlightthickness=0)
         sb = ttk.Scrollbar(lista_frame, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=sb.set)
+        sb_x = ttk.Scrollbar(lista_frame, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
         canvas.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.inner = ttk.Frame(canvas)
@@ -1174,7 +1176,9 @@ class App(tk.Tk):
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_planilha = tree
@@ -1339,7 +1343,9 @@ class App(tk.Tk):
             tree.heading(c, text=self._label_coluna_filtro(t, False))
             tree.column(c, width=w, anchor=a)
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_ofx = tree
@@ -1450,7 +1456,9 @@ class App(tk.Tk):
         tree.tag_configure("parcial", background="#cfe2ff")   # azul claro
         tree.tag_configure("paga", background="#e9ecef")      # cinza (já liquidada)
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_dominio_dados = tree
@@ -1551,7 +1559,12 @@ class App(tk.Tk):
         tree.tag_configure("manual", background="#cfe2ff")
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+
+        sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
+
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
@@ -1628,7 +1641,9 @@ class App(tk.Tk):
             self.tree_pend_p.heading(c, text=t)
             self.tree_pend_p.column(c, width=w, anchor=a)
         sb_p = ttk.Scrollbar(tabela_p, orient="vertical", command=self.tree_pend_p.yview)
-        self.tree_pend_p.configure(yscrollcommand=sb_p.set)
+        sb_p_x = ttk.Scrollbar(tabela_p, orient="horizontal", command=self.tree_pend_p.xview)
+        self.tree_pend_p.configure(yscrollcommand=sb_p.set, xscrollcommand=sb_p_x.set)
+        sb_p_x.pack(side="bottom", fill="x")
         self.tree_pend_p.pack(side="left", fill="both", expand=True)
         sb_p.pack(side="right", fill="y")
 
@@ -1671,7 +1686,9 @@ class App(tk.Tk):
         # Tag pra destacar linhas com dados enriquecidos por PDF
         self.tree_pend_o.tag_configure("enriquecido_pdf", background="#e7f3ff")
         sb_o = ttk.Scrollbar(tabela_o, orient="vertical", command=self.tree_pend_o.yview)
-        self.tree_pend_o.configure(yscrollcommand=sb_o.set)
+        sb_o_x = ttk.Scrollbar(tabela_o, orient="horizontal", command=self.tree_pend_o.xview)
+        self.tree_pend_o.configure(yscrollcommand=sb_o.set, xscrollcommand=sb_o_x.set)
+        sb_o_x.pack(side="bottom", fill="x")
         self.tree_pend_o.pack(side="left", fill="both", expand=True)
         sb_o.pack(side="right", fill="y")
 
@@ -1708,7 +1725,12 @@ class App(tk.Tk):
         tree.tag_configure("destaque", background="#fff3cd")
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+
+        sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
+
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
@@ -1804,7 +1826,12 @@ class App(tk.Tk):
         ).pack(side="left", padx=2)
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+
+        sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
+
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+
+        sb_x.pack(side="bottom", fill="x")
         sb.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         self.tree_conciliados_dominio = tree
@@ -1926,7 +1953,12 @@ class App(tk.Tk):
         tree.tag_configure("ofx_falta", background="#ffe5cc")         # laranja claro
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+
+        sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
+
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
@@ -2230,7 +2262,12 @@ class App(tk.Tk):
         tree.column("empresa", width=180, anchor="w")
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+
+        sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
+
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+
+        sb_x.pack(side="bottom", fill="x")
 
         # iid → índice em self.aprovacoes_pendentes
         self._itens_aprovacoes: dict[str, int] = {}
@@ -2411,7 +2448,9 @@ class App(tk.Tk):
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
         sb = ttk.Scrollbar(corpo_lanc, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+        sb_x = ttk.Scrollbar(corpo_lanc, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_lancamentos = tree
@@ -2459,7 +2498,9 @@ class App(tk.Tk):
         tree.column("descricao", width=500, anchor="w")
         tree.column("tipo", width=60, anchor="center")
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
+        sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree_plano_contas = tree
