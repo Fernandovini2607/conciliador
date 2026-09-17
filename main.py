@@ -900,6 +900,124 @@ class App(tk.Tk):
 
         return _cm()
 
+    def _abrir_legenda_comparacao(self) -> None:
+        """Dialog explicando o que cada cor da aba Comparação significa
+        e o que o operador deve fazer em cada situação. Substitui o
+        painel de legenda que ficava no topo da aba."""
+        win = tk.Toplevel(self)
+        win.title("Legenda de cores — aba Comparação")
+        win.geometry("720x540")
+        win.transient(self)
+        win.resizable(False, True)
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+
+        # Cabeçalho explicando o contexto
+        ttk.Label(
+            win, text="Como interpretar as cores da aba Comparação",
+            font=("TkDefaultFont", 11, "bold"), foreground="#1f3a68",
+        ).pack(padx=16, pady=(14, 4), anchor="w")
+        ttk.Label(
+            win, text=(
+                "A aba Comparação junta 3 fontes de pagamentos e mostra "
+                "quais bateram com o Domínio e quais faltam. Cada linha "
+                "recebe uma cor conforme a origem e o status:"
+            ),
+            wraplength=680, foreground="#333", justify="left",
+        ).pack(padx=16, pady=(0, 12), anchor="w")
+
+        # Cada entrada: (cor, rótulo, o que é, o que fazer)
+        cores = [
+            (
+                "#d4edda", "🟢 Verde — OK",
+                "Pagamento conciliado no banco (par Planilha × OFX) E "
+                "encontrado no Domínio.",
+                "Nada. O lançamento está fechado — planilha, extrato e "
+                "sistema contábil concordam.",
+            ),
+            (
+                "#fff3cd", "🟡 Amarelo — Falta no Domínio",
+                "Pagamento conciliado no banco (par Planilha × OFX), mas "
+                "NÃO existe parcela correspondente no Domínio.",
+                "Ver se a parcela não foi lançada no Domínio (esquecida "
+                "ou fornecedor diferente). Se for pagamento válido, criar "
+                "regra ou lançamento manual pra virar Lançamento contábil.",
+            ),
+            (
+                "#cce5ff", "🔵 Azul — Caixa geral no Domínio",
+                "Pagamento que existia SÓ na planilha (sem OFX "
+                "correspondente — típico de dinheiro em caixa) E foi "
+                "encontrado no Domínio.",
+                "Nada. O caixa geral já foi lançado no sistema.",
+            ),
+            (
+                "#e2e3e5", "⚪ Cinza — Caixa geral falta no Domínio",
+                "Pagamento que existia SÓ na planilha, sem parcela "
+                "correspondente no Domínio.",
+                "Confirmar se é pagamento em caixa que ainda precisa "
+                "ser lançado. Criar regra ou lançamento manual.",
+            ),
+            (
+                "#d1ecf1", "🩵 Ciano — OFX (sem planilha) no Domínio",
+                "Pagamento que veio SÓ do extrato bancário (sem planilha "
+                "correspondente) E foi encontrado no Domínio — geralmente "
+                "após enriquecimento por comprovante PDF.",
+                "Nada. Extrato e Domínio já concordam.",
+            ),
+            (
+                "#ffe5cc", "🟠 Laranja — OFX (sem planilha) falta no Domínio",
+                "Pagamento que veio do extrato bancário mas NÃO tem "
+                "contrapartida no Domínio nem na planilha.",
+                "Investigar o pagamento (talvez taxa bancária, "
+                "movimentação atípica ou fornecedor não cadastrado). "
+                "Criar regra por memo ou lançamento manual.",
+            ),
+        ]
+
+        # Container com scroll caso o dialog seja pequeno demais
+        canvas = tk.Canvas(win, borderwidth=0, highlightthickness=0)
+        canvas.pack(side="left", fill="both", expand=True, padx=(16, 0), pady=(0, 8))
+        sb = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        sb.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
+        canvas.configure(yscrollcommand=sb.set)
+        interior = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=interior, anchor="nw")
+        interior.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+
+        for cor, rotulo, o_que_e, o_que_fazer in cores:
+            bloco = ttk.Frame(interior)
+            bloco.pack(fill="x", pady=6, padx=(0, 16))
+            # Chip colorido + rótulo (tk.Label aceita background)
+            chip = tk.Label(
+                bloco, text=f"  {rotulo}  ",
+                background=cor, foreground="#111",
+                font=("TkDefaultFont", 9, "bold"),
+                relief="solid", borderwidth=1,
+            )
+            chip.pack(anchor="w", pady=(0, 4))
+            ttk.Label(
+                bloco,
+                text=f"O que é: {o_que_e}",
+                wraplength=640, foreground="#333", justify="left",
+                font=("TkDefaultFont", 9),
+            ).pack(anchor="w", padx=(8, 0))
+            ttk.Label(
+                bloco,
+                text=f"O que fazer: {o_que_fazer}",
+                wraplength=640, foreground="#1f3a68", justify="left",
+                font=("TkDefaultFont", 9, "italic"),
+            ).pack(anchor="w", padx=(8, 0), pady=(1, 0))
+
+        # Rodapé com botão Fechar (fora do canvas)
+        rodape = ttk.Frame(win)
+        rodape.pack(side="bottom", fill="x", padx=16, pady=(0, 12))
+        ttk.Button(rodape, text="Fechar", command=win.destroy).pack(side="right")
+
     def _abrir_status(self) -> None:
         """Dialog com o resumo do que foi importado: empresa, Domínio,
         planilha, OFX. Substitui os labels de status que ficavam na
@@ -1841,49 +1959,7 @@ class App(tk.Tk):
         self._notebook_conciliados.add(aba, text="Comparação (0)")
         self._aba_dominio = aba
 
-        # ---- Cabeçalho: instrução + legenda de cores lado a lado
-        topo_comp = ttk.Frame(aba)
-        topo_comp.pack(side="top", fill="x", padx=6, pady=(6, 4))
-
-        instr = ttk.Label(
-            topo_comp,
-            text=(
-                "Comparação de 3 fontes com o Domínio:\n"
-                "• Pares Planilha×OFX conciliados\n"
-                "• Pendentes só na planilha (Caixa geral)\n"
-                "• Pendentes só no OFX (quando não há planilha importada)"
-            ),
-            wraplength=500,
-            justify="left",
-        )
-        instr.pack(side="left", anchor="nw")
-
-        # Legenda das cores — 6 chips coloridos com significado
-        legenda = ttk.LabelFrame(topo_comp, text="Legenda de cores")
-        legenda.pack(side="right", padx=(10, 0))
-        cores = [
-            ("#d4edda", "OK",          "Conciliado P×OFX e no Domínio"),
-            ("#fff3cd", "Falta dom",   "Conciliado P×OFX, falta no Domínio"),
-            ("#cce5ff", "Caixa OK",    "Pendente da planilha (Caixa geral) no Domínio"),
-            ("#e2e3e5", "Caixa falta", "Pendente da planilha (Caixa geral) falta no Domínio"),
-            ("#d1ecf1", "OFX OK",      "Pendente do OFX (sem planilha) no Domínio"),
-            ("#ffe5cc", "OFX falta",   "Pendente do OFX (sem planilha) falta no Domínio"),
-        ]
-        for i, (cor, rotulo, desc) in enumerate(cores):
-            # tk.Label aceita background — ttk.Label ignora em alguns temas
-            chip = tk.Label(
-                legenda, text=f"  {rotulo}  ",
-                background=cor, foreground="#111",
-                font=("TkDefaultFont", 8, "bold"),
-                relief="solid", borderwidth=1,
-            )
-            chip.grid(row=i, column=0, padx=(6, 4), pady=1, sticky="w")
-            ttk.Label(
-                legenda, text=desc, font=("TkDefaultFont", 8),
-                foreground="#333",
-            ).grid(row=i, column=1, padx=(0, 8), pady=1, sticky="w")
-
-        # ---- Filtro por cor: Combobox + botão limpar
+        # ---- Filtro por cor: Combobox + botão limpar + botão Legenda
         # Guarda como StringVar pra persistir entre renders.
         # Mapeia rótulo visível → tag interna do treeview (mesmo nome do status).
         self._filtro_cor_map = {
@@ -1916,6 +1992,10 @@ class App(tk.Tk):
             filtro_frame, text="Limpar",
             command=self._limpar_filtro_comparacao,
         ).pack(side="left", padx=(4, 0))
+        ttk.Button(
+            filtro_frame, text="ℹ Legenda",
+            command=self._abrir_legenda_comparacao,
+        ).pack(side="left", padx=(8, 0))
         self.lbl_filtro_comparacao = ttk.Label(
             filtro_frame, text="", foreground="#555",
         )
