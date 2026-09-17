@@ -2513,18 +2513,29 @@ class App(tk.Tk):
 
         # ---- Carrega parcelas de cada empresa e marca a origem
         try:
-            todas_transacoes: list[Transacao] = []
-            for e in empresas_pra_carregar:
-                codi = e.get("codi_emp")
-                txs = parser_dominio.extrair_pagamentos(
-                    self.conn_dominio, fonte, codi_emp=codi,
-                )
-                # Marca cada Transacao com a empresa de origem
-                for t in txs:
-                    t.extras["codi_emp_origem"] = codi
-                    t.extras["razao_empresa"] = e.get("razao", "")
-                todas_transacoes.extend(txs)
-            self.transacoes_dominio = todas_transacoes
+            with self._carregando(
+                "Carregando pagamentos do Domínio...",
+                f"Consultando {len(empresas_pra_carregar)} empresa(s) "
+                "do grupo...",
+            ) as lbl:
+                todas_transacoes: list[Transacao] = []
+                for i, e in enumerate(empresas_pra_carregar, 1):
+                    codi = e.get("codi_emp")
+                    razao = e.get("razao", "") or ""
+                    lbl.config(
+                        text=f"[{i}/{len(empresas_pra_carregar)}] "
+                        f"Empresa {codi} — {razao[:35]}...",
+                    )
+                    lbl.update()
+                    txs = parser_dominio.extrair_pagamentos(
+                        self.conn_dominio, fonte, codi_emp=codi,
+                    )
+                    # Marca cada Transacao com a empresa de origem
+                    for t in txs:
+                        t.extras["codi_emp_origem"] = codi
+                        t.extras["razao_empresa"] = razao
+                    todas_transacoes.extend(txs)
+                self.transacoes_dominio = todas_transacoes
         except Exception as e:
             messagebox.showerror("Erro ao ler Domínio", str(e))
             return
@@ -2588,9 +2599,13 @@ class App(tk.Tk):
                 pass
 
         try:
-            self.plano_contas = parser_dominio.extrair_plano_contas(
-                self.conn_dominio, fonte, codi_emp=codi_emp,
-            )
+            with self._carregando(
+                "Carregando plano de contas...",
+                f"Consultando contas analíticas da empresa {codi_emp}...",
+            ):
+                self.plano_contas = parser_dominio.extrair_plano_contas(
+                    self.conn_dominio, fonte, codi_emp=codi_emp,
+                )
         except Exception as e:
             messagebox.showerror("Erro ao ler plano de contas", str(e))
             return
