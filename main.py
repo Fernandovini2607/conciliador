@@ -747,6 +747,10 @@ class App(tk.Tk):
             command=self._importar_comprovantes_pdf, width=26,
         ).pack(fill="x", pady=2)
         ttk.Button(
+            self._sidebar, text="Importar comprovantes PIX",
+            command=self._importar_comprovantes_pix, width=26,
+        ).pack(fill="x", pady=2)
+        ttk.Button(
             self._sidebar, text="Importar OFX",
             command=self._abrir_ofx, width=26,
         ).pack(fill="x", pady=2)
@@ -3313,13 +3317,27 @@ class App(tk.Tk):
                 "automaticamente. Use 'Editar colunas' para revisar/alterar.",
             )
 
-    def _importar_comprovantes_pdf(self) -> None:
-        """Importa comprovantes de pagamento de boleto em PDF (nativos)
-        de bancos suportados (Sicoob, Bradesco). Cada comprovante vira
-        uma Transacao — vai pra 'planilha virtual' e entra no fluxo
-        normal de conciliação com OFX/Domínio."""
+    def _importar_comprovantes_pix(self) -> None:
+        """Wrapper de _importar_comprovantes_pdf pra PIX. O parser Sicoob
+        já detecta PIX automaticamente dentro do mesmo PDF; esse botão
+        existe pra deixar claro pro operador que PDFs de PIX também são
+        aceitos e são processados no mesmo fluxo."""
+        self._importar_comprovantes_pdf(modo="pix")
+
+    def _importar_comprovantes_pdf(self, modo: str = "boleto") -> None:
+        """Importa comprovantes de pagamento em PDF (nativos) de bancos
+        suportados. Cada comprovante vira uma Transacao — vai pra
+        'planilha virtual' e entra no fluxo normal de conciliação com
+        OFX/Domínio.
+
+        ``modo`` só muda o título do diálogo de seleção — o parser é o
+        mesmo pra boletos e PIX (detecta o tipo por marcador do texto)."""
         caminhos = filedialog.askopenfilenames(
-            title="Selecione um ou mais PDFs de comprovantes",
+            title=(
+                "Selecione um ou mais PDFs de comprovantes PIX"
+                if modo == "pix"
+                else "Selecione um ou mais PDFs de comprovantes"
+            ),
             filetypes=[("PDF", "*.pdf"), ("Todos", "*.*")],
         )
         if not caminhos:
@@ -3332,7 +3350,12 @@ class App(tk.Tk):
         # com o nome do arquivo atual (útil em PDFs grandes / lotes).
         try:
             with self._carregando(
-                "Importando comprovantes PDF...", "Iniciando...",
+                (
+                    "Importando comprovantes PIX..."
+                    if modo == "pix"
+                    else "Importando comprovantes PDF..."
+                ),
+                "Iniciando...",
             ) as lbl:
                 def _on_prog(atual: int, total: int, nome: str) -> None:
                     lbl.config(text=f"[{atual}/{total}] Lendo {nome}...")
