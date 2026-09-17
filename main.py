@@ -911,7 +911,7 @@ class App(tk.Tk):
         de cada botão espelha o dos originais na hora de abrir."""
         win = tk.Toplevel(self)
         win.title("Configurações do Domínio")
-        win.geometry("380x220")
+        win.geometry("480x230")
         win.transient(self)
         win.resizable(False, False)
         try:
@@ -942,8 +942,8 @@ class App(tk.Tk):
             return _wrap
 
         ttk.Button(
-            win, text="Conectar Domínio",
-            command=_acao(self._conectar_dominio), width=28,
+            win, text=str(self.btn_conectar_dominio.cget("text")),
+            command=_acao(self._conectar_dominio), width=40,
         ).pack(padx=16, pady=4, fill="x")
         # Fontes (SQL) são configuração de sistema — só admin vê
         if eh_admin:
@@ -2536,16 +2536,41 @@ class App(tk.Tk):
         self._limpa_resultados()
 
     def _atualiza_label_dominio(self) -> None:
-        cred = parser_dominio.load_odbc_config()
-        # Sidebar: SEM a empresa (ela vira label na barra do usuário no topo).
-        partes = [f"Conectado — DSN={cred.get('dsn', '?')}"]
+        # Sidebar: só contadores (pagamentos/plano). O status
+        # "Conectado — DSN=..." fica no botão "Conectar Domínio"
+        # dentro do dialog Configurações.
+        partes = []
         if self.transacoes_dominio:
             partes.append(f"{len(self.transacoes_dominio)} pagamentos")
         if self.plano_contas:
             partes.append(f"{len(self.plano_contas)} contas no plano")
-        self.lbl_dominio.config(text="  |  ".join(partes))
+        self.lbl_dominio.config(
+            text="  |  ".join(partes) if partes else "",
+        )
+        # Botão Conectar Domínio (oculto na tela, visível no dialog):
+        # texto reflete o estado da conexão.
+        self._atualiza_botao_conectar_dominio()
         # Topo: empresa ativa fica ao lado do nome do usuário.
         self._atualiza_label_empresa_topo()
+
+    def _atualiza_botao_conectar_dominio(self) -> None:
+        """Atualiza o rótulo do botão Conectar Domínio:
+        - Desconectado: "Conectar Domínio"
+        - Conectado: "Conectar Domínio — Conectado (DSN=xxx)"
+        O botão é usado tanto no dialog Configurações (novo widget
+        criado a cada abertura) quanto como referência oculta pra
+        preservar estado. Aqui atualizamos só a referência oculta;
+        o dialog lê esse texto na hora de abrir."""
+        if not hasattr(self, "btn_conectar_dominio"):
+            return
+        if self.conn_dominio is not None:
+            cred = parser_dominio.load_odbc_config()
+            dsn = cred.get("dsn", "?")
+            self.btn_conectar_dominio.config(
+                text=f"Conectar Domínio — Conectado (DSN={dsn})",
+            )
+        else:
+            self.btn_conectar_dominio.config(text="Conectar Domínio")
 
     def _atualiza_label_empresa_topo(self) -> None:
         """Atualiza o label 'Empresa ativa' que fica ao lado do nome do
