@@ -58,7 +58,7 @@ os botões ficam na **sidebar esquerda** ("Ações"), organizados por
 grupo, na ordem do fluxo diário:
 
 - **EMPRESA**: Selecionar empresa
-- **IMPORTAR**: Abrir planilha, Importar comprovantes PDF, Importar OFX
+- **IMPORTAR**: Abrir planilha, Importar comprovantes PDF, Importar comprovantes PIX, Importar OFX
 - **DOMÍNIO**: Carregar pagamentos, Carregar plano contas
 - **EDITAR / LIMPAR**: Editar colunas, Limpar planilha, Limpar OFX
 - **CONCILIAR**: Conciliar, Comparar com Domínio, Configurar taxas
@@ -106,12 +106,17 @@ foi conciliado) aparecem embaixo dos botões correspondentes na sidebar.
 ### 3.1.b Comprovantes PDF de pagamento (alternativa/complemento)
 
 Se a empresa **não tem planilha de controle** mas você tem
-comprovantes de boleto em PDF baixados do internet banking:
+comprovantes em PDF baixados do internet banking:
 
-- Clique em **Importar comprovantes PDF**.
+- Clique em **Importar comprovantes PDF** (boletos) ou **Importar
+  comprovantes PIX** (Pix Sicoob).
+- **Antes de escolher o arquivo**, aparece um dialog perguntando o
+  período (data inicial e final). Só serão importados os comprovantes
+  cuja data de pagamento cair no intervalo. Deixe em branco pra
+  importar tudo do PDF.
 - Selecione um ou mais arquivos (Ctrl+clique).
-- **Bancos suportados**: Sicoob e Bradesco. Outros bancos podem ser
-  adicionados sob demanda (peça pro admin).
+- **Bancos suportados**: Sicoob (boletos e PIX) e Bradesco. Outros
+  bancos podem ser adicionados sob demanda (peça pro admin).
 - Aguarde o processamento (rápido em PDFs pequenos, alguns segundos
   em PDFs de 100+ páginas).
 - Os comprovantes viram uma "planilha virtual" — mesmas colunas,
@@ -120,11 +125,18 @@ comprovantes de boleto em PDF baixados do internet banking:
 **Combinar planilha + comprovantes:** você pode importar planilha
 .xlsx primeiro e depois os PDFs. O sistema **detecta duplicatas**
 (quando o mesmo lançamento está nos dois) e importa cada um só uma
-vez. O popup avisa quantos entraram e quantos foram ignorados.
+vez. Funciona até com **CNPJ mascarado** do PIX (`**.687.766/0001-**`)
+contra CNPJ completo da planilha. O popup avisa quantos entraram e
+quantos foram ignorados.
 
 > Cada comprovante PDF traz **CNPJ + nome do fornecedor** — dados
 > mais completos que a maioria das planilhas de controle. Isso ajuda
 > muito a conciliação com o Domínio.
+
+> **PIX Sicoob**: os campos preenchidos são um pouco diferentes dos
+> boletos — não tem NF, valor é único (sem juros/desconto), CNPJ pode
+> vir mascarado. Como não tem NF, PIX conciliam com o Domínio pelas
+> **Fases 3 e 6** (fornecedor + valor, sem NF).
 
 ### 3.2 Extrato bancário OFX
 - Clique em **Importar OFX**.

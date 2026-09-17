@@ -78,8 +78,10 @@ def tabela_abas() -> Table:
     cabecalho = ["#", "Aba", "Conteúdo"]
     linhas = [
         ["0", "Planilha", "Dados crus da planilha .xlsx OU dos comprovantes "
-         "PDF (Sicoob/Bradesco). Botões Abrir planilha e Importar "
-         "comprovantes PDF. Deduplica automaticamente entre xlsx+PDF."],
+         "PDF (boletos Sicoob/Bradesco e PIX Sicoob). Botões Abrir "
+         "planilha, Importar comprovantes PDF e Importar comprovantes "
+         "PIX. Deduplica automaticamente entre xlsx+PDF+PIX. Antes de "
+         "cada import, dialog pergunta o período (data pagamento)."],
         ["1", "OFX", "Pagamentos do extrato (data, banco, valor, memo, "
          "documento). Multi-arquivo. Após conciliação, ganha colunas "
          "Fornecedor (via PDF) + CNPJ (via PDF) + fundo azul nas linhas "
@@ -367,20 +369,29 @@ def construir() -> list:
     flow.append(Paragraph("Comprovantes PDF de pagamento — parser_pdf.py", H2))
     flow.append(bullets([
         "Extração <b>nativa</b> de PDFs (via <i>pdfplumber</i>) de "
-        "comprovantes de pagamento de boleto. Não requer OCR — funciona "
+        "comprovantes de pagamento. Não requer OCR — funciona "
         "só em PDFs digitais (baixados de internet banking).",
-        "<b>Bancos suportados hoje</b>: Sicoob (SISBR) e Bradesco NET "
-        "Empresa. Arquitetura permite adicionar novos bancos com "
-        "detecção automática por marcadores fortes no texto.",
-        "<b>Campos extraídos</b>: valor pago, data pagamento, data "
-        "vencimento, beneficiário (nome e CNPJ), nº documento, banco.",
+        "<b>Bancos suportados hoje</b>: Sicoob (SISBR) — boletos <b>e "
+        "PIX</b> misturados no mesmo PDF; Bradesco NET Empresa. "
+        "Arquitetura permite adicionar novos bancos com detecção "
+        "automática por marcadores fortes no texto.",
+        "<b>Campos extraídos (boleto)</b>: valor pago, data pagamento, "
+        "data vencimento, beneficiário (nome e CNPJ), nº documento, "
+        "juros/desconto explícitos, banco.",
+        "<b>Campos extraídos (PIX Sicoob)</b>: valor, data do pagamento, "
+        "destinatário (nome multi-linha + CPF/CNPJ mascarado), tipo do "
+        "PIX (copia e cola / via chave / via manual), ID Transação. "
+        "Não tem NF nem valor de parcela — casa nas Fases 3 e 6.",
         "<b>Multi-comprovante</b>: um único PDF pode ter dezenas ou "
-        "centenas de comprovantes empilhados — o parser divide por "
-        "cabeçalhos e processa cada um separadamente.",
+        "centenas de comprovantes empilhados (boletos + PIX misturados) "
+        "— o parser divide por marcadores e processa cada um.",
         "<b>Streaming pra PDFs grandes</b>: performance calibrada pra "
-        "arquivos de 500+ páginas (~50 ms/pág). UI mostra progresso.",
-        "<b>Deduplicação cruzada</b>: se a planilha já tem esse lançamento, "
-        "detecta e ignora (ver seção 5).",
+        "arquivos de 500+ páginas (~50 ms/pág). UI mostra progresso "
+        "por página numa caixinha \"Carregando...\".",
+        "<b>Deduplicação cruzada</b>: se a planilha já tem esse "
+        "lançamento, detecta e ignora (ver seção 5). Tolera CNPJ "
+        "mascarado do PIX (<i>**.687.766/0001-**</i>) contra CNPJ "
+        "completo da planilha (comparação por substring dos dígitos).",
     ]))
 
     flow.append(Paragraph("Sistema Domínio (ODBC) — parser_dominio.py", H2))

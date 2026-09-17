@@ -227,6 +227,7 @@ def construir():
     flow.append(bullets([
         "<b>EMPRESA</b>: Selecionar empresa",
         "<b>IMPORTAR</b>: Abrir planilha, Importar comprovantes PDF, "
+        "Importar comprovantes PIX, "
         "Importar OFX",
         "<b>DOMÍNIO</b>: Carregar pagamentos, Carregar plano contas",
         "<b>EDITAR / LIMPAR</b>: Editar colunas, Limpar planilha, Limpar OFX",
@@ -276,20 +277,40 @@ def construir():
         TEXTO,
     ))
     flow.append(bullets([
-        "Clique em <b>Importar comprovantes PDF</b>.",
+        "Clique em <b>Importar comprovantes PDF</b> (boletos) ou "
+        "<b>Importar comprovantes PIX</b>.",
+        "<b>Antes de escolher o arquivo</b>, aparece um dialog "
+        "perguntando o período (data inicial e final). Só serão "
+        "importados os comprovantes cuja data de pagamento cair no "
+        "intervalo. Você pode deixar em branco pra importar tudo.",
         "Selecione um ou mais arquivos (Ctrl+clique).",
-        "<b>Bancos suportados</b>: Sicoob e Bradesco.",
+        "<b>Bancos suportados</b>: Sicoob (boletos e PIX) e Bradesco.",
         "Aguarde o processamento — rápido em PDFs pequenos, alguns "
         "segundos em PDFs de 100+ páginas.",
         "Os comprovantes viram uma \"planilha virtual\" — mesmas colunas, "
         "mesmo fluxo de conciliação.",
     ]))
     flow.append(caixa_dica(
-        "Pode combinar planilha .xlsx + comprovantes PDF. O sistema "
-        "detecta duplicatas e importa cada lançamento uma vez só. O "
+        "Pode combinar planilha .xlsx + comprovantes PDF (boletos) + "
+        "comprovantes PIX. O sistema detecta duplicatas e importa cada "
+        "lançamento uma vez só — funciona até com CNPJ mascarado do "
+        "PIX (**.687.766/0001-**) contra CNPJ completo da planilha. O "
         "popup avisa quantos entraram e quantos foram ignorados. "
         "Comprovantes PDF trazem CNPJ + nome, o que ajuda muito a "
         "conciliação com o Domínio."
+    ))
+    flow.append(Spacer(1, 4))
+    flow.append(caixa_dica(
+        "<b>PIX Sicoob</b>: os campos preenchidos são um pouco "
+        "diferentes dos boletos:<br/>"
+        "• Valor: único (PIX debita exato, sem juros/desconto).<br/>"
+        "• Nº NF: vazio (PIX não tem número de nota).<br/>"
+        "• CNPJ: pode vir <i>mascarado</i> como <i>**.687.766/0001-**</i> "
+        "— o sistema entende e casa mesmo assim.<br/>"
+        "• Histórico: <i>Pix copia e cola — &lt;destinatário&gt;</i>.<br/>"
+        "Como não tem NF, PIX conciliam com o Domínio pelas Fases 3 "
+        "(valor + fornecedor + CNPJ raiz) e 6 (fornecedor forte + "
+        "valor ≤5% + data exata)."
     ))
     flow.append(Spacer(1, 4))
     flow.append(caixa_dica(
