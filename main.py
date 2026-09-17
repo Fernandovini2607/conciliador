@@ -506,6 +506,9 @@ class App(tk.Tk):
         self._migrar_config_legado()
 
         self._monta_ui()
+        # Se ja tinha empresa salva do session anterior, ja mostra
+        # o label no topo (nao precisa esperar Conectar Dominio).
+        self._atualiza_label_empresa_topo()
 
         # Conecta o Domínio automaticamente usando as credenciais salvas
         # (após a UI estar montada, senão os botões que ele habilita ainda
@@ -646,6 +649,13 @@ class App(tk.Tk):
             foreground="#6b7280",
             font=("TkDefaultFont", 8),
         ).pack(side="left", padx=(10, 0))
+        # Empresa ativa — populada por _atualiza_label_empresa_topo
+        # sempre que a empresa muda (seleção + conectar Domínio).
+        self.lbl_empresa_topo = ttk.Label(
+            topo_user, text="",
+            foreground="#1f3a68", font=("TkDefaultFont", 9, "bold"),
+        )
+        self.lbl_empresa_topo.pack(side="left", padx=(20, 0))
         ttk.Button(
             topo_user, text="Trocar usuário",
             command=self._trocar_usuario,
@@ -2527,15 +2537,31 @@ class App(tk.Tk):
 
     def _atualiza_label_dominio(self) -> None:
         cred = parser_dominio.load_odbc_config()
-        emp = self.cfg.get("dominio_empresa")
-        partes = [f"Conectado (read-only): DSN={cred.get('dsn', '?')}"]
-        if emp:
-            partes.append(f"Empresa: {emp['codi_emp']} — {emp['razao'][:40]}")
+        # Sidebar: SEM a empresa (ela vira label na barra do usuário no topo).
+        partes = [f"Conectado — DSN={cred.get('dsn', '?')}"]
         if self.transacoes_dominio:
             partes.append(f"{len(self.transacoes_dominio)} pagamentos")
         if self.plano_contas:
             partes.append(f"{len(self.plano_contas)} contas no plano")
         self.lbl_dominio.config(text="  |  ".join(partes))
+        # Topo: empresa ativa fica ao lado do nome do usuário.
+        self._atualiza_label_empresa_topo()
+
+    def _atualiza_label_empresa_topo(self) -> None:
+        """Atualiza o label 'Empresa ativa' que fica ao lado do nome do
+        usuário na barra de topo. Vazio quando nenhuma empresa foi
+        selecionada."""
+        if not hasattr(self, "lbl_empresa_topo"):
+            return
+        emp = self.cfg.get("dominio_empresa") or {}
+        codi = emp.get("codi_emp")
+        razao = emp.get("razao", "") or ""
+        if codi is None:
+            self.lbl_empresa_topo.config(text="")
+        else:
+            self.lbl_empresa_topo.config(
+                text=f"🏢 Empresa: {codi} — {razao[:45]}",
+            )
 
     def _configurar_fonte_dominio(self) -> None:
         """Configura a fonte de pagamentos do Domínio (parcelas a pagar)."""
