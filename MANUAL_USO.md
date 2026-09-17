@@ -53,10 +53,18 @@ troque a senha inicial pela sua senha pessoal.
 
 ## 📥 Passo 3 — Carregar os dados da empresa
 
-Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo. Os
-botões pra importar cada uma ficam na **sidebar esquerda** ("Fontes de
-dados"), na ordem do fluxo diário: Selecionar empresa → Abrir planilha
-→ Importar comprovantes PDF → Importar OFX.
+Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo. Todos
+os botões ficam na **sidebar esquerda** ("Ações"), organizados por
+grupo, na ordem do fluxo diário:
+
+- **EMPRESA**: Selecionar empresa
+- **IMPORTAR**: Abrir planilha, Importar comprovantes PDF, Importar OFX
+- **DOMÍNIO**: Carregar pagamentos, Carregar plano contas
+- **EDITAR / LIMPAR**: Editar colunas, Limpar planilha, Limpar OFX
+- **CONCILIAR**: Conciliar, Comparar com Domínio, Configurar taxas
+
+As labels de status (planilha carregada, OFX carregado, resumo do que
+foi conciliado) aparecem embaixo dos botões correspondentes na sidebar.
 
 > **Ganhar espaço de tela**: depois que você importou tudo que
 > precisava, clique no botão **◀ Recolher** no rodapé da sidebar. Ela

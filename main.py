@@ -671,112 +671,148 @@ class App(tk.Tk):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
-        # --- Linha 1: Domínio (sistema contábil) ---
-        # Botoes de acao rapida do Dominio (carregar). Os de configuracao
-        # (Conectar Dominio, Fonte pagamentos, Fonte plano contas) foram
-        # movidos pra dialog "Configuracoes" no topo direito.
-        topo_dom = ttk.Frame(self, padding=(10, 6, 10, 4))
-        topo_dom.pack(fill="x")
-        # Botoes de FONTE — criados aqui pra que _abrir_configuracoes
-        # possa reusar as mesmas referencias (mantem o estado 'disabled'
-        # controlado pelos handlers atuais).
+        # --- Botoes tecnicos criados como widgets ocultos ---
+        # Sao acionados via _abrir_configuracoes (dialog no topo direito).
+        # Ficam sem parent visual — moram num Frame descartado.
+        _oculto = ttk.Frame(self)  # nao packado
         self.btn_conectar_dominio = ttk.Button(
-            topo_dom, text="Conectar Domínio", command=self._conectar_dominio,
+            _oculto, text="Conectar Domínio", command=self._conectar_dominio,
         )
         self.btn_fonte = ttk.Button(
-            topo_dom, text="Fonte: pagamentos",
+            _oculto, text="Fonte: pagamentos",
             command=self._configurar_fonte_dominio, state="disabled",
         )
         self.btn_fonte_plano = ttk.Button(
-            topo_dom, text="Fonte: plano contas",
+            _oculto, text="Fonte: plano contas",
             command=self._configurar_fonte_plano_contas, state="disabled",
         )
-        # NAO packam esses tres — sao acionados via _abrir_configuracoes.
-        self.btn_carregar_dominio = ttk.Button(
-            topo_dom, text="Carregar pagamentos", command=self._carregar_dominio, state="disabled",
-        )
-        self.btn_carregar_dominio.pack(side="left", padx=4)
-        self.btn_carregar_plano = ttk.Button(
-            topo_dom, text="Carregar plano contas",
-            command=self._carregar_plano_contas, state="disabled",
-        )
-        self.btn_carregar_plano.pack(side="left", padx=4)
-        self.lbl_dominio = ttk.Label(topo_dom, text="(Domínio não conectado)")
-        self.lbl_dominio.pack(side="left", padx=8)
-
-        # --- Linha 2: Planilha (só ações auxiliares agora; abrir/importar
-        # ficam na sidebar esquerda) ---
-        topo = ttk.Frame(self, padding=(10, 0, 10, 4))
-        topo.pack(fill="x")
-        self.btn_editar_colunas = ttk.Button(
-            topo, text="Editar colunas", command=self._editar_colunas, state="disabled",
-        )
-        self.btn_editar_colunas.pack(side="left", padx=4)
-        self.btn_limpar_planilha = ttk.Button(
-            topo, text="Limpar planilha", command=self._limpar_planilha, state="disabled",
-        )
-        self.btn_limpar_planilha.pack(side="left", padx=4)
-        self.lbl_planilha = ttk.Label(topo, text="(nenhuma planilha carregada)")
-        self.lbl_planilha.pack(side="left", padx=8)
-
-        # --- Linha 3: OFX (só ações auxiliares agora) ---
-        topo2 = ttk.Frame(self, padding=(10, 0, 10, 6))
-        topo2.pack(fill="x")
-        self.btn_limpar_ofx = ttk.Button(
-            topo2, text="Limpar OFX", command=self._limpar_ofx, state="disabled",
-        )
-        self.btn_limpar_ofx.pack(side="left", padx=4)
-        self.lbl_ofx = ttk.Label(topo2, text="(nenhum OFX carregado)")
-        self.lbl_ofx.pack(side="left", padx=8)
-
-        acoes = ttk.Frame(self, padding=(10, 0, 10, 8))
-        acoes.pack(fill="x")
-        self.btn_conciliar = ttk.Button(
-            acoes, text="Conciliar", command=self._executar_conciliacao, state="disabled",
-        )
-        self.btn_conciliar.pack(side="left", padx=4)
-        self.btn_comparar_dominio = ttk.Button(
-            acoes, text="Comparar com Domínio",
-            command=self._comparar_com_dominio,
-        )
-        self.btn_comparar_dominio.pack(side="left", padx=4)
-        ttk.Button(
-            acoes, text="Configurar taxas", command=self._abrir_config_taxas,
-        ).pack(side="left", padx=4)
-        self.lbl_resumo = ttk.Label(acoes, text="")
-        self.lbl_resumo.pack(side="left", padx=12)
 
         # --- Corpo: sidebar esquerda + notebook direita ---
         corpo = ttk.Frame(self)
         corpo.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Sidebar esquerda com as 4 acoes principais de origem de dados,
-        # na ordem do fluxo diario: empresa -> planilha -> comprovantes -> OFX.
-        self._sidebar = ttk.LabelFrame(corpo, text="Fontes de dados", padding=8)
+        # Sidebar esquerda com TODAS as acoes principais, agrupadas.
+        # Ordem do fluxo diario: empresa -> importar (planilha/PDF/OFX) ->
+        # carregar Dominio -> auxiliares (editar/limpar) -> conciliar/comparar.
+        self._sidebar = ttk.LabelFrame(corpo, text="Ações", padding=8)
         self._sidebar.pack(side="left", fill="y", padx=(0, 8))
+
+        def _sep():
+            ttk.Separator(self._sidebar, orient="horizontal").pack(
+                fill="x", pady=(8, 4),
+            )
+
+        def _titulo(txt):
+            ttk.Label(
+                self._sidebar, text=txt,
+                foreground="#1f3a68",
+                font=("TkDefaultFont", 8, "bold"),
+            ).pack(anchor="w", pady=(4, 2))
+
+        # --- Grupo 1: Empresa
+        _titulo("EMPRESA")
         self.btn_empresa = ttk.Button(
             self._sidebar, text="Selecionar empresa",
-            command=self._selecionar_empresa, state="disabled", width=24,
+            command=self._selecionar_empresa, state="disabled", width=26,
         )
-        self.btn_empresa.pack(fill="x", pady=(0, 4))
+        self.btn_empresa.pack(fill="x", pady=2)
+
+        # --- Grupo 2: Importar
+        _sep()
+        _titulo("IMPORTAR")
         ttk.Button(
             self._sidebar, text="Abrir planilha (.xlsx)",
-            command=self._abrir_planilha, width=24,
-        ).pack(fill="x", pady=4)
+            command=self._abrir_planilha, width=26,
+        ).pack(fill="x", pady=2)
         ttk.Button(
             self._sidebar, text="Importar comprovantes PDF",
-            command=self._importar_comprovantes_pdf, width=24,
-        ).pack(fill="x", pady=4)
+            command=self._importar_comprovantes_pdf, width=26,
+        ).pack(fill="x", pady=2)
         ttk.Button(
             self._sidebar, text="Importar OFX",
-            command=self._abrir_ofx, width=24,
-        ).pack(fill="x", pady=4)
-        # Botao pra RECOLHER a sidebar quando terminou a importacao —
-        # libera espaco pra visualizacao dos dados nas abas.
-        ttk.Separator(self._sidebar, orient="horizontal").pack(fill="x", pady=(8, 4))
+            command=self._abrir_ofx, width=26,
+        ).pack(fill="x", pady=2)
+
+        # --- Grupo 3: Domínio (carregar)
+        _sep()
+        _titulo("DOMÍNIO")
+        self.btn_carregar_dominio = ttk.Button(
+            self._sidebar, text="Carregar pagamentos",
+            command=self._carregar_dominio, state="disabled", width=26,
+        )
+        self.btn_carregar_dominio.pack(fill="x", pady=2)
+        self.btn_carregar_plano = ttk.Button(
+            self._sidebar, text="Carregar plano contas",
+            command=self._carregar_plano_contas, state="disabled", width=26,
+        )
+        self.btn_carregar_plano.pack(fill="x", pady=2)
+        self.lbl_dominio = ttk.Label(
+            self._sidebar, text="(Domínio não conectado)",
+            foreground="#666", font=("TkDefaultFont", 8),
+            wraplength=200,
+        )
+        self.lbl_dominio.pack(anchor="w", pady=(2, 0))
+
+        # --- Grupo 4: Editar/Limpar
+        _sep()
+        _titulo("EDITAR / LIMPAR")
+        self.btn_editar_colunas = ttk.Button(
+            self._sidebar, text="Editar colunas",
+            command=self._editar_colunas, state="disabled", width=26,
+        )
+        self.btn_editar_colunas.pack(fill="x", pady=2)
+        self.btn_limpar_planilha = ttk.Button(
+            self._sidebar, text="Limpar planilha",
+            command=self._limpar_planilha, state="disabled", width=26,
+        )
+        self.btn_limpar_planilha.pack(fill="x", pady=2)
+        self.btn_limpar_ofx = ttk.Button(
+            self._sidebar, text="Limpar OFX",
+            command=self._limpar_ofx, state="disabled", width=26,
+        )
+        self.btn_limpar_ofx.pack(fill="x", pady=2)
+        self.lbl_planilha = ttk.Label(
+            self._sidebar, text="(nenhuma planilha carregada)",
+            foreground="#666", font=("TkDefaultFont", 8),
+            wraplength=200,
+        )
+        self.lbl_planilha.pack(anchor="w", pady=(2, 0))
+        self.lbl_ofx = ttk.Label(
+            self._sidebar, text="(nenhum OFX carregado)",
+            foreground="#666", font=("TkDefaultFont", 8),
+            wraplength=200,
+        )
+        self.lbl_ofx.pack(anchor="w", pady=(0, 0))
+
+        # --- Grupo 5: Conciliar/Comparar/Regras
+        _sep()
+        _titulo("CONCILIAR")
+        self.btn_conciliar = ttk.Button(
+            self._sidebar, text="Conciliar",
+            command=self._executar_conciliacao, state="disabled", width=26,
+        )
+        self.btn_conciliar.pack(fill="x", pady=2)
+        self.btn_comparar_dominio = ttk.Button(
+            self._sidebar, text="Comparar com Domínio",
+            command=self._comparar_com_dominio, width=26,
+        )
+        self.btn_comparar_dominio.pack(fill="x", pady=2)
+        ttk.Button(
+            self._sidebar, text="Configurar taxas",
+            command=self._abrir_config_taxas, width=26,
+        ).pack(fill="x", pady=2)
+        self.lbl_resumo = ttk.Label(
+            self._sidebar, text="",
+            foreground="#1f3a68", font=("TkDefaultFont", 8, "bold"),
+            wraplength=200,
+        )
+        self.lbl_resumo.pack(anchor="w", pady=(2, 0))
+
+        # --- Recolher sidebar
+        _sep()
         ttk.Button(
             self._sidebar, text="◀ Recolher",
-            command=self._toggle_sidebar, width=24,
+            command=self._toggle_sidebar, width=26,
         ).pack(fill="x", pady=(0, 0))
 
         # Botao mini pra REABRIR a sidebar — fica escondido enquanto a

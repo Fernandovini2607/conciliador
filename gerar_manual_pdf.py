@@ -221,10 +221,21 @@ def construir():
     flow.append(Paragraph("Passo 3 — Carregar os dados da empresa", PASSO))
     flow.append(Paragraph(
         "Você vai trabalhar com <b>até 3 fontes de dados</b> ao mesmo tempo. "
-        "Os botões pra importar cada uma ficam na <b>sidebar esquerda</b> "
-        "(\"Fontes de dados\"), na ordem do fluxo diário: Selecionar "
-        "empresa → Abrir planilha → Importar comprovantes PDF → Importar OFX.",
-        TEXTO,
+        "<b>Todos os botões ficam na sidebar esquerda</b> (\"Ações\"), "
+        "organizados por grupo na ordem do fluxo diário:", TEXTO,
+    ))
+    flow.append(bullets([
+        "<b>EMPRESA</b>: Selecionar empresa",
+        "<b>IMPORTAR</b>: Abrir planilha, Importar comprovantes PDF, "
+        "Importar OFX",
+        "<b>DOMÍNIO</b>: Carregar pagamentos, Carregar plano contas",
+        "<b>EDITAR / LIMPAR</b>: Editar colunas, Limpar planilha, Limpar OFX",
+        "<b>CONCILIAR</b>: Conciliar, Comparar com Domínio, Configurar taxas",
+    ]))
+    flow.append(Paragraph(
+        "As labels de status (planilha carregada, OFX carregado, resumo "
+        "do que foi conciliado) aparecem embaixo dos botões correspondentes "
+        "na sidebar.", TEXTO,
     ))
     flow.append(caixa_dica(
         "<b>Ganhar espaço de tela</b>: depois que você importou tudo que "
