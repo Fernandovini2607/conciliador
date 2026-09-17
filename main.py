@@ -661,25 +661,37 @@ class App(tk.Tk):
         )
         if eh_admin:
             self.btn_gerenciar_usuarios.pack(side="right", padx=2)
+        # "Configuracoes" agrupa acoes tecnicas do Dominio (Conectar,
+        # configurar fontes SQL). Fica sempre visivel — operador pode
+        # abrir e clicar em Conectar Dominio.
+        ttk.Button(
+            topo_user, text="⚙ Configurações",
+            command=self._abrir_configuracoes,
+        ).pack(side="right", padx=2)
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
         # --- Linha 1: Domínio (sistema contábil) ---
+        # Botoes de acao rapida do Dominio (carregar). Os de configuracao
+        # (Conectar Dominio, Fonte pagamentos, Fonte plano contas) foram
+        # movidos pra dialog "Configuracoes" no topo direito.
         topo_dom = ttk.Frame(self, padding=(10, 6, 10, 4))
         topo_dom.pack(fill="x")
-        ttk.Button(topo_dom, text="Conectar Domínio", command=self._conectar_dominio).pack(side="left", padx=4)
-        # Botões de FONTE (SQL Domínio) são configuração do sistema —
-        # só admin vê. Operadores usam a fonte que o admin já configurou.
+        # Botoes de FONTE — criados aqui pra que _abrir_configuracoes
+        # possa reusar as mesmas referencias (mantem o estado 'disabled'
+        # controlado pelos handlers atuais).
+        self.btn_conectar_dominio = ttk.Button(
+            topo_dom, text="Conectar Domínio", command=self._conectar_dominio,
+        )
         self.btn_fonte = ttk.Button(
-            topo_dom, text="Fonte: pagamentos", command=self._configurar_fonte_dominio, state="disabled",
+            topo_dom, text="Fonte: pagamentos",
+            command=self._configurar_fonte_dominio, state="disabled",
         )
         self.btn_fonte_plano = ttk.Button(
             topo_dom, text="Fonte: plano contas",
             command=self._configurar_fonte_plano_contas, state="disabled",
         )
-        if eh_admin:
-            self.btn_fonte.pack(side="left", padx=4)
-            self.btn_fonte_plano.pack(side="left", padx=4)
+        # NAO packam esses tres — sao acionados via _abrir_configuracoes.
         self.btn_carregar_dominio = ttk.Button(
             topo_dom, text="Carregar pagamentos", command=self._carregar_dominio, state="disabled",
         )
@@ -845,6 +857,66 @@ class App(tk.Tk):
                     pass
 
         return _cm()
+
+    def _abrir_configuracoes(self) -> None:
+        """Dialog de configurações do Domínio: Conectar, Fonte
+        pagamentos, Fonte plano contas. Reusa os handlers dos botões
+        originais (que ficam ocultos no topo). O estado ativo/inativo
+        de cada botão espelha o dos originais na hora de abrir."""
+        win = tk.Toplevel(self)
+        win.title("Configurações do Domínio")
+        win.geometry("380x220")
+        win.transient(self)
+        win.resizable(False, False)
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+
+        ttk.Label(
+            win, text="Configurações técnicas do Domínio Contábil",
+            font=("TkDefaultFont", 10, "bold"), foreground="#1f3a68",
+        ).pack(padx=16, pady=(14, 6), anchor="w")
+        ttk.Label(
+            win, text=(
+                "Ações de administrador — normalmente configura uma vez "
+                "só. Depois use os botões principais na tela."
+            ),
+            font=("TkDefaultFont", 9), foreground="#666", wraplength=340,
+        ).pack(padx=16, pady=(0, 12), anchor="w")
+
+        eh_admin = bool(self.usuario_atual.get("admin"))
+
+        def _acao(cmd):
+            """Wraps o comando pra fechar o dialog antes de rodar
+            (evita concorrência de dialogs)."""
+            def _wrap():
+                win.destroy()
+                cmd()
+            return _wrap
+
+        ttk.Button(
+            win, text="Conectar Domínio",
+            command=_acao(self._conectar_dominio), width=28,
+        ).pack(padx=16, pady=4, fill="x")
+        # Fontes (SQL) são configuração de sistema — só admin vê
+        if eh_admin:
+            btn_p = ttk.Button(
+                win, text="Fonte: pagamentos",
+                command=_acao(self._configurar_fonte_dominio), width=28,
+                state=str(self.btn_fonte.cget("state")),
+            )
+            btn_p.pack(padx=16, pady=4, fill="x")
+            btn_pc = ttk.Button(
+                win, text="Fonte: plano contas",
+                command=_acao(self._configurar_fonte_plano_contas), width=28,
+                state=str(self.btn_fonte_plano.cget("state")),
+            )
+            btn_pc.pack(padx=16, pady=4, fill="x")
+
+        ttk.Button(
+            win, text="Fechar", command=win.destroy,
+        ).pack(padx=16, pady=(12, 12), anchor="e")
 
     def _toggle_sidebar(self) -> None:
         """Recolhe/expande a sidebar 'Fontes de dados' pra liberar espaço

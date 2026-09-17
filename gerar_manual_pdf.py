@@ -159,6 +159,15 @@ def construir():
     ))
     flow.append(Spacer(1, 0.3 * cm))
     flow.append(caixa_dica(
+        "<b>Botão ⚙ Configurações</b> (canto superior direito, ao lado de "
+        "<i>Gerenciar usuários</i>): agrupa as ações técnicas do Domínio "
+        "— <i>Conectar Domínio</i>, <i>Fonte: pagamentos</i> e "
+        "<i>Fonte: plano contas</i>. Normalmente configura-se uma vez só "
+        "na instalação. Depois use <b>Carregar pagamentos</b> e "
+        "<b>Carregar plano contas</b> na tela principal."
+    ))
+    flow.append(Spacer(1, 4))
+    flow.append(caixa_dica(
         "<b>Layout das abas</b>: o notebook principal tem 5 abas — "
         "<b>Planilha</b>, <b>OFX</b>, <b>Domínio dados</b>, "
         "<b>Conciliados</b> e <b>Plano de contas</b>. A aba "

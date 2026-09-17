@@ -1,5 +1,13 @@
 # Manual do Conciliador — Como usar no dia a dia
 
+> **Botão ⚙ Configurações** (canto superior direito, ao lado de
+> *Gerenciar usuários*): agrupa as ações técnicas do Domínio —
+> *Conectar Domínio*, *Fonte: pagamentos* e *Fonte: plano contas*.
+> Normalmente você configura uma vez só quando o Conciliador é
+> instalado. Depois de configurado, use os botões **Carregar
+> pagamentos** e **Carregar plano contas** que ficam sempre visíveis
+> na tela principal.
+
 > **Layout das abas**: o notebook principal tem 5 abas — **Planilha**,
 > **OFX**, **Domínio dados**, **Conciliados** e **Plano de contas**.
 > A aba **Conciliados** é uma super-aba que agrupa as ramificações
