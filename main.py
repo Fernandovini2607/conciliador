@@ -235,8 +235,10 @@ class DialogoFiltroColuna(tk.Toplevel):
         sb_x = ttk.Scrollbar(lista_frame, orient="horizontal", command=canvas.xview)
         canvas.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
         sb_x.pack(side="bottom", fill="x")
-        canvas.pack(side="left", fill="both", expand=True)
+
         sb.pack(side="right", fill="y")
+
+        canvas.pack(side="left", fill="both", expand=True)
         self.inner = ttk.Frame(canvas)
         canvas.create_window((0, 0), window=self.inner, anchor="nw")
         self.inner.bind(
@@ -1458,9 +1460,13 @@ class App(tk.Tk):
         sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
         sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        # Ordem do pack: scrollbars PRIMEIRO nos lados (bottom + right),
+        # tree por ULTIMO com expand=True. Assim as scrollbars têm
+        # espaço reservado; se packar tree antes, o expand engole a
+        # scrollbar da direita.
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
         self.tree_planilha = tree
         tree.bind("<Button-1>", self._on_click_header_planilha)
 
@@ -1626,8 +1632,10 @@ class App(tk.Tk):
         sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
         sb.pack(side="right", fill="y")
+
+        tree.pack(side="left", fill="both", expand=True)
         self.tree_ofx = tree
         # Tag pra destacar linhas enriquecidas por PDF (fundo azul claro)
         tree.tag_configure("enriquecido_pdf", background="#e7f3ff")
@@ -1739,8 +1747,10 @@ class App(tk.Tk):
         sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
         sb.pack(side="right", fill="y")
+
+        tree.pack(side="left", fill="both", expand=True)
         self.tree_dominio_dados = tree
         tree.bind("<Button-1>", self._on_click_header_dominio)
 
@@ -1845,8 +1855,12 @@ class App(tk.Tk):
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
 
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
+
         sb.pack(side="right", fill="y")
+
+
+        tree.pack(side="left", fill="both", expand=True)
 
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x")
@@ -2011,8 +2025,12 @@ class App(tk.Tk):
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
 
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
+
         sb.pack(side="right", fill="y")
+
+
+        tree.pack(side="left", fill="both", expand=True)
 
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x")
@@ -2201,8 +2219,12 @@ class App(tk.Tk):
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
 
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
+
         sb.pack(side="right", fill="y")
+
+
+        tree.pack(side="left", fill="both", expand=True)
 
         self.tree_dominio = tree
         # iid → Par (para linhas P×OFX) OU Transacao (para Caixa geral)
@@ -2693,8 +2715,10 @@ class App(tk.Tk):
         sb_x = ttk.Scrollbar(corpo_lanc, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
         sb.pack(side="right", fill="y")
+
+        tree.pack(side="left", fill="both", expand=True)
         self.tree_lancamentos = tree
         # iid → LancamentoContabil (para resolver seleção no botão)
         self.itens_lancamentos: dict[str, LancamentoContabil] = {}
@@ -2743,8 +2767,10 @@ class App(tk.Tk):
         sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
         sb_x.pack(side="bottom", fill="x")
-        tree.pack(side="left", fill="both", expand=True)
+
         sb.pack(side="right", fill="y")
+
+        tree.pack(side="left", fill="both", expand=True)
         self.tree_plano_contas = tree
 
     def _render_aba_plano_contas(self) -> None:
