@@ -23,7 +23,8 @@ troque a senha inicial pela sua senha pessoal.
 
 ## 🏢 Passo 2 — Selecionar a empresa que vai trabalhar
 
-1. Na barra do topo, clique em **Selecionar empresa**.
+1. Na **sidebar esquerda** ("Fontes de dados"), clique em
+   **Selecionar empresa**.
 2. Escolha a empresa da lista e clique em **OK**.
 3. Se aparecer uma pergunta "Trocar de empresa? Os dados carregados
    serão descartados", clique em **Sim** (é normal — cada empresa
@@ -36,10 +37,14 @@ troque a senha inicial pela sua senha pessoal.
 
 ## 📥 Passo 3 — Carregar os dados da empresa
 
-Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo:
+Você vai trabalhar com **até 3 fontes de dados** ao mesmo tempo. Os
+botões pra importar cada uma ficam na **sidebar esquerda** ("Fontes de
+dados"), na ordem do fluxo diário: Selecionar empresa → Abrir planilha
+→ Importar comprovantes PDF → Importar OFX.
 
 ### 3.1 Planilha de contas a pagar (opcional)
-- Clique em **Abrir planilha (.xlsx)** e escolha o arquivo.
+- Clique em **Abrir planilha (.xlsx)** (sidebar esquerda) e escolha o
+  arquivo.
 - Se for a primeira vez com essa empresa, o sistema pergunta qual
   coluna é o quê. Marque:
   - **Vencimento** (obrigatório)

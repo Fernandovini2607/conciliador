@@ -668,10 +668,6 @@ class App(tk.Tk):
         topo_dom = ttk.Frame(self, padding=(10, 6, 10, 4))
         topo_dom.pack(fill="x")
         ttk.Button(topo_dom, text="Conectar Domínio", command=self._conectar_dominio).pack(side="left", padx=4)
-        self.btn_empresa = ttk.Button(
-            topo_dom, text="Selecionar empresa", command=self._selecionar_empresa, state="disabled",
-        )
-        self.btn_empresa.pack(side="left", padx=4)
         # Botões de FONTE (SQL Domínio) são configuração do sistema —
         # só admin vê. Operadores usam a fonte que o admin já configurou.
         self.btn_fonte = ttk.Button(
@@ -696,14 +692,10 @@ class App(tk.Tk):
         self.lbl_dominio = ttk.Label(topo_dom, text="(Domínio não conectado)")
         self.lbl_dominio.pack(side="left", padx=8)
 
-        # --- Linha 2: Planilha ---
+        # --- Linha 2: Planilha (só ações auxiliares agora; abrir/importar
+        # ficam na sidebar esquerda) ---
         topo = ttk.Frame(self, padding=(10, 0, 10, 4))
         topo.pack(fill="x")
-        ttk.Button(topo, text="Abrir planilha (.xlsx)", command=self._abrir_planilha).pack(side="left", padx=4)
-        ttk.Button(
-            topo, text="Importar comprovantes PDF",
-            command=self._importar_comprovantes_pdf,
-        ).pack(side="left", padx=4)
         self.btn_editar_colunas = ttk.Button(
             topo, text="Editar colunas", command=self._editar_colunas, state="disabled",
         )
@@ -715,10 +707,9 @@ class App(tk.Tk):
         self.lbl_planilha = ttk.Label(topo, text="(nenhuma planilha carregada)")
         self.lbl_planilha.pack(side="left", padx=8)
 
-        # --- Linha 3: OFX ---
+        # --- Linha 3: OFX (só ações auxiliares agora) ---
         topo2 = ttk.Frame(self, padding=(10, 0, 10, 6))
         topo2.pack(fill="x")
-        ttk.Button(topo2, text="Importar OFX", command=self._abrir_ofx).pack(side="left", padx=4)
         self.btn_limpar_ofx = ttk.Button(
             topo2, text="Limpar OFX", command=self._limpar_ofx, state="disabled",
         )
@@ -743,8 +734,34 @@ class App(tk.Tk):
         self.lbl_resumo = ttk.Label(acoes, text="")
         self.lbl_resumo.pack(side="left", padx=12)
 
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # --- Corpo: sidebar esquerda + notebook direita ---
+        corpo = ttk.Frame(self)
+        corpo.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Sidebar esquerda com as 4 acoes principais de origem de dados,
+        # na ordem do fluxo diario: empresa -> planilha -> comprovantes -> OFX.
+        sidebar = ttk.LabelFrame(corpo, text="Fontes de dados", padding=8)
+        sidebar.pack(side="left", fill="y", padx=(0, 8))
+        self.btn_empresa = ttk.Button(
+            sidebar, text="Selecionar empresa",
+            command=self._selecionar_empresa, state="disabled", width=24,
+        )
+        self.btn_empresa.pack(fill="x", pady=(0, 4))
+        ttk.Button(
+            sidebar, text="Abrir planilha (.xlsx)",
+            command=self._abrir_planilha, width=24,
+        ).pack(fill="x", pady=4)
+        ttk.Button(
+            sidebar, text="Importar comprovantes PDF",
+            command=self._importar_comprovantes_pdf, width=24,
+        ).pack(fill="x", pady=4)
+        ttk.Button(
+            sidebar, text="Importar OFX",
+            command=self._abrir_ofx, width=24,
+        ).pack(fill="x", pady=4)
+
+        self.notebook = ttk.Notebook(corpo)
+        self.notebook.pack(side="left", fill="both", expand=True)
 
         # Abas de dados crus (origem) — vêm primeiro no fluxo de leitura
         self._monta_aba_planilha_dados()

@@ -185,7 +185,8 @@ def construir():
     # ============ Passo 2
     flow.append(Paragraph("Passo 2 — Selecionar a empresa", PASSO))
     flow.append(bullets([
-        "Na barra do topo, clique em <b>Selecionar empresa</b>.",
+        "Na <b>sidebar esquerda</b> (\"Fontes de dados\"), clique em "
+        "<b>Selecionar empresa</b>.",
         "Escolha a empresa da lista e clique em <b>OK</b>.",
         "Se aparecer a pergunta <i>“Trocar de empresa? Os dados carregados "
         "serão descartados”</i>, clique em <b>Sim</b>. É normal — cada "
@@ -200,7 +201,10 @@ def construir():
     # ============ Passo 3
     flow.append(Paragraph("Passo 3 — Carregar os dados da empresa", PASSO))
     flow.append(Paragraph(
-        "Você vai trabalhar com <b>até 3 fontes de dados</b> ao mesmo tempo:",
+        "Você vai trabalhar com <b>até 3 fontes de dados</b> ao mesmo tempo. "
+        "Os botões pra importar cada uma ficam na <b>sidebar esquerda</b> "
+        "(\"Fontes de dados\"), na ordem do fluxo diário: Selecionar "
+        "empresa → Abrir planilha → Importar comprovantes PDF → Importar OFX.",
         TEXTO,
     ))
 
