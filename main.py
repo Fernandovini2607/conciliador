@@ -3992,13 +3992,27 @@ class App(tk.Tk):
             return False
 
         # 3) Identidade — CNPJ ou nome
-        cnpj_a = cls._normaliza_cnpj(t_a.extras.get("cnpj", ""))
-        cnpj_b = cls._normaliza_cnpj(t_b.extras.get("cnpj", ""))
-        # Se ambos tem CNPJ, só bate se forem iguais
+        cnpj_a_bruto = t_a.extras.get("cnpj", "")
+        cnpj_b_bruto = t_b.extras.get("cnpj", "")
+        cnpj_a = cls._normaliza_cnpj(cnpj_a_bruto)
+        cnpj_b = cls._normaliza_cnpj(cnpj_b_bruto)
+        # Um lado com CNPJ MASCARADO (asteriscos) — comum em comprovante
+        # PIX Sicoob "**.687.766/0001-**". Compara só os dígitos que
+        # aparecem: se são substring do outro, considera bate. Isso evita
+        # duplicar o mesmo pagamento entre planilha (CNPJ completo) e
+        # PDF PIX (CNPJ mascarado).
+        a_mascarado = "*" in cnpj_a_bruto
+        b_mascarado = "*" in cnpj_b_bruto
         if cnpj_a and cnpj_b:
             if cnpj_a == cnpj_b:
                 return True
-            # CNPJs diferentes explícitos → não é duplicata
+            # Se um lado é mascarado, aceita se os dígitos visíveis são
+            # substring do CNPJ completo do outro lado.
+            if a_mascarado and not b_mascarado and cnpj_a in cnpj_b:
+                return True
+            if b_mascarado and not a_mascarado and cnpj_b in cnpj_a:
+                return True
+            # CNPJs diferentes explícitos (ambos completos) → não bate
             return False
 
         nome_a = cls._normaliza_nome_fornecedor(
