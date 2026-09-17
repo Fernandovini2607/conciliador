@@ -681,9 +681,10 @@ class App(tk.Tk):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
-        # --- Botoes tecnicos criados como widgets ocultos ---
-        # Sao acionados via _abrir_configuracoes (dialog no topo direito).
-        # Ficam sem parent visual — moram num Frame descartado.
+        # --- Botoes e labels ocultos ---
+        # Botoes tecnicos: acionados via _abrir_configuracoes.
+        # Labels de status: acionados via _abrir_status (todos os
+        # handlers continuam fazendo self.lbl_X.config(text=...)).
         _oculto = ttk.Frame(self)  # nao packado
         self.btn_conectar_dominio = ttk.Button(
             _oculto, text="Conectar Domínio", command=self._conectar_dominio,
@@ -696,6 +697,11 @@ class App(tk.Tk):
             _oculto, text="Fonte: plano contas",
             command=self._configurar_fonte_plano_contas, state="disabled",
         )
+        # Labels de status — moram no Frame oculto. O dialog Status
+        # le o texto via cget() e mostra tudo agrupado.
+        self.lbl_planilha = ttk.Label(_oculto, text="(nenhuma planilha carregada)")
+        self.lbl_ofx = ttk.Label(_oculto, text="(nenhum OFX carregado)")
+        self.lbl_dominio = ttk.Label(_oculto, text="")
 
         # --- Corpo: sidebar esquerda + notebook direita ---
         corpo = ttk.Frame(self)
@@ -756,12 +762,6 @@ class App(tk.Tk):
             command=self._carregar_plano_contas, state="disabled", width=26,
         )
         self.btn_carregar_plano.pack(fill="x", pady=2)
-        self.lbl_dominio = ttk.Label(
-            self._sidebar, text="(Domínio não conectado)",
-            foreground="#666", font=("TkDefaultFont", 8),
-            wraplength=200,
-        )
-        self.lbl_dominio.pack(anchor="w", pady=(2, 0))
 
         # --- Grupo 4: Editar/Limpar
         _sep()
@@ -781,18 +781,12 @@ class App(tk.Tk):
             command=self._limpar_ofx, state="disabled", width=26,
         )
         self.btn_limpar_ofx.pack(fill="x", pady=2)
-        self.lbl_planilha = ttk.Label(
-            self._sidebar, text="(nenhuma planilha carregada)",
-            foreground="#666", font=("TkDefaultFont", 8),
-            wraplength=200,
-        )
-        self.lbl_planilha.pack(anchor="w", pady=(2, 0))
-        self.lbl_ofx = ttk.Label(
-            self._sidebar, text="(nenhum OFX carregado)",
-            foreground="#666", font=("TkDefaultFont", 8),
-            wraplength=200,
-        )
-        self.lbl_ofx.pack(anchor="w", pady=(0, 0))
+        # Botão Status: abre popup com o que foi importado (planilha, PDF,
+        # OFX, Domínio). Substitui os labels de status que ficavam aqui.
+        ttk.Button(
+            self._sidebar, text="ℹ Status das importações",
+            command=self._abrir_status, width=26,
+        ).pack(fill="x", pady=2)
 
         # --- Grupo 5: Conciliar/Comparar/Regras
         _sep()
@@ -903,6 +897,87 @@ class App(tk.Tk):
                     pass
 
         return _cm()
+
+    def _abrir_status(self) -> None:
+        """Dialog com o resumo do que foi importado: empresa, Domínio,
+        planilha, OFX. Substitui os labels de status que ficavam na
+        sidebar."""
+        win = tk.Toplevel(self)
+        win.title("Status das importações")
+        win.geometry("520x360")
+        win.transient(self)
+        win.resizable(False, False)
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+
+        ttk.Label(
+            win, text="Status atual das importações",
+            font=("TkDefaultFont", 10, "bold"), foreground="#1f3a68",
+        ).pack(padx=16, pady=(14, 8), anchor="w")
+
+        def _linha(rotulo: str, valor: str, cor_valor: str = "#111") -> None:
+            f = ttk.Frame(win)
+            f.pack(fill="x", padx=16, pady=2)
+            ttk.Label(
+                f, text=rotulo, foreground="#666",
+                font=("TkDefaultFont", 9, "bold"), width=14, anchor="w",
+            ).pack(side="left")
+            ttk.Label(
+                f, text=valor, foreground=cor_valor,
+                font=("TkDefaultFont", 9), wraplength=380, justify="left",
+            ).pack(side="left", fill="x", expand=True)
+
+        # Empresa
+        emp = self.cfg.get("dominio_empresa") or {}
+        emp_txt = (
+            f"{emp['codi_emp']} — {emp.get('razao', '')}"
+            if emp.get("codi_emp") is not None else "(nenhuma selecionada)"
+        )
+        _linha("Empresa:", emp_txt)
+
+        # Domínio
+        if self.conn_dominio is not None:
+            cred = parser_dominio.load_odbc_config()
+            dom_status = f"Conectado — DSN={cred.get('dsn', '?')}"
+            cor = "#065f46"
+        else:
+            dom_status = "Não conectado"
+            cor = "#7f1d1d"
+        _linha("Domínio:", dom_status, cor)
+        _linha(
+            "Pagamentos:",
+            f"{len(self.transacoes_dominio)} parcelas"
+            if self.transacoes_dominio else "(não carregado)",
+        )
+        _linha(
+            "Plano contas:",
+            f"{len(self.plano_contas)} contas analíticas"
+            if self.plano_contas else "(não carregado)",
+        )
+
+        # Planilha
+        _linha("Planilha:", str(self.lbl_planilha.cget("text")))
+        # OFX
+        _linha("OFX:", str(self.lbl_ofx.cget("text")))
+
+        # Conciliação
+        if self.pares_conciliados or self.pendentes_planilha or self.pendentes_ofx:
+            _linha(
+                "Conciliados:",
+                f"{len(self.pares_conciliados)} pares",
+                cor_valor="#065f46",
+            )
+            _linha(
+                "Pendentes:",
+                f"{len(self.pendentes_planilha)} planilha, "
+                f"{len(self.pendentes_ofx)} OFX",
+            )
+
+        ttk.Button(
+            win, text="Fechar", command=win.destroy,
+        ).pack(padx=16, pady=(16, 12), anchor="e")
 
     def _abrir_configuracoes(self) -> None:
         """Dialog de configurações do Domínio: Conectar, Fonte
