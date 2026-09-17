@@ -767,14 +767,24 @@ class App(tk.Tk):
         self._monta_aba_planilha_dados()
         self._monta_aba_ofx_dados()
         self._monta_aba_dominio_dados()
-        # Abas de conciliação (resultado)
+        # Container "Conciliados" — aba super que agrupa TODAS as
+        # ramificações do resultado (Conciliados, Conciliados × Domínio,
+        # Pendentes, Sugestões, Comparação, Aprovações, Lançamentos).
+        # A UI fica menos poluída — o operador vê o painel geral e
+        # navega entre as ramificações num sub-notebook.
+        self._aba_conc_container = ttk.Frame(self.notebook)
+        self.notebook.add(self._aba_conc_container, text="Conciliados")
+        self._notebook_conciliados = ttk.Notebook(self._aba_conc_container)
+        self._notebook_conciliados.pack(fill="both", expand=True)
+        # Sub-abas dentro do container "Conciliados"
         self._monta_aba_conciliados()
+        self._monta_aba_conciliados_dominio()
         self._monta_aba_pendentes()
         self._monta_aba_sugestoes()
-        self._monta_aba_conciliados_dominio()
         self._monta_aba_dominio()
         self._monta_aba_aprovacoes()
         self._monta_aba_lancamentos()
+        # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
     # --------------- Filtros estilo Excel (popup ao clicar no cabeçalho) ---
@@ -1237,8 +1247,8 @@ class App(tk.Tk):
             self._atualiza_headers_dominio()
 
     def _monta_aba_conciliados(self) -> None:
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Conciliados (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
         cols = (
@@ -1286,8 +1296,8 @@ class App(tk.Tk):
         self.tree_conciliados = tree
 
     def _monta_aba_pendentes(self) -> None:
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Pendentes (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Pendentes (0)")
         self._aba_pendentes = aba
 
         instr = ttk.Label(
@@ -1397,8 +1407,8 @@ class App(tk.Tk):
         sb_o.pack(side="right", fill="y")
 
     def _monta_aba_sugestoes(self) -> None:
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Sugestões (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Sugestões (0)")
         self._aba_sugestoes = aba
 
         instr = ttk.Label(
@@ -1450,8 +1460,8 @@ class App(tk.Tk):
         tree.bind("<Control-A>", lambda _e: self._selecionar_todas_sugestoes())
 
     def _monta_aba_conciliados_dominio(self) -> None:
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Conciliados × Domínio (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Conciliados × Domínio (0)")
         self._aba_conciliados_dominio = aba
 
         instr = ttk.Label(
@@ -1531,8 +1541,8 @@ class App(tk.Tk):
         self.tree_conciliados_dominio = tree
 
     def _monta_aba_dominio(self) -> None:
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Domínio (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Comparação (0)")
         self._aba_dominio = aba
 
         # ---- Cabeçalho: instrução + legenda de cores lado a lado
@@ -1910,8 +1920,8 @@ class App(tk.Tk):
         por terem valor pago > 10% acima da parcela do Domínio. Operador
         aprova (casa como Conciliados × Domínio, injeta juros implícito)
         ou rejeita (linha continua pendente)."""
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Aprovações (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Aprovações (0)")
         self._aba_aprovacoes = aba
 
         instr = ttk.Label(
@@ -2014,7 +2024,7 @@ class App(tk.Tk):
                 ),
             )
             self._itens_aprovacoes[iid] = idx
-        self.notebook.tab(
+        self._notebook_conciliados.tab(
             self._aba_aprovacoes,
             text=f"Aprovações ({len(self.aprovacoes_pendentes)})",
         )
@@ -2077,8 +2087,8 @@ class App(tk.Tk):
         self._renderizar_comparacao()
 
     def _monta_aba_lancamentos(self) -> None:
-        aba = ttk.Frame(self.notebook)
-        self.notebook.add(aba, text="Lançamentos contábeis (0)")
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Lançamentos contábeis (0)")
         self._aba_lancamentos = aba
 
         info = ttk.Label(
@@ -2749,7 +2759,7 @@ class App(tk.Tk):
             partes.append(f"caixa {n_caixa_ok}/{n_caixa_falta}")
         if n_ofx_ok or n_ofx_falta:
             partes.append(f"OFX {n_ofx_ok}/{n_ofx_falta}")
-        self.notebook.tab(7, text=f"Comparação ({' | '.join(partes)})")
+        self._notebook_conciliados.tab(self._aba_dominio, text=f"Comparação ({' | '.join(partes)})")
 
         # Atualiza o rotulo do filtro pra o operador ver o efeito
         if hasattr(self, "lbl_filtro_comparacao"):
@@ -3258,7 +3268,7 @@ class App(tk.Tk):
         if not preservar_lancamentos:
             for item in self.tree_dominio.get_children():
                 self.tree_dominio.delete(item)
-            self.notebook.tab(7, text="Comparação (0)")
+            self._notebook_conciliados.tab(self._aba_dominio, text="Comparação (0)")
             self._atualiza_botao_comparar()
 
     def _executar_conciliacao(self) -> None:
@@ -4440,11 +4450,11 @@ class App(tk.Tk):
             self._render_aba_ofx()
         # Atualiza Comparação também (no-op se Domínio não carregado)
         self._recalcular_comparacao()
-        self.notebook.tab(3, text=f"Conciliados ({len(self.pares_conciliados)})")
-        self.notebook.tab(
-            4, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
+        self._notebook_conciliados.tab(self._aba_conciliados, text=f"Conciliados ({len(self.pares_conciliados)})")
+        self._notebook_conciliados.tab(
+            self._aba_pendentes, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
         )
-        self.notebook.tab(5, text=f"Sugestões ({len(self.sugestoes)})")
+        self._notebook_conciliados.tab(self._aba_sugestoes, text=f"Sugestões ({len(self.sugestoes)})")
 
     def _render_conciliados(self) -> None:
         for item in self.tree_conciliados.get_children():
@@ -4785,7 +4795,7 @@ class App(tk.Tk):
             )
 
         total = len(pares) + len(caixa_dominio) + len(ofx_dominio)
-        self.notebook.tab(6, text=f"Conciliados × Domínio ({total})")
+        self._notebook_conciliados.tab(self._aba_conciliados_dominio, text=f"Conciliados × Domínio ({total})")
 
         # Reflete a fila de aprovações que a filtragem construiu.
         self._render_aba_aprovacoes()
@@ -4823,7 +4833,7 @@ class App(tk.Tk):
                 self.itens_tree_planilha[iid] = t
             mostradas += 1
         total = len(self.transacoes_planilha)
-        self.notebook.tab(0, text=f"Planilha ({total})")
+        self.notebook.tab(self._aba_planilha, text=f"Planilha ({total})")
         if hasattr(self, "lbl_filtro_planilha"):
             tem_filtro = termo or tem_filtro_col
             self.lbl_filtro_planilha.config(
@@ -4862,7 +4872,7 @@ class App(tk.Tk):
         label_tab = f"OFX ({total})"
         if n_enriq:
             label_tab = f"OFX ({total} | {n_enriq} enriquecido por PDF)"
-        self.notebook.tab(1, text=label_tab)
+        self.notebook.tab(self._aba_ofx, text=label_tab)
         if hasattr(self, "lbl_filtro_ofx"):
             tem_filtro = termo or tem_filtro_col
             self.lbl_filtro_ofx.config(
@@ -4922,10 +4932,10 @@ class App(tk.Tk):
         }
         if len(empresas_unicas) > 1:
             self.notebook.tab(
-                2, text=f"Domínio dados ({total} | {len(empresas_unicas)} empresas)",
+                self._aba_dominio_dados, text=f"Domínio dados ({total} | {len(empresas_unicas)} empresas)",
             )
         else:
-            self.notebook.tab(2, text=f"Domínio dados ({total})")
+            self.notebook.tab(self._aba_dominio_dados, text=f"Domínio dados ({total})")
         if hasattr(self, "lbl_filtro_dominio"):
             tem_filtro = termo or status_pedido != "Todos" or tem_filtro_col
             self.lbl_filtro_dominio.config(
@@ -5415,9 +5425,9 @@ class App(tk.Tk):
                 ),
             )
             self.itens_lancamentos[iid] = l
-        idx = self.notebook.index(self._aba_lancamentos)
-        self.notebook.tab(
-            idx, text=f"Lançamentos contábeis ({len(self.lancamentos_contabeis)})",
+        self._notebook_conciliados.tab(
+            self._aba_lancamentos,
+            text=f"Lançamentos contábeis ({len(self.lancamentos_contabeis)})",
         )
         # Atualiza label que indica qual empresa está ativa
         if hasattr(self, "lbl_lancamentos_empresa"):

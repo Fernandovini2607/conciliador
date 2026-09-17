@@ -159,6 +159,16 @@ def construir():
     ))
     flow.append(Spacer(1, 0.3 * cm))
     flow.append(caixa_dica(
+        "<b>Layout das abas</b>: o notebook principal tem 5 abas — "
+        "<b>Planilha</b>, <b>OFX</b>, <b>Domínio dados</b>, "
+        "<b>Conciliados</b> e <b>Plano de contas</b>. A aba "
+        "<b>Conciliados</b> é uma super-aba que agrupa as ramificações "
+        "do resultado da conciliação: Conciliados, Conciliados × Domínio, "
+        "Pendentes, Sugestões, Comparação, Aprovações e Lançamentos "
+        "contábeis (basta clicar na sub-aba correspondente)."
+    ))
+    flow.append(Spacer(1, 0.3 * cm))
+    flow.append(caixa_dica(
         "<b>Qual versão está aberta?</b> No topo da janela, ao lado do "
         "seu nome, aparece um número cinza como <b>v2026.09.15</b>. É a "
         "data da build que está na sua máquina. O suporte usa esse "

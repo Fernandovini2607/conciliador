@@ -1,5 +1,13 @@
 # Manual do Conciliador — Como usar no dia a dia
 
+> **Layout das abas**: o notebook principal tem 5 abas — **Planilha**,
+> **OFX**, **Domínio dados**, **Conciliados** e **Plano de contas**.
+> A aba **Conciliados** é uma super-aba que agrupa as ramificações
+> do resultado da conciliação: *Conciliados*, *Conciliados × Domínio*,
+> *Pendentes*, *Sugestões*, *Comparação*, *Aprovações* e
+> *Lançamentos contábeis* (basta clicar na sub-aba correspondente).
+
+
 Guia passo a passo para operar o sistema. Não é sobre instalar — é
 sobre **usar** depois de instalado.
 
