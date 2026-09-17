@@ -50,6 +50,11 @@ botões pra importar cada uma ficam na **sidebar esquerda** ("Fontes de
 dados"), na ordem do fluxo diário: Selecionar empresa → Abrir planilha
 → Importar comprovantes PDF → Importar OFX.
 
+> **Ganhar espaço de tela**: depois que você importou tudo que
+> precisava, clique no botão **◀ Recolher** no rodapé da sidebar. Ela
+> some e você ganha ~200px de largura pras abas de dados. Pra abrir
+> de novo, clique no botão **▶** que fica na borda esquerda.
+
 ### 3.1 Planilha de contas a pagar (opcional)
 - Clique em **Abrir planilha (.xlsx)** (sidebar esquerda) e escolha o
   arquivo.

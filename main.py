@@ -740,25 +740,41 @@ class App(tk.Tk):
 
         # Sidebar esquerda com as 4 acoes principais de origem de dados,
         # na ordem do fluxo diario: empresa -> planilha -> comprovantes -> OFX.
-        sidebar = ttk.LabelFrame(corpo, text="Fontes de dados", padding=8)
-        sidebar.pack(side="left", fill="y", padx=(0, 8))
+        self._sidebar = ttk.LabelFrame(corpo, text="Fontes de dados", padding=8)
+        self._sidebar.pack(side="left", fill="y", padx=(0, 8))
         self.btn_empresa = ttk.Button(
-            sidebar, text="Selecionar empresa",
+            self._sidebar, text="Selecionar empresa",
             command=self._selecionar_empresa, state="disabled", width=24,
         )
         self.btn_empresa.pack(fill="x", pady=(0, 4))
         ttk.Button(
-            sidebar, text="Abrir planilha (.xlsx)",
+            self._sidebar, text="Abrir planilha (.xlsx)",
             command=self._abrir_planilha, width=24,
         ).pack(fill="x", pady=4)
         ttk.Button(
-            sidebar, text="Importar comprovantes PDF",
+            self._sidebar, text="Importar comprovantes PDF",
             command=self._importar_comprovantes_pdf, width=24,
         ).pack(fill="x", pady=4)
         ttk.Button(
-            sidebar, text="Importar OFX",
+            self._sidebar, text="Importar OFX",
             command=self._abrir_ofx, width=24,
         ).pack(fill="x", pady=4)
+        # Botao pra RECOLHER a sidebar quando terminou a importacao —
+        # libera espaco pra visualizacao dos dados nas abas.
+        ttk.Separator(self._sidebar, orient="horizontal").pack(fill="x", pady=(8, 4))
+        ttk.Button(
+            self._sidebar, text="◀ Recolher",
+            command=self._toggle_sidebar, width=24,
+        ).pack(fill="x", pady=(0, 0))
+
+        # Botao mini pra REABRIR a sidebar — fica escondido enquanto a
+        # sidebar esta visivel. Fica ancorado no lado esquerdo do corpo,
+        # ocupando pouco espaco (largura 3, altura total).
+        self._btn_expandir_sidebar = ttk.Button(
+            corpo, text="▶", command=self._toggle_sidebar, width=3,
+        )
+        # NAO packado ainda; so aparece quando a sidebar recolhe.
+        self._sidebar_visivel = True
 
         self.notebook = ttk.Notebook(corpo)
         self.notebook.pack(side="left", fill="both", expand=True)
@@ -786,6 +802,23 @@ class App(tk.Tk):
         self._monta_aba_lancamentos()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
+
+    def _toggle_sidebar(self) -> None:
+        """Recolhe/expande a sidebar 'Fontes de dados' pra liberar espaço
+        pras abas de dados. Útil depois de importar planilha/OFX/PDF —
+        o operador não precisa mais dos botões e ganha ~200px de largura."""
+        if self._sidebar_visivel:
+            self._sidebar.pack_forget()
+            self._btn_expandir_sidebar.pack(
+                side="left", fill="y", padx=(0, 8), before=self.notebook,
+            )
+            self._sidebar_visivel = False
+        else:
+            self._btn_expandir_sidebar.pack_forget()
+            self._sidebar.pack(
+                side="left", fill="y", padx=(0, 8), before=self.notebook,
+            )
+            self._sidebar_visivel = True
 
     # --------------- Filtros estilo Excel (popup ao clicar no cabeçalho) ---
 

@@ -217,6 +217,12 @@ def construir():
         "empresa → Abrir planilha → Importar comprovantes PDF → Importar OFX.",
         TEXTO,
     ))
+    flow.append(caixa_dica(
+        "<b>Ganhar espaço de tela</b>: depois que você importou tudo que "
+        "precisava, clique no botão <b>◀ Recolher</b> no rodapé da sidebar. "
+        "Ela some e você ganha ~200px de largura pras abas de dados. Pra "
+        "abrir de novo, clique no botão <b>▶</b> que fica na borda esquerda."
+    ))
 
     flow.append(Paragraph("3.1 Planilha de contas a pagar (opcional)", H3))
     flow.append(bullets([
