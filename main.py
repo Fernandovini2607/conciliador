@@ -5370,6 +5370,20 @@ class App(tk.Tk):
                 v = extras.get("juros_implicito")
             return f"{v:.2f}" if v is not None else ""
 
+        def _venc_com_prio_dominio(t_local, t_dom) -> str:
+            """Data de vencimento com prioridade pro Domínio.
+
+            Regra: quando o Domínio tem parcela casada, a data de
+            vencimento dele é a verdade contábil — a planilha pode
+            estar com data errada (digitação, importação sem revisão).
+            Aqui devolvemos a data do Domínio nesses casos, formatada.
+            Se não há Domínio, cai pra data local (planilha/OFX)."""
+            if t_dom is not None and t_dom.data:
+                return t_dom.data.strftime("%d/%m/%Y")
+            if t_local is not None and t_local.data:
+                return t_local.data.strftime("%d/%m/%Y")
+            return ""
+
         def _valor_e_pago(t) -> tuple[str, str]:
             """Devolve ('valor formatado', 'valor pago formatado').
             Valor prefere extras['valor_parcela']; pago prefere
@@ -5414,12 +5428,13 @@ class App(tk.Tk):
                     f"Δ {par.diff_dias_dominio}d, R$ {par.diff_valor_dominio:.2f}"
                 )
             valor_txt, pago_txt = _valor_e_pago(par.planilha)
+            venc_txt = _venc_com_prio_dominio(par.planilha, par.dominio)
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
                     tipo_txt,
                     origem,
-                    par.planilha.data.strftime("%d/%m/%Y"),
+                    venc_txt,
                     pagto_txt,
                     valor_txt,
                     pago_txt,
@@ -5476,12 +5491,13 @@ class App(tk.Tk):
             )
 
             valor_txt, pago_txt = _valor_e_pago(t_p)
+            venc_txt = _venc_com_prio_dominio(t_p, t_dom)
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
                     "Caixa",                              # Tipo
                     "Caixa geral",                        # Origem
-                    t_p.data.strftime("%d/%m/%Y"),
+                    venc_txt,
                     pagto_txt,
                     valor_txt,
                     pago_txt,
@@ -5535,12 +5551,13 @@ class App(tk.Tk):
                 diff_dom = f"Δ {d_d}d, R$ {d_v:.2f}"
 
             valor_txt, pago_txt = _valor_e_pago(t_o)
+            venc_txt = _venc_com_prio_dominio(t_o, t_dom)
             self.tree_conciliados_dominio.insert(
                 "", "end",
                 values=(
                     "OFX",                                # Tipo
                     origem,                               # Origem = banco do OFX
-                    t_o.data.strftime("%d/%m/%Y"),
+                    venc_txt,
                     pagto_txt,
                     valor_txt,
                     pago_txt,

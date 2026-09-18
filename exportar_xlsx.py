@@ -181,10 +181,15 @@ def exportar_conciliados_dominio(
         if par.diff_dias_dominio or par.diff_valor_dominio:
             diff_dom = f"{par.diff_dias_dominio}d, R$ {par.diff_valor_dominio:.2f}"
 
+        # Data de vencimento: prioridade Domínio (verdade contábil)
+        venc_data = (
+            par.dominio.data if par.dominio and par.dominio.data
+            else par.planilha.data
+        )
         valores = [
             tipo_txt,
             origem,
-            _fmt_data(par.planilha.data),
+            _fmt_data(venc_data),
             _fmt_data(pagto),
             _valor_par(par.planilha),
             _valor_pg(par.planilha),
