@@ -236,10 +236,12 @@ def exportar_conciliados_dominio(
             if t_p.extras.get("historico") else "(sem OFX)"
         )
 
+        # Data de vencimento: prioridade Domínio (verdade contábil)
+        venc_data = t_dom.data if (t_dom and t_dom.data) else t_p.data
         valores = [
             "Caixa",
             "Caixa geral",
-            _fmt_data(t_p.data),
+            _fmt_data(venc_data),
             _fmt_data(pagto),
             _valor_par(t_p),
             _valor_pg(t_p),
@@ -283,10 +285,13 @@ def exportar_conciliados_dominio(
             if d_d or d_v:
                 diff_dom = f"{d_d}d, R$ {d_v:.2f}"
 
+            # Data de vencimento: prioridade Domínio (verdade contábil).
+            # Coluna Pagamento sempre a data do OFX (dinheiro efetivamente saiu).
+            venc_data = t_dom.data if (t_dom and t_dom.data) else t_o.data
             valores = [
                 "OFX",
                 origem,
-                _fmt_data(t_o.data),
+                _fmt_data(venc_data),
                 _fmt_data(t_o.data),
                 _valor_par(t_o),
                 _valor_pg(t_o),
