@@ -2236,24 +2236,26 @@ class App(tk.Tk):
         # iid → Par (para linhas P×OFX) OU Transacao (para Caixa geral)
         self._itens_comparacao: dict[str, Par | Transacao] = {}
 
+        # Botoes de acao — linha horizontal na parte de baixo da aba,
+        # deixa o operador ver todos de uma vez sem precisar rolar.
         botoes = ttk.Frame(aba)
-        botoes.pack(side="bottom", fill="x")
+        botoes.pack(side="bottom", fill="x", padx=6, pady=6)
         ttk.Button(
             botoes, text="Editar dados",
             command=self._editar_par_amarelo,
-        ).pack(side="top", anchor="w", padx=6, pady=(6, 2))
+        ).pack(side="left", padx=(0, 4))
         ttk.Button(
             botoes, text="Lançar manualmente",
             command=self._lancar_manual,
-        ).pack(side="top", anchor="w", padx=6, pady=2)
+        ).pack(side="left", padx=4)
         ttk.Button(
             botoes, text="Criar regra de fornecedor (do amarelo selecionado)",
             command=self._criar_regra_fornecedor,
-        ).pack(side="top", anchor="w", padx=6, pady=(2, 2))
+        ).pack(side="left", padx=4)
         ttk.Button(
             botoes, text="Exportar pendências (amarelos + cinzas + laranjas) para Excel",
             command=self._exportar_pendencias_comparacao,
-        ).pack(side="top", anchor="w", padx=6, pady=(2, 6))
+        ).pack(side="left", padx=4)
 
     def _editar_par_amarelo(self) -> None:
         """Edita os dados do lado da planilha de um par amarelo (Conciliado,
