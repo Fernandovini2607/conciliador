@@ -4507,10 +4507,18 @@ class App(tk.Tk):
         ]
 
         def _melhor_match_dominio(
-            cnpj_p_norm: str, data_p, valor_p,
+            cnpj_p_norm: str, data_p, valor_p, nf_p_norm: str = "",
         ) -> tuple[int | None, int, Decimal]:
             """Procura na lista dominio_disponivel o melhor match 2-de-3.
-            Devolve (idx ou None, diff_dias, diff_valor)."""
+            Devolve (idx ou None, diff_dias, diff_valor).
+
+            **Guard-rail contra falso positivo por NF divergente**: quando
+            AMBOS os lados têm NF preenchida e elas NÃO batem (comparação
+            tolerante via _nfs_batem), NÃO considera match — mesmo que
+            CNPJ + data bateriam. Sem isso, boletos do mesmo fornecedor
+            pagos no mesmo dia mas com NFs distintas casavam por CNPJ+data,
+            consumindo a parcela errada do Domínio e deixando o pagamento
+            correto órfão."""
             melhor_idx: int | None = None
             melhor_score: tuple | None = None
             melhor_d = 0
@@ -4518,6 +4526,13 @@ class App(tk.Tk):
             for i, t in enumerate(dominio_disponivel):
                 cnpj_d = self._normaliza_cnpj(t.extras.get("cnpj", ""))
                 valor_d = _quant(t.valor)
+                nf_d_norm = self._normaliza_nf(t.extras.get("numero_nf", ""))
+                # Guard-rail NF: se AMBAS preenchidas e não batem, pula
+                if (
+                    nf_p_norm and nf_d_norm
+                    and not self._nfs_batem(nf_p_norm, nf_d_norm)
+                ):
+                    continue
                 matches = 0
                 if cnpj_p_norm and cnpj_p_norm == cnpj_d:
                     matches += 1
@@ -4541,8 +4556,9 @@ class App(tk.Tk):
         pares_sem_match_f3: list[Par] = []
         for par in pares_sem_match:
             cnpj_p = self._normaliza_cnpj(par.planilha.extras.get("cnpj", ""))
+            nf_p = self._normaliza_nf(par.planilha.extras.get("numero_nf", ""))
             idx, dd, dv = _melhor_match_dominio(
-                cnpj_p, par.planilha.data, _quant(par.planilha.valor),
+                cnpj_p, par.planilha.data, _quant(par.planilha.valor), nf_p,
             )
             if idx is not None:
                 t_dom = dominio_disponivel.pop(idx)
@@ -4565,8 +4581,9 @@ class App(tk.Tk):
         pendentes_sem_match_f3: list[Transacao] = []
         for t_p in pendentes_sem_match:
             cnpj_p = self._normaliza_cnpj(t_p.extras.get("cnpj", ""))
+            nf_p = self._normaliza_nf(t_p.extras.get("numero_nf", ""))
             idx, dd, dv = _melhor_match_dominio(
-                cnpj_p, t_p.data, _quant(t_p.valor),
+                cnpj_p, t_p.data, _quant(t_p.valor), nf_p,
             )
             if idx is not None:
                 t_dom = dominio_disponivel.pop(idx)
@@ -4594,8 +4611,9 @@ class App(tk.Tk):
         pendentes_ofx_sem_match_f3: list[Transacao] = []
         for t_o in pendentes_ofx_sem_match:
             cnpj_o = self._normaliza_cnpj(t_o.extras.get("cnpj", ""))
+            nf_o = self._normaliza_nf(t_o.extras.get("numero_nf", ""))
             idx, dd, dv = _melhor_match_dominio(
-                cnpj_o, t_o.data, _quant(t_o.valor),
+                cnpj_o, t_o.data, _quant(t_o.valor), nf_o,
             )
             if idx is not None:
                 t_dom = dominio_disponivel.pop(idx)
