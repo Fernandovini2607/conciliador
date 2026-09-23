@@ -96,8 +96,10 @@ def tabela_abas() -> Table:
         ["6", "Conciliados × Domínio", "Pares triple-matched + Caixa geral + OFX "
          "(sem planilha) que casaram no Domínio. Botão Exportar Excel."],
         ["7", "Comparação", "6 status coloridos (ok, falta dom, caixa ok/falta, "
-         "OFX ok/falta). Legenda + 4 botões (Editar dados, Lançar manual, "
-         "Criar regra, Exportar pendências)."],
+         "OFX ok/falta). Colunas: Status, Vencimento, Pagamento, Valor, Emissão, "
+         "Nº NF, CNPJ, Fornecedor, Histórico, Tipo, Memo OFX. Botão Legenda "
+         "detalhada + 4 botões de ação em linha horizontal no rodapé "
+         "(Editar dados, Lançar manual, Criar regra, Exportar pendências)."],
         ["8", "Lançamentos contábeis", "Saídas geradas por regras ou manualmente "
          "(6 tipos). Botões Editar, Excluir, Exportar Excel."],
         ["9", "Plano de contas", "Plano da empresa carregado do Domínio, "
@@ -472,7 +474,11 @@ def construir() -> list:
         "mais curto pra evitar falso positivo com NFs muito genéricas.",
         "<b>Fase 2 — 2 de 3</b>: pelo menos 2 dentre (CNPJ, data, valor) "
         "iguais. O campo restante pode divergir; a diferença aparece na "
-        "coluna Δ Domínio.",
+        "coluna Δ Domínio. "
+        "<b>Guard-rail NF</b>: quando AMBOS os lados têm NF preenchida e "
+        "elas <b>não batem</b> (via comparação tolerante), o candidato é "
+        "descartado — mesmo com CNPJ+data batendo. Evita boletos do mesmo "
+        "fornecedor pagos no mesmo dia se cruzarem incorretamente.",
         "<b>Fase 3 — Fornecedor + Valor</b>: valor exato E (CNPJ bate "
         "OU nome bate por substring normalizada OU <b>CNPJ raiz bate</b>). "
         "Data usada apenas como desempate — NÃO precisa bater. Útil "
@@ -490,12 +496,14 @@ def construir() -> list:
         "vira <b>juros implícito</b> na coluna Juros. Quando a diferença "
         "passa de 10%, o casamento não é feito automaticamente — vai pra "
         "aba <b>Aprovações</b> pra o operador decidir Aprovar/Rejeitar.",
-        "<b>Reuso de parcela 'Parcial' na Fase 4</b>: quando o Domínio "
-        "marca a parcela com status <i>Parcial</i> (parcela que recebe "
-        "vários pagamentos parciais), a Fase 4 permite vincular a mesma "
-        "parcela a <b>múltiplos pagamentos</b> — não é consumida ao casar. "
-        "Reflete a realidade contábil de uma parcela quitada por vários "
-        "lançamentos bancários. Parcelas <i>Aberto</i> continuam exclusivas.",
+        "<b>Reuso de parcela em pagamento parcial (Fases 2, 4 e 6)</b>: "
+        "a parcela do Domínio <b>não é consumida</b> ao casar quando: "
+        "(a) status é <i>Parcial</i> (marcado explicitamente), OU "
+        "(b) o valor pago é ≤ 95% da parcela (heurística — detecta "
+        "parcelamento mesmo com status <i>Aberto</i>). Sem esse reuso, "
+        "só o primeiro dos N pagamentos parciais casava e os demais "
+        "viravam órfãos. Aplicado nas 3 fases que casam sem exigir valor "
+        "exato (Fases 2, 4 e 6).",
         "<b>Fase 6 — Fornecedor forte + valor ≤5% + data exata (sem "
         "NF)</b>: última tentativa quando as fases anteriores não casaram. "
         "Cobre casos onde o 'Nº NF' da planilha/OFX é o <b>Nosso Número "
@@ -530,7 +538,12 @@ def construir() -> list:
         "CNPJ/fornecedor sem digitação.",
         "<b>Aba Conciliados × Domínio</b>: dados priorizam sempre o Domínio "
         "> planilha/PDF > OFX. Se o CNPJ da planilha está errado ou vazio, "
-        "puxa o do Domínio (que é a fonte contábil confiável).",
+        "puxa o do Domínio (que é a fonte contábil confiável). "
+        "<b>Data de vencimento</b> também segue essa prioridade: quando "
+        "o pagamento casou com uma parcela do Domínio, exibe a data de "
+        "vencimento do Domínio (verdade contábil) — planilhas às vezes "
+        "vêm com data de vencimento errada. Aplicado também na exportação "
+        "Excel (aba Conciliados × Domínio).",
     ]))
 
     flow.append(Paragraph("Preservação seletiva ao limpar", H2))
