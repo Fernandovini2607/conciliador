@@ -2182,12 +2182,13 @@ class App(tk.Tk):
         self.lbl_filtro_comparacao.pack(side="left", padx=(10, 0))
 
         cols = (
-            "status", "vencimento", "valor", "emissao", "nf",
+            "status", "vencimento", "pagamento", "valor", "emissao", "nf",
             "cnpj", "fornecedor", "memo_ofx",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("status", text="Status")
         tree.heading("vencimento", text="Vencimento")
+        tree.heading("pagamento", text="Pagamento")
         tree.heading("valor", text="Valor")
         tree.heading("emissao", text="Emissão")
         tree.heading("nf", text="Nº NF")
@@ -2196,6 +2197,7 @@ class App(tk.Tk):
         tree.heading("memo_ofx", text="Memo OFX")
         tree.column("status", width=180, anchor="w")
         tree.column("vencimento", width=85, anchor="center")
+        tree.column("pagamento", width=85, anchor="center")
         tree.column("valor", width=100, anchor="e")
         tree.column("emissao", width=85, anchor="center")
         tree.column("nf", width=75, anchor="center")
@@ -3378,12 +3380,22 @@ class App(tk.Tk):
             cnpj = origem_extras.get("cnpj") or extras_fallback.get("cnpj", "")
             fornecedor = origem_extras.get("fornecedor") or extras_fallback.get("fornecedor", "")
             memo = t_ofx.descricao if t_ofx else "(Caixa geral — sem OFX)"
+            # Data de pagamento: preferência planilha.data_pagamento (data
+            # que o operador registrou), fallback pra ofx.data (dia que o
+            # dinheiro efetivamente saiu do banco).
+            data_pagto = None
+            if t_planilha and getattr(t_planilha, "data_pagamento", None):
+                data_pagto = t_planilha.data_pagamento
+            elif t_ofx and t_ofx.data:
+                data_pagto = t_ofx.data
+            pagto_txt = data_pagto.strftime("%d/%m/%Y") if data_pagto else ""
 
             iid = self.tree_dominio.insert(
                 "", "end",
                 values=(
                     rotulo,
                     t_planilha.data.strftime("%d/%m/%Y"),
+                    pagto_txt,
                     f"{t_planilha.valor:.2f}",
                     _fmt_data(emissao),
                     nf,
