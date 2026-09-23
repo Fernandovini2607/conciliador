@@ -2183,7 +2183,7 @@ class App(tk.Tk):
 
         cols = (
             "status", "vencimento", "pagamento", "valor", "emissao", "nf",
-            "cnpj", "fornecedor", "memo_ofx",
+            "cnpj", "fornecedor", "historico", "tipo", "memo_ofx",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("status", text="Status")
@@ -2194,6 +2194,8 @@ class App(tk.Tk):
         tree.heading("nf", text="Nº NF")
         tree.heading("cnpj", text="CNPJ")
         tree.heading("fornecedor", text="Fornecedor")
+        tree.heading("historico", text="Histórico")
+        tree.heading("tipo", text="Tipo")
         tree.heading("memo_ofx", text="Memo OFX")
         tree.column("status", width=180, anchor="w")
         tree.column("vencimento", width=85, anchor="center")
@@ -2203,6 +2205,8 @@ class App(tk.Tk):
         tree.column("nf", width=75, anchor="center")
         tree.column("cnpj", width=130, anchor="w")
         tree.column("fornecedor", width=220, anchor="w")
+        tree.column("historico", width=200, anchor="w")
+        tree.column("tipo", width=100, anchor="w")
         tree.column("memo_ofx", width=200, anchor="w")
         tree.tag_configure("ok", background="#d4edda")
         tree.tag_configure("falta_dominio", background="#fff3cd")
@@ -3379,6 +3383,13 @@ class App(tk.Tk):
             nf = origem_extras.get("numero_nf") or extras_fallback.get("numero_nf", "")
             cnpj = origem_extras.get("cnpj") or extras_fallback.get("cnpj", "")
             fornecedor = origem_extras.get("fornecedor") or extras_fallback.get("fornecedor", "")
+            # Histórico e Tipo: vêm da planilha (aba Planilha dados brutos).
+            # Prioridade planilha por serem campos operacionais que o
+            # contador registra ao lançar o pagamento; sem eles, tenta
+            # extras do Domínio (ex.: pagamentos importados via SQL livre
+            # que trazem um histórico).
+            historico = extras_fallback.get("historico") or origem_extras.get("historico", "")
+            tipo = extras_fallback.get("tipo") or origem_extras.get("tipo", "")
             memo = t_ofx.descricao if t_ofx else "(Caixa geral — sem OFX)"
             # Data de pagamento: preferência planilha.data_pagamento (data
             # que o operador registrou), fallback pra ofx.data (dia que o
@@ -3401,6 +3412,8 @@ class App(tk.Tk):
                     nf,
                     cnpj,
                     fornecedor,
+                    historico,
+                    tipo,
                     memo,
                 ),
                 tags=(status,),
