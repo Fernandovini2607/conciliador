@@ -6,7 +6,7 @@ REM
 REM Uso: edite a variavel NF_ALVO abaixo, salve e clique duplo.
 
 REM ============ CONFIGURE A NF QUE QUER DEPURAR ============
-set NF_ALVO=194304
+set NF_ALVO=276158
 REM =========================================================
 
 cd /d "%~dp0"
