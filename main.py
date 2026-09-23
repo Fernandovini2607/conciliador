@@ -4798,12 +4798,31 @@ class App(tk.Tk):
                     melhor_v = dv
             return melhor_t, melhor_d, melhor_v
 
-        def _consome_dominio_f4(t_dom) -> None:
+        def _consome_dominio_f4(t_dom, fonte_dados=None) -> None:
             """Consome a parcela do Domínio após match de Fase 4.
-            Se status='Parcial', NÃO remove — mantém disponível para
-            outros pagamentos parciais casarem com ela também."""
+
+            NÃO consome (mantém disponível pra outros pagamentos casarem)
+            em dois casos:
+
+            1. Status = 'Parcial' (marcado explicitamente no Domínio).
+            2. **Pagamento parcial detectado automaticamente**: quando o
+               valor pago é significativamente menor que a parcela
+               (≤ 95% do valor da parcela). Isso acontece quando o cliente
+               paga uma parcela do Domínio (ex: R$ 90k) em várias vezes
+               (ex: 3× R$ 30k) e o Domínio ainda não recebeu baixa —
+               continua status 'Aberto' com valor pago 0. Sem isso, só o
+               primeiro dos vários pagamentos parciais casava e os
+               outros ficavam órfãos.
+            """
             if _eh_parcial(t_dom):
-                return  # parcela reutilizável — não remove nem marca
+                return
+            if fonte_dados is not None:
+                valor_pago = _quant(fonte_dados.valor)
+                valor_parcela = _quant(t_dom.valor)
+                if valor_parcela > 0 and (
+                    valor_pago <= valor_parcela * Decimal("0.95")
+                ):
+                    return  # pagamento parcial → parcela ainda pode receber outros
             try:
                 dominio_disponivel.remove(t_dom)
             except ValueError:
@@ -4874,7 +4893,7 @@ class App(tk.Tk):
                 par.dominio = t_dom
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
-                _consome_dominio_f4(t_dom)
+                _consome_dominio_f4(t_dom, par.planilha)
                 if _tem_nf_debug(par.planilha) or _tem_nf_debug(t_dom):
                     _log(
                         f"[F4 par] CASOU par(NF={nf_p} valor="
@@ -4901,7 +4920,7 @@ class App(tk.Tk):
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                _consome_dominio_f4(t_dom)
+                _consome_dominio_f4(t_dom, t_p)
                 if _tem_nf_debug(t_p) or _tem_nf_debug(t_dom):
                     _log(
                         f"[F4 pend_plan] CASOU planilha(NF={nf_p} "
@@ -4965,7 +4984,7 @@ class App(tk.Tk):
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                _consome_dominio_f4(t_dom)
+                _consome_dominio_f4(t_dom, t_o)
 
         # ---------- FASE 6: fornecedor forte + valor ≤5% + data exata
         # Sem exigir NF. Cobre casos onde "Nº NF" da planilha/OFX é
@@ -5043,7 +5062,7 @@ class App(tk.Tk):
                 par.dominio = t_dom
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
-                _consome_dominio_f4(t_dom)
+                _consome_dominio_f4(t_dom, par.planilha)
 
         # Pendentes planilha — Fase 6
         for t_p in pendentes_sem_match_f6:
@@ -5057,7 +5076,7 @@ class App(tk.Tk):
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                _consome_dominio_f4(t_dom)
+                _consome_dominio_f4(t_dom, t_p)
 
         # Pendentes OFX — Fase 6 (raramente casa; OFX raramente traz CNPJ
         # exceto quando enriquecido por PDF)
@@ -5072,7 +5091,7 @@ class App(tk.Tk):
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                _consome_dominio_f4(t_dom)
+                _consome_dominio_f4(t_dom, t_o)
 
         # Dump do log de debug (se ativado via DEBUG_NF)
         if _nf_debug and _log_lines:
