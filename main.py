@@ -4506,6 +4506,24 @@ class App(tk.Tk):
             t for t in self.transacoes_dominio if id(t) not in usados
         ]
 
+        def _eh_pagto_parcial(t_dom, valor_pago) -> bool:
+            """True se o pagamento é claramente parcial em relação à
+            parcela do Domínio — nesse caso a parcela deve permanecer
+            disponível pra outros pagamentos casarem com ela.
+
+            Duas condições dão parcial:
+            1. status = 'Parcial' (explícito no Domínio).
+            2. valor_pago ≤ 95% da parcela (heurística: pagamento
+               significativamente menor, típico de parcelamento).
+            Usado tanto pela Fase 2 (2-de-3) quanto pela Fase 4/6."""
+            if str(t_dom.extras.get("status", "")).strip().lower() == "parcial":
+                return True
+            v_parcela = _quant(t_dom.valor)
+            v_pago = _quant(valor_pago)
+            if v_parcela > 0 and v_pago <= v_parcela * Decimal("0.95"):
+                return True
+            return False
+
         def _melhor_match_dominio(
             cnpj_p_norm: str, data_p, valor_p, nf_p_norm: str = "",
         ) -> tuple[int | None, int, Decimal]:
@@ -4561,11 +4579,15 @@ class App(tk.Tk):
                 cnpj_p, par.planilha.data, _quant(par.planilha.valor), nf_p,
             )
             if idx is not None:
-                t_dom = dominio_disponivel.pop(idx)
+                t_dom = dominio_disponivel[idx]
                 par.dominio = t_dom
                 par.diff_dias_dominio = dd
                 par.diff_valor_dominio = dv
-                usados.add(id(t_dom))
+                # Se é pagamento parcial, NÃO consome a parcela do Domínio
+                # — outros pagamentos parciais podem casar com ela também
+                if not _eh_pagto_parcial(t_dom, par.planilha.valor):
+                    dominio_disponivel.pop(idx)
+                    usados.add(id(t_dom))
                 if _tem_nf_debug(par.planilha) or _tem_nf_debug(t_dom):
                     _log(
                         f"[F2 par] CASOU par(NF="
@@ -4586,13 +4608,17 @@ class App(tk.Tk):
                 cnpj_p, t_p.data, _quant(t_p.valor), nf_p,
             )
             if idx is not None:
-                t_dom = dominio_disponivel.pop(idx)
+                t_dom = dominio_disponivel[idx]
                 self.pendentes_planilha_dominio[id(t_p)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                usados.add(id(t_dom))
+                # Se é pagamento parcial, NÃO consome (ver comentário
+                # análogo na Fase 2 dos pares)
+                if not _eh_pagto_parcial(t_dom, t_p.valor):
+                    dominio_disponivel.pop(idx)
+                    usados.add(id(t_dom))
                 if _tem_nf_debug(t_p) or _tem_nf_debug(t_dom):
                     _log(
                         f"[F2 pend_plan] CASOU planilha(data={t_p.data} "
@@ -4616,13 +4642,17 @@ class App(tk.Tk):
                 cnpj_o, t_o.data, _quant(t_o.valor), nf_o,
             )
             if idx is not None:
-                t_dom = dominio_disponivel.pop(idx)
+                t_dom = dominio_disponivel[idx]
                 self.pendentes_ofx_dominio[id(t_o)] = {
                     "dominio": t_dom,
                     "diff_dias": dd,
                     "diff_valor": dv,
                 }
-                usados.add(id(t_dom))
+                # Não consome se é pagamento parcial (permite outros
+                # pagamentos casarem com a mesma parcela)
+                if not _eh_pagto_parcial(t_dom, t_o.valor):
+                    dominio_disponivel.pop(idx)
+                    usados.add(id(t_dom))
             else:
                 pendentes_ofx_sem_match_f3.append(t_o)
 
