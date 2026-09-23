@@ -2219,25 +2219,17 @@ class App(tk.Tk):
         tree.tag_configure("ofx_falta", background="#ffe5cc")         # laranja claro
 
         sb = ttk.Scrollbar(aba, orient="vertical", command=tree.yview)
-
         sb_x = ttk.Scrollbar(aba, orient="horizontal", command=tree.xview)
-
         tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
-
-        sb_x.pack(side="bottom", fill="x")
-
-
-        sb.pack(side="right", fill="y")
-
-
-        tree.pack(side="left", fill="both", expand=True)
 
         self.tree_dominio = tree
         # iid → Par (para linhas P×OFX) OU Transacao (para Caixa geral)
         self._itens_comparacao: dict[str, Par | Transacao] = {}
 
-        # Botoes de acao — linha horizontal na parte de baixo da aba,
-        # deixa o operador ver todos de uma vez sem precisar rolar.
+        # Botoes de acao — PACKADOS ANTES do tree pra ficarem sempre
+        # visiveis embaixo (mesma tecnica da aba Aprovacoes). Se packar
+        # depois do tree.pack(expand=True), o tree engole o espaco e
+        # os botoes ficam invisiveis.
         botoes = ttk.Frame(aba)
         botoes.pack(side="bottom", fill="x", padx=6, pady=6)
         ttk.Button(
@@ -2256,6 +2248,11 @@ class App(tk.Tk):
             botoes, text="Exportar pendências (amarelos + cinzas + laranjas) para Excel",
             command=self._exportar_pendencias_comparacao,
         ).pack(side="left", padx=4)
+
+        # Scrollbars e tree (packadas por ultimo — ocupam o resto)
+        sb_x.pack(side="bottom", fill="x")
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
 
     def _editar_par_amarelo(self) -> None:
         """Edita os dados do lado da planilha de um par amarelo (Conciliado,
