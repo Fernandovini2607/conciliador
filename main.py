@@ -982,6 +982,9 @@ class App(tk.Tk):
         # Abas de dados crus (origem) — vêm primeiro no fluxo de leitura
         self._monta_aba_planilha_dados()
         self._monta_aba_ofx_dados()
+        # Aba de OFX de outras filiais — logo ao lado da OFX principal
+        # (só populada quando o grupo empresarial tem 2+ empresas).
+        self._monta_aba_ofx_outras_filiais()
         self._monta_aba_dominio_dados()
         # Container "Conciliados" — aba super que agrupa TODAS as
         # ramificações do resultado (Conciliados, Conciliados × Domínio,
@@ -1000,10 +1003,6 @@ class App(tk.Tk):
         self._monta_aba_dominio()
         self._monta_aba_aprovacoes()
         self._monta_aba_lancamentos()
-        # OFX de outras filiais — aparece só como visualização/rastreio;
-        # as transações também estão em self.transacoes_ofx pra
-        # participar da conciliação normal.
-        self._monta_aba_ofx_outras_filiais()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
@@ -2684,12 +2683,12 @@ class App(tk.Tk):
 
     def _monta_aba_ofx_outras_filiais(self) -> None:
         """Aba dedicada aos OFX importados de outras empresas do grupo
-        (matriz+filiais). Mostra só as transações marcadas com
-        extras['origem_filial'] pra o operador rastrear quais pagamentos
-        vieram de outra filial. Elas também entram na conciliação normal
-        via self.transacoes_ofx."""
-        aba = ttk.Frame(self._notebook_conciliados)
-        self._notebook_conciliados.add(aba, text="OFX outras filiais (0)")
+        (matriz+filiais). Fica no notebook principal, ao lado da aba OFX
+        — visualização/rastreio das transações marcadas com
+        extras['origem_filial']. Elas também entram em self.transacoes_ofx
+        pra participar da conciliação normal."""
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="OFX outras filiais (0)")
         self._aba_ofx_outras_filiais = aba
 
         # Cabeçalho explicativo
@@ -2750,7 +2749,7 @@ class App(tk.Tk):
                 t.extras.get("origem_filial", "") or "",
             ))
         total = len(self.transacoes_ofx_outras_filiais)
-        self._notebook_conciliados.tab(
+        self.notebook.tab(
             self._aba_ofx_outras_filiais,
             text=f"OFX outras filiais ({total})",
         )
