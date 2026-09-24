@@ -4283,8 +4283,16 @@ class App(tk.Tk):
             # Brutos são a fonte da verdade; visível é derivado depois.
             self.pendentes_planilha_brutos = list(pend_p)
             self.pendentes_planilha = list(pend_p)
-            self.pendentes_ofx_brutos = list(pend_o)
-            self.pendentes_ofx = list(pend_o)
+            # Descarta pendentes vindos de OFX de OUTRAS filiais: se
+            # nao casaram com a planilha desta empresa, sao movimentacoes
+            # que pertencem a outra empresa do grupo — nao entram nas
+            # abas Pendentes, Comparacao, Conciliados x Dominio etc.
+            pend_o_filtrada = [
+                t for t in pend_o
+                if not t.extras.get("origem_filial")
+            ]
+            self.pendentes_ofx_brutos = list(pend_o_filtrada)
+            self.pendentes_ofx = list(pend_o_filtrada)
             # Enriquece as Transacoes do OFX com CNPJ/nome/nº doc vindos
             # dos comprovantes PDF (quando a planilha foi importada de PDF).
             lbl.config(text="Enriquecendo OFX com dados dos PDFs...")
