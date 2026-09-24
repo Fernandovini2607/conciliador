@@ -579,6 +579,15 @@ class App(tk.Tk):
         # Dados originais
         self.transacoes_planilha: list[Transacao] = []
         self.transacoes_ofx: list[Transacao] = []
+        # OFX de OUTRAS empresas do mesmo grupo (matriz+filiais) — permite
+        # que pagamentos feitos por outra empresa do grupo apareçam na
+        # conciliação da empresa atual. Cada transação vai marcada com
+        # extras['origem_filial'] = nome do arquivo pra rastreio.
+        # Entram junto no self.transacoes_ofx pra passar pelo mesmo fluxo
+        # de conciliação — a nova lista mantém a referência pra a aba
+        # dedicada e pra exclusão seletiva.
+        self.transacoes_ofx_outras_filiais: list[Transacao] = []
+        self.caminhos_ofx_outras_filiais: list[Path] = []
         self.caminho_planilha: Path | None = None
         self.caminhos_ofx: list[Path] = []
         self.estrutura_planilha: EstruturaPlanilha | None = None
@@ -879,6 +888,14 @@ class App(tk.Tk):
             self._sidebar, text="Importar OFX",
             command=self._abrir_ofx, width=26,
         ).pack(fill="x", pady=2)
+        # Botão só habilita quando o grupo empresarial (matriz+filiais)
+        # tem mais de 1 empresa carregada no Domínio.
+        self.btn_ofx_outras_filiais = ttk.Button(
+            self._sidebar, text="OFX outras filiais",
+            command=self._abrir_ofx_outras_filiais,
+            state="disabled", width=26,
+        )
+        self.btn_ofx_outras_filiais.pack(fill="x", pady=2)
 
         # --- Grupo 3: Domínio (carregar)
         _sep()
@@ -983,6 +1000,10 @@ class App(tk.Tk):
         self._monta_aba_dominio()
         self._monta_aba_aprovacoes()
         self._monta_aba_lancamentos()
+        # OFX de outras filiais — aparece só como visualização/rastreio;
+        # as transações também estão em self.transacoes_ofx pra
+        # participar da conciliação normal.
+        self._monta_aba_ofx_outras_filiais()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
@@ -2661,6 +2682,79 @@ class App(tk.Tk):
         self._render_aba_aprovacoes()
         self._renderizar_comparacao()
 
+    def _monta_aba_ofx_outras_filiais(self) -> None:
+        """Aba dedicada aos OFX importados de outras empresas do grupo
+        (matriz+filiais). Mostra só as transações marcadas com
+        extras['origem_filial'] pra o operador rastrear quais pagamentos
+        vieram de outra filial. Elas também entram na conciliação normal
+        via self.transacoes_ofx."""
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="OFX outras filiais (0)")
+        self._aba_ofx_outras_filiais = aba
+
+        # Cabeçalho explicativo
+        ttk.Label(
+            aba,
+            text=(
+                "Movimentações OFX importadas de outras empresas do grupo. "
+                "Elas participam da conciliação com a planilha da empresa "
+                "atual — útil quando a matriz paga boletos das filiais "
+                "(ou vice-versa)."
+            ),
+            wraplength=900, foreground="#555", justify="left",
+        ).pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        # Tabela — mesmas colunas da aba OFX + coluna Origem (arquivo)
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
+        cols = ("data", "banco", "documento", "valor", "memo",
+                "fornecedor", "cnpj", "origem")
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("data", "Data pagamento", 110, "center"),
+            ("banco", "Banco", 120, "w"),
+            ("documento", "Documento", 100, "w"),
+            ("valor", "Valor", 100, "e"),
+            ("memo", "Memo", 220, "w"),
+            ("fornecedor", "Fornecedor (via PDF)", 180, "w"),
+            ("cnpj", "CNPJ (via PDF)", 130, "w"),
+            ("origem", "Origem (arquivo)", 200, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self.tree_ofx_outras_filiais = tree
+
+    def _render_aba_ofx_outras_filiais(self) -> None:
+        """Popula a aba com as transações da lista dedicada. Chamado
+        depois de importar novos arquivos ou ao limpar."""
+        if not hasattr(self, "tree_ofx_outras_filiais"):
+            return
+        tree = self.tree_ofx_outras_filiais
+        for iid in tree.get_children():
+            tree.delete(iid)
+        for t in self.transacoes_ofx_outras_filiais:
+            tree.insert("", "end", values=(
+                t.data.strftime("%d/%m/%Y") if t.data else "",
+                t.extras.get("banco", "") or "",
+                t.extras.get("documento", "") or "",
+                f"{t.valor:.2f}",
+                t.descricao or "",
+                t.extras.get("fornecedor", "") or "",
+                t.extras.get("cnpj", "") or "",
+                t.extras.get("origem_filial", "") or "",
+            ))
+        total = len(self.transacoes_ofx_outras_filiais)
+        self._notebook_conciliados.tab(
+            self._aba_ofx_outras_filiais,
+            text=f"OFX outras filiais ({total})",
+        )
+
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
         self._notebook_conciliados.add(aba, text="Lançamentos contábeis (0)")
@@ -2906,6 +3000,10 @@ class App(tk.Tk):
         # OFX
         self.transacoes_ofx = []
         self.caminhos_ofx = []
+        self.transacoes_ofx_outras_filiais = []
+        self.caminhos_ofx_outras_filiais = []
+        if hasattr(self, "btn_ofx_outras_filiais"):
+            self.btn_ofx_outras_filiais.config(state="disabled")
         self.lbl_ofx.config(text="(nenhum OFX carregado)")
         self.btn_limpar_ofx.config(state="disabled")
         # Domínio (pagamentos da empresa antiga)
@@ -3088,6 +3186,16 @@ class App(tk.Tk):
             messagebox.showerror("Erro ao ler Domínio", str(e))
             return
 
+        # Guarda a lista de empresas do grupo pra o botão de OFX de
+        # outras filiais saber quais opções mostrar.
+        self._empresas_grupo = empresas_pra_carregar
+        # Habilita o botão "OFX outras filiais" só quando o grupo tem
+        # mais de 1 empresa.
+        if hasattr(self, "btn_ofx_outras_filiais"):
+            self.btn_ofx_outras_filiais.config(
+                state=("normal" if len(empresas_pra_carregar) > 1 else "disabled"),
+            )
+
         # Se carregou de várias empresas, avisa
         if len(empresas_pra_carregar) > 1:
             resumo = "\n".join(
@@ -3105,7 +3213,9 @@ class App(tk.Tk):
                 "filiais (ou vice-versa). O plano de contas do grupo é "
                 "sempre o da matriz — se você selecionou uma filial, o "
                 "sistema puxa o plano da matriz ao clicar em "
-                "'Carregar plano contas'."
+                "'Carregar plano contas'.\n\n"
+                "Botão 'OFX outras filiais' foi habilitado — use-o para "
+                "importar o extrato das outras empresas do grupo."
             )
 
         self._atualiza_label_dominio()
@@ -3809,6 +3919,13 @@ class App(tk.Tk):
 
         self.transacoes_ofx = []
         self.caminhos_ofx = []
+        # Ao reimportar OFX principal, tambem descarta o de outras
+        # filiais (a base contexto mudou; nao pode manter transacoes
+        # antigas misturadas).
+        self.transacoes_ofx_outras_filiais = []
+        self.caminhos_ofx_outras_filiais = []
+        if hasattr(self, "_render_aba_ofx_outras_filiais"):
+            self._render_aba_ofx_outras_filiais()
         total_ignorados = 0
         erros: list[str] = []
 
@@ -3867,6 +3984,101 @@ class App(tk.Tk):
         self._atualiza_botao()
         self._render_aba_ofx()
         self._limpa_resultados()
+
+    def _abrir_ofx_outras_filiais(self) -> None:
+        """Importa OFX de OUTRAS empresas do grupo (matriz+filiais) —
+        útil quando a matriz paga boletos das filiais e vice-versa. As
+        transações entram no mesmo self.transacoes_ofx e passam pelo
+        fluxo normal de conciliação, mas ficam marcadas com
+        extras['origem_filial'] = <arquivo> pra visualização separada
+        na aba dedicada."""
+        # Valida: precisa ter grupo empresarial (mais de 1 empresa)
+        empresas = getattr(self, "_empresas_grupo", [])
+        if len(empresas) < 2:
+            messagebox.showwarning(
+                "Grupo empresarial não detectado",
+                "Este botão só funciona quando o Domínio identificou "
+                "mais de uma empresa com o mesmo CNPJ raiz.\n\n"
+                "Passos: Conectar Domínio → Selecionar empresa → "
+                "Carregar pagamentos. Se o grupo tiver mais de 1 "
+                "empresa, este botão habilita.",
+            )
+            return
+        # Pergunta o período
+        periodo = self._pedir_periodo(
+            "Período do extrato OFX (outras filiais)",
+            "Só serão importadas movimentações cuja data (do lançamento "
+            "no banco) cair dentro desse intervalo. Deixe em branco pra "
+            "importar tudo dos arquivos.",
+        )
+        if periodo is None:
+            return
+        caminhos = filedialog.askopenfilenames(
+            title=(
+                "Selecione os OFX das OUTRAS empresas do grupo "
+                "(Ctrl+clique pra vários)"
+            ),
+            filetypes=[("OFX", "*.ofx"), ("Todos", "*.*")],
+        )
+        if not caminhos:
+            return
+
+        # Lê cada arquivo, marca as transações e adiciona
+        total_novos = 0
+        total_ignorados = 0
+        erros: list[str] = []
+        with self._carregando(
+            "Importando OFX de outras filiais...",
+            f"Lendo {len(caminhos)} arquivo(s)...",
+        ) as lbl:
+            for i, caminho in enumerate(caminhos, 1):
+                nome_arq = Path(caminho).name
+                lbl.config(text=f"[{i}/{len(caminhos)}] Lendo {nome_arq}...")
+                lbl.update()
+                try:
+                    txs, ignorados = ler_ofx(caminho)
+                except Exception as e:
+                    erros.append(f"{nome_arq}: {e}")
+                    continue
+                # Filtro por período (data da movimentação)
+                ini, fim = periodo
+                if ini is not None or fim is not None:
+                    txs = [
+                        t for t in txs
+                        if self._dentro_periodo(
+                            t, ini, fim, usar_pagamento=False,
+                        )
+                    ]
+                # Marca as transações com a origem — o arquivo carrega a
+                # identidade da filial (o operador nomeia o arquivo).
+                for t in txs:
+                    t.extras["origem_filial"] = nome_arq
+                self.transacoes_ofx.extend(txs)
+                self.transacoes_ofx_outras_filiais.extend(txs)
+                self.caminhos_ofx_outras_filiais.append(Path(caminho))
+                total_novos += len(txs)
+                total_ignorados += ignorados
+
+        if erros:
+            messagebox.showerror(
+                "Erro ao ler um ou mais OFX", "\n".join(erros),
+            )
+
+        if total_novos:
+            messagebox.showinfo(
+                "OFX de outras filiais importado",
+                f"{total_novos} pagamento(s) adicionado(s) ao fluxo de "
+                f"conciliação. Aparecem na aba OFX (fundo diferenciado) "
+                f"e na aba 'OFX outras filiais' pra rastreio."
+                + (f"\n\n{total_ignorados} recebimentos ignorados."
+                   if total_ignorados else ""),
+            )
+            self.btn_limpar_ofx.config(state="normal")
+            self._atualiza_botao()
+            self._render_aba_ofx()
+            if hasattr(self, "_render_aba_ofx_outras_filiais"):
+                self._render_aba_ofx_outras_filiais()
+            self._limpa_resultados()
 
     def _limpar_planilha(self) -> None:
         """Remove a planilha importada. Pendentes e sugestões são
@@ -3953,10 +4165,17 @@ class App(tk.Tk):
             return
         self.transacoes_ofx = []
         self.caminhos_ofx = []
+        # Limpa também as OFX das outras filiais — foram todas concate-
+        # nadas em transacoes_ofx, então limpar tudo é o comportamento
+        # esperado.
+        self.transacoes_ofx_outras_filiais = []
+        self.caminhos_ofx_outras_filiais = []
         self.lbl_ofx.config(text="(nenhum OFX carregado)")
         self.btn_limpar_ofx.config(state="disabled")
         self._atualiza_botao()
         self._render_aba_ofx()
+        if hasattr(self, "_render_aba_ofx_outras_filiais"):
+            self._render_aba_ofx_outras_filiais()
         # Preserva pendentes da planilha ainda carregada (não deve apagar
         # pendentes da planilha só porque o OFX foi limpo).
         self._limpa_resultados(
