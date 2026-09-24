@@ -2703,6 +2703,27 @@ class App(tk.Tk):
             wraplength=900, foreground="#555", justify="left",
         ).pack(side="top", fill="x", padx=6, pady=(6, 4))
 
+        # Barra de filtro/busca — mesmo padrao das outras abas
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_ofx_outras_filiais = tk.StringVar()
+        self.filtro_ofx_outras_filiais.trace_add(
+            "write",
+            lambda *_a: self._render_aba_ofx_outras_filiais(),
+        )
+        ttk.Entry(
+            topo, textvariable=self.filtro_ofx_outras_filiais, width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_ofx_outras_filiais.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_ofx_outras_filiais = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_ofx_outras_filiais.pack(side="left", padx=8)
+
         # Tabela — mesmas colunas da aba OFX + coluna Origem (arquivo)
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
@@ -2731,14 +2752,20 @@ class App(tk.Tk):
 
     def _render_aba_ofx_outras_filiais(self) -> None:
         """Popula a aba com as transações da lista dedicada. Chamado
-        depois de importar novos arquivos ou ao limpar."""
+        depois de importar novos arquivos, ao limpar ou quando muda o
+        filtro de busca."""
         if not hasattr(self, "tree_ofx_outras_filiais"):
             return
         tree = self.tree_ofx_outras_filiais
         for iid in tree.get_children():
             tree.delete(iid)
+        # Termo do filtro (case-insensitive; casa em qualquer coluna)
+        termo = ""
+        if hasattr(self, "filtro_ofx_outras_filiais"):
+            termo = self.filtro_ofx_outras_filiais.get().strip().lower()
+        mostradas = 0
         for t in self.transacoes_ofx_outras_filiais:
-            tree.insert("", "end", values=(
+            row = (
                 t.data.strftime("%d/%m/%Y") if t.data else "",
                 t.extras.get("banco", "") or "",
                 t.extras.get("documento", "") or "",
@@ -2747,12 +2774,24 @@ class App(tk.Tk):
                 t.extras.get("fornecedor", "") or "",
                 t.extras.get("cnpj", "") or "",
                 t.extras.get("origem_filial", "") or "",
-            ))
+            )
+            if termo and termo not in " ".join(row).lower():
+                continue
+            tree.insert("", "end", values=row)
+            mostradas += 1
         total = len(self.transacoes_ofx_outras_filiais)
         self.notebook.tab(
             self._aba_ofx_outras_filiais,
             text=f"OFX outras filiais ({total})",
         )
+        # Label do filtro — mostra "N de M" quando ha filtro ativo
+        if hasattr(self, "lbl_filtro_ofx_outras_filiais"):
+            self.lbl_filtro_ofx_outras_filiais.config(
+                text=(
+                    f"Mostrando {mostradas} de {total}"
+                    if termo else f"{total} movimentação(ões)"
+                ),
+            )
 
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
