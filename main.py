@@ -1436,6 +1436,10 @@ class App(tk.Tk):
             topo, text="Editar lançamento selecionado",
             command=self._editar_lancamento_planilha,
         ).pack(side="left", padx=4)
+        ttk.Button(
+            topo, text="Excluir selecionado",
+            command=self._excluir_lancamento_planilha,
+        ).pack(side="left", padx=4)
         self.lbl_filtro_planilha = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_planilha.pack(side="left", padx=8)
 
@@ -1608,6 +1612,78 @@ class App(tk.Tk):
             "limpos — clique em 'Conciliar' para refazer com os novos dados.",
         )
 
+    def _excluir_lancamento_planilha(self) -> None:
+        """Remove o lançamento selecionado da planilha em memória.
+        NÃO altera o arquivo .xlsx original. Limpa os resultados de
+        conciliação porque a entrada mudou."""
+        sel = self.tree_planilha.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha na aba Planilha para excluir.",
+            )
+            return
+        t = self.itens_tree_planilha.get(sel[0])
+        if t is None:
+            return
+        resumo = (
+            f"{t.data.strftime('%d/%m/%Y') if t.data else ''} — "
+            f"R$ {t.valor:.2f} — "
+            f"{t.extras.get('fornecedor', '') or ''}"
+        )
+        if not messagebox.askyesno(
+            "Excluir lançamento?",
+            f"Vai excluir:\n\n{resumo}\n\n"
+            "Só remove da lista em memória — o arquivo .xlsx original "
+            "não é alterado. Os resultados de conciliação serão limpos "
+            "(precisa rodar Conciliar de novo).",
+        ):
+            return
+        self.transacoes_planilha = [
+            x for x in self.transacoes_planilha if x is not t
+        ]
+        self._render_aba_planilha()
+        self._limpa_resultados()
+
+    def _excluir_lancamento_ofx(self) -> None:
+        """Remove a movimentação OFX selecionada em memória. NÃO altera
+        o arquivo .ofx. Limpa os resultados de conciliação."""
+        sel = self.tree_ofx.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Sem seleção",
+                "Selecione uma linha na aba OFX para excluir.",
+            )
+            return
+        t = self.itens_tree_ofx.get(sel[0])
+        if t is None:
+            return
+        resumo = (
+            f"{t.data.strftime('%d/%m/%Y') if t.data else ''} — "
+            f"R$ {t.valor:.2f} — "
+            f"{(t.descricao or '')[:60]}"
+        )
+        if not messagebox.askyesno(
+            "Excluir movimentação?",
+            f"Vai excluir:\n\n{resumo}\n\n"
+            "Só remove da lista em memória — o arquivo .ofx original "
+            "não é alterado. Os resultados de conciliação serão limpos "
+            "(precisa rodar Conciliar de novo).",
+        ):
+            return
+        self.transacoes_ofx = [
+            x for x in self.transacoes_ofx if x is not t
+        ]
+        # Se veio de outra filial, remove tambem da lista dedicada
+        if t.extras.get("origem_filial"):
+            self.transacoes_ofx_outras_filiais = [
+                x for x in self.transacoes_ofx_outras_filiais if x is not t
+            ]
+            if hasattr(self, "_render_aba_ofx_outras_filiais"):
+                self._render_aba_ofx_outras_filiais()
+        self._render_aba_ofx()
+        self._limpa_resultados()
+
     def _monta_aba_ofx_dados(self) -> None:
         aba = ttk.Frame(self.notebook)
         self.notebook.add(aba, text="OFX (0)")
@@ -1623,11 +1699,17 @@ class App(tk.Tk):
         ttk.Button(topo, text="Limpar", command=self._limpa_filtros_ofx).pack(
             side="left", padx=4,
         )
+        ttk.Button(
+            topo, text="Excluir selecionado",
+            command=self._excluir_lancamento_ofx,
+        ).pack(side="left", padx=4)
         self.lbl_filtro_ofx = ttk.Label(topo, text="", foreground="#666")
         self.lbl_filtro_ofx.pack(side="left", padx=8)
 
         # Estado dos filtros por coluna (estilo Excel)
         self.filtros_col_ofx: dict[str, set[str] | None] = {}
+        # iid → Transacao (para resolver seleção do botão Excluir)
+        self.itens_tree_ofx: dict[str, Transacao] = {}
 
         # Treeview + scrollbar
         corpo = ttk.Frame(aba)
@@ -5982,6 +6064,8 @@ class App(tk.Tk):
     def _render_aba_ofx(self) -> None:
         for item in self.tree_ofx.get_children():
             self.tree_ofx.delete(item)
+        if hasattr(self, "itens_tree_ofx"):
+            self.itens_tree_ofx.clear()
         termo = self.filtro_ofx.get().strip().lower() if hasattr(self, "filtro_ofx") else ""
         cols = self.COLS_OFX
         filtros = getattr(self, "filtros_col_ofx", {})
@@ -6001,7 +6085,9 @@ class App(tk.Tk):
                 continue
             # Linhas enriquecidas por PDF ficam com fundo azul claro
             tags = ("enriquecido_pdf",) if t.extras.get("enriquecido_por_pdf") else ()
-            self.tree_ofx.insert("", "end", values=row, tags=tags)
+            iid = self.tree_ofx.insert("", "end", values=row, tags=tags)
+            if hasattr(self, "itens_tree_ofx"):
+                self.itens_tree_ofx[iid] = t
             mostradas += 1
         total = len(self.transacoes_ofx)
         n_enriq = sum(
