@@ -4023,6 +4023,11 @@ class App(tk.Tk):
         pass
 
     def _comparar_com_dominio(self) -> None:
+        # Aviso proativo pra grupo empresarial incompleto — mesma
+        # motivacao do Conciliar: sem dados de todas as filiais, um
+        # pagamento pode ficar orfao ou virar lancamento errado.
+        if not self._avisar_grupo_incompleto():
+            return
         # Valida pré-condições com mensagens claras
         if (
             not self.pares_conciliados
@@ -5145,7 +5150,76 @@ class App(tk.Tk):
             self._notebook_conciliados.tab(self._aba_dominio, text="Comparação (0)")
             self._atualiza_botao_comparar()
 
+    def _avisar_grupo_incompleto(self) -> bool:
+        """Se a empresa selecionada faz parte de grupo empresarial (2+
+        empresas com mesmo CNPJ raiz), verifica se os dados de TODAS as
+        filiais foram importados. Se faltar alguma, mostra um aviso
+        proativo — o operador confirma se quer continuar ou parar pra
+        importar o que falta.
+
+        Motivação: sem os dados das outras filiais, um pagamento feito
+        pela filial B pode não casar com nada, virar 'pendente' na aba
+        e depois virar lançamento contábil ERRADO (a empresa atual não
+        pagou aquilo, foi a filial). Cross-conciliação entre filiais
+        depende de todos os dados estarem carregados juntos.
+
+        Retorna True se pode prosseguir (não é grupo, ou operador
+        confirmou); False se deve parar (operador cancelou)."""
+        empresas = getattr(self, "_empresas_grupo", [])
+        if len(empresas) < 2:
+            return True  # Nao e grupo, continua normal
+        # Coleta codi_emp das filiais que ja tem dados carregados
+        codis_com_ofx = {
+            t.extras.get("codi_emp_filial")
+            for t in self.transacoes_ofx
+            if t.extras.get("codi_emp_filial") is not None
+        }
+        codis_com_planilha = {
+            t.extras.get("codi_emp_filial")
+            for t in self.transacoes_planilha
+            if t.extras.get("codi_emp_filial") is not None
+        }
+        # Empresas do grupo que NAO tem OFX ou planilha
+        faltantes = []
+        for e in empresas:
+            codi = e.get("codi_emp")
+            razao = (e.get("razao", "") or "")[:40]
+            falta_ofx = codi not in codis_com_ofx
+            falta_plan = codi not in codis_com_planilha
+            if falta_ofx or falta_plan:
+                partes = []
+                if falta_ofx:
+                    partes.append("OFX")
+                if falta_plan:
+                    partes.append("planilha")
+                faltantes.append(
+                    f"• [{codi}] {razao} — falta: {' + '.join(partes)}"
+                )
+        if not faltantes:
+            return True  # Todo mundo tem dados, ok
+        detalhes = "\n".join(faltantes[:8])
+        if len(faltantes) > 8:
+            detalhes += f"\n... e mais {len(faltantes) - 8} empresa(s)."
+        return messagebox.askyesno(
+            "Grupo empresarial — dados incompletos",
+            f"Você está contabilizando uma empresa que faz parte de "
+            f"grupo ({len(empresas)} empresas com o mesmo CNPJ raiz). "
+            f"Algumas ainda não tiveram OFX/planilha importados:\n\n"
+            f"{detalhes}\n\n"
+            "Sem os dados dessas empresas, um pagamento feito por uma "
+            "filial pode ficar sem par e virar lançamento contábil ERRADO "
+            "na empresa atual.\n\n"
+            "Continuar mesmo assim?",
+            icon="warning",
+        )
+
     def _executar_conciliacao(self) -> None:
+        # Aviso preventivo: se é grupo empresarial, alerta o operador se
+        # ele nao importou dados de todas as empresas. Sem isso, um
+        # pagamento feito por outra filial fica sem par e vira lancamento
+        # contabil errado.
+        if not self._avisar_grupo_incompleto():
+            return
         # PRESERVA pares já conciliados (de rodadas anteriores, se o
         # usuário limpou planilha/OFX e importou outros). Isso evita
         # dupla conciliação: uma linha da planilha que já casou com
@@ -5153,6 +5227,10 @@ class App(tk.Tk):
         ids_planilha_ja_pareada = {id(p.planilha) for p in self.pares_conciliados}
         ids_ofx_ja_pareado = {id(p.ofx) for p in self.pares_conciliados}
 
+        # A conciliacao roda com TODAS as transacoes (empresa atual +
+        # outras filiais juntas). Assim um pagamento da planilha desta
+        # empresa casa com um OFX de outra filial do grupo (caso onde
+        # a matriz paga boletos das filiais ou vice-versa).
         planilha_pra_conciliar = [
             t for t in self.transacoes_planilha
             if id(t) not in ids_planilha_ja_pareada
