@@ -2284,6 +2284,26 @@ class App(tk.Tk):
         self._notebook_conciliados.add(aba, text="Conciliados (0)")
         self._aba_conciliados = aba
 
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=4, pady=4)
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_conciliados = tk.StringVar()
+        self.filtro_conciliados.trace_add(
+            "write", lambda *_a: self._render_conciliados(),
+        )
+        ttk.Entry(topo, textvariable=self.filtro_conciliados, width=40).pack(
+            side="left",
+        )
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_conciliados.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_conciliados = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_conciliados.pack(side="left", padx=8)
+
         cols = (
             "tipo", "origem", "data", "pagto", "valor", "emissao",
             "nf", "cnpj", "fornecedor", "memo_ofx", "diff",
@@ -2531,6 +2551,26 @@ class App(tk.Tk):
         )
         instr.pack(side="top", fill="x", padx=6, pady=(6, 0))
 
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=4, pady=4)
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_conciliados_dominio = tk.StringVar()
+        self.filtro_conciliados_dominio.trace_add(
+            "write", lambda *_a: self._render_aba_conciliados_dominio(),
+        )
+        ttk.Entry(
+            topo, textvariable=self.filtro_conciliados_dominio, width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_conciliados_dominio.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_conciliados_dominio = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_conciliados_dominio.pack(side="left", padx=8)
+
         cols = (
             "tipo", "origem", "data", "pagto",
             "valor", "valor_pago", "juros", "desconto",
@@ -2637,6 +2677,15 @@ class App(tk.Tk):
         ttk.Button(
             filtro_frame, text="Limpar",
             command=self._limpar_filtro_comparacao,
+        ).pack(side="left", padx=(4, 0))
+        # Busca por termo — casa contra qualquer coluna (substring case-insensitive)
+        ttk.Label(filtro_frame, text="  Buscar:").pack(side="left")
+        self.filtro_termo_comparacao = tk.StringVar()
+        self.filtro_termo_comparacao.trace_add(
+            "write", lambda *_a: self._renderizar_comparacao(),
+        )
+        ttk.Entry(
+            filtro_frame, textvariable=self.filtro_termo_comparacao, width=30,
         ).pack(side="left", padx=(4, 0))
         ttk.Button(
             filtro_frame, text="ℹ Legenda",
@@ -3400,6 +3449,26 @@ class App(tk.Tk):
             wraplength=900, foreground="#555", justify="left",
         ).pack(side="top", fill="x", padx=6, pady=(6, 4))
 
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_conciliados_anteriores = tk.StringVar()
+        self.filtro_conciliados_anteriores.trace_add(
+            "write", lambda *_a: self._render_aba_conciliados_anteriores(),
+        )
+        ttk.Entry(
+            topo, textvariable=self.filtro_conciliados_anteriores, width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_conciliados_anteriores.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_conciliados_anteriores = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_conciliados_anteriores.pack(side="left", padx=8)
+
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
         cols = ("empresa", "venc", "pagto", "valor", "nf",
@@ -3432,6 +3501,10 @@ class App(tk.Tk):
         tree = self.tree_conciliados_anteriores
         for iid in tree.get_children():
             tree.delete(iid)
+        termo = ""
+        if hasattr(self, "filtro_conciliados_anteriores"):
+            termo = self.filtro_conciliados_anteriores.get().strip().lower()
+        mostradas = 0
         for par in self.pares_conciliados_anteriores:
             codi = par.planilha.extras.get("codi_emp_filial")
             razao = par.planilha.extras.get("razao_empresa_filial", "") or ""
@@ -3439,7 +3512,7 @@ class App(tk.Tk):
                 f"{codi} - {razao[:30]}" if codi is not None else razao
             )
             pagto = par.planilha.data_pagamento or par.ofx.data
-            tree.insert("", "end", values=(
+            values = (
                 empresa_txt,
                 par.planilha.data.strftime("%d/%m/%Y") if par.planilha.data else "",
                 pagto.strftime("%d/%m/%Y") if pagto else "",
@@ -3448,12 +3521,22 @@ class App(tk.Tk):
                 par.planilha.extras.get("fornecedor", "") or "",
                 par.ofx.extras.get("banco", "") or "",
                 par.ofx.descricao or "",
-            ))
+            )
+            if termo and termo not in " ".join(
+                str(v) for v in values
+            ).lower():
+                continue
+            tree.insert("", "end", values=values)
+            mostradas += 1
         total = len(self.pares_conciliados_anteriores)
         self._notebook_conciliados.tab(
             self._aba_conciliados_anteriores,
             text=f"Conciliados anteriores ({total})",
         )
+        if hasattr(self, "lbl_filtro_conciliados_anteriores"):
+            self.lbl_filtro_conciliados_anteriores.config(
+                text=(f"Mostrando {mostradas} de {total}" if termo else ""),
+            )
 
     def _monta_aba_pagos_por_outra(self) -> None:
         """Aba com os pares em que planilha e OFX pertencem a empresas
@@ -3481,6 +3564,26 @@ class App(tk.Tk):
             ),
             wraplength=900, foreground="#555", justify="left",
         ).pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_pagos_por_outra = tk.StringVar()
+        self.filtro_pagos_por_outra.trace_add(
+            "write", lambda *_a: self._render_aba_pagos_por_outra(),
+        )
+        ttk.Entry(
+            topo, textvariable=self.filtro_pagos_por_outra, width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_pagos_por_outra.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_pagos_por_outra = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_pagos_por_outra.pack(side="left", padx=8)
 
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
@@ -3522,6 +3625,11 @@ class App(tk.Tk):
         for iid in tree.get_children():
             tree.delete(iid)
 
+        termo = ""
+        if hasattr(self, "filtro_pagos_por_outra"):
+            termo = self.filtro_pagos_por_outra.get().strip().lower()
+        total_bruto = 0
+
         emp_atual = self.cfg.get("dominio_empresa") or {}
         codi_atual = emp_atual.get("codi_emp")
 
@@ -3557,7 +3665,7 @@ class App(tk.Tk):
                 tag = "lanc_la"
 
             pagto = par.planilha.data_pagamento or par.ofx.data
-            tree.insert("", "end", values=(
+            values = (
                 sentido,
                 _razao(par.planilha),
                 _razao(par.ofx),
@@ -3567,13 +3675,23 @@ class App(tk.Tk):
                 par.planilha.extras.get("numero_nf", "") or "",
                 par.planilha.extras.get("fornecedor", "") or "",
                 par.ofx.descricao or "",
-            ), tags=(tag,))
+            )
+            total_bruto += 1
+            if termo and termo not in " ".join(
+                str(v) for v in values
+            ).lower():
+                continue
+            tree.insert("", "end", values=values, tags=(tag,))
             n += 1
 
         self._notebook_conciliados.tab(
             self._aba_pagos_por_outra,
-            text=f"Pagos por outra empresa ({n})",
+            text=f"Pagos por outra empresa ({total_bruto})",
         )
+        if hasattr(self, "lbl_filtro_pagos_por_outra"):
+            self.lbl_filtro_pagos_por_outra.config(
+                text=(f"Mostrando {n} de {total_bruto}" if termo else ""),
+            )
 
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
@@ -3598,6 +3716,26 @@ class App(tk.Tk):
             aba, text="", foreground="#555",
         )
         self.lbl_lancamentos_empresa.pack(side="top", fill="x", padx=6, pady=(0, 4))
+
+        # Barra de filtro
+        topo_lanc = ttk.Frame(aba)
+        topo_lanc.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(topo_lanc, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_lancamentos = tk.StringVar()
+        self.filtro_lancamentos.trace_add(
+            "write", lambda *_a: self._render_aba_lancamentos(),
+        )
+        ttk.Entry(
+            topo_lanc, textvariable=self.filtro_lancamentos, width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo_lanc, text="Limpar",
+            command=lambda: self.filtro_lancamentos.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_lancamentos = ttk.Label(
+            topo_lanc, text="", foreground="#666",
+        )
+        self.lbl_filtro_lancamentos.pack(side="left", padx=8)
 
         # Rodapé com botões — packado antes do corpo pra ficar ancorado embaixo
         rodape_lanc = ttk.Frame(aba)
@@ -4250,10 +4388,12 @@ class App(tk.Tk):
         self._renderizar_comparacao()
 
     def _limpar_filtro_comparacao(self) -> None:
-        """Volta o filtro por cor da aba Comparação pra 'Todos' e re-renderiza."""
+        """Zera os filtros da aba Comparação (cor e termo) e re-renderiza."""
         if hasattr(self, "filtro_cor_comparacao"):
             self.filtro_cor_comparacao.set("Todos")
-            self._renderizar_comparacao()
+        if hasattr(self, "filtro_termo_comparacao"):
+            self.filtro_termo_comparacao.set("")
+        self._renderizar_comparacao()
 
     def _renderizar_comparacao(self) -> None:
         """Monta a lista de resultados e chama _render_aba_dominio.
@@ -4384,11 +4524,13 @@ class App(tk.Tk):
         if hasattr(self, "filtro_cor_comparacao"):
             rotulo_sel = self.filtro_cor_comparacao.get()
             status_filtro = self._filtro_cor_map.get(rotulo_sel)
+        termo = ""
+        if hasattr(self, "filtro_termo_comparacao"):
+            termo = self.filtro_termo_comparacao.get().strip().lower()
         mostradas = 0
         for status, t_planilha, t_ofx, t_dom, _diff_d, _diff_v, par in resultados:
             if status_filtro is not None and status != status_filtro:
                 continue
-            mostradas += 1
             rotulo = rotulos.get(status, status)
             # Extras: prioriza Domínio se houver, depois planilha
             origem_extras = t_dom.extras if t_dom else t_planilha.extras
@@ -4429,23 +4571,27 @@ class App(tk.Tk):
                     )[:26]
                     pago_por = f"[{codi_ofx}] {razao_ofx}"
 
+            values = (
+                rotulo,
+                t_planilha.data.strftime("%d/%m/%Y"),
+                pagto_txt,
+                f"{t_planilha.valor:.2f}",
+                _fmt_data(emissao),
+                nf,
+                cnpj,
+                fornecedor,
+                historico,
+                tipo,
+                memo,
+                pago_por,
+            )
+            if termo and termo not in " ".join(
+                str(v) for v in values
+            ).lower():
+                continue
+            mostradas += 1
             iid = self.tree_dominio.insert(
-                "", "end",
-                values=(
-                    rotulo,
-                    t_planilha.data.strftime("%d/%m/%Y"),
-                    pagto_txt,
-                    f"{t_planilha.valor:.2f}",
-                    _fmt_data(emissao),
-                    nf,
-                    cnpj,
-                    fornecedor,
-                    historico,
-                    tipo,
-                    memo,
-                    pago_por,
-                ),
-                tags=(status,),
+                "", "end", values=values, tags=(status,),
             )
             # Pares vão pro dict; pendentes da planilha (sem par) também
             # entram, mas com a Transacao da planilha — handlers fazem isinstance
@@ -6697,6 +6843,10 @@ class App(tk.Tk):
         for item in self.tree_conciliados.get_children():
             self.tree_conciliados.delete(item)
         self.itens_pares.clear()
+        termo = ""
+        if hasattr(self, "filtro_conciliados"):
+            termo = self.filtro_conciliados.get().strip().lower()
+        mostradas = 0
         for par in self.pares_conciliados:
             diff_txt = ""
             if par.diff_dias or par.diff_valor:
@@ -6708,24 +6858,31 @@ class App(tk.Tk):
             pagto = par.planilha.data_pagamento or par.ofx.data
             pagto_txt = pagto.strftime("%d/%m/%Y") if pagto else ""
             origem = par.ofx.extras.get("banco", "") or "OFX"
+            row = (
+                tipo_txt,
+                origem,
+                par.planilha.data.strftime("%d/%m/%Y"),
+                pagto_txt,
+                f"{par.planilha.valor:.2f}",
+                emissao_txt,
+                par.planilha.extras.get("numero_nf", ""),
+                par.planilha.extras.get("cnpj", ""),
+                par.planilha.extras.get("fornecedor", ""),
+                par.ofx.descricao,
+                diff_txt,
+            )
+            if termo and termo not in " ".join(str(v) for v in row).lower():
+                continue
             iid = self.tree_conciliados.insert(
-                "", "end",
-                values=(
-                    tipo_txt,
-                    origem,
-                    par.planilha.data.strftime("%d/%m/%Y"),
-                    pagto_txt,
-                    f"{par.planilha.valor:.2f}",
-                    emissao_txt,
-                    par.planilha.extras.get("numero_nf", ""),
-                    par.planilha.extras.get("cnpj", ""),
-                    par.planilha.extras.get("fornecedor", ""),
-                    par.ofx.descricao,
-                    diff_txt,
-                ),
-                tags=(par.tipo,),
+                "", "end", values=row, tags=(par.tipo,),
             )
             self.itens_pares[iid] = par
+            mostradas += 1
+        if hasattr(self, "lbl_filtro_conciliados"):
+            total = len(self.pares_conciliados)
+            self.lbl_filtro_conciliados.config(
+                text=(f"Mostrando {mostradas} de {total}" if termo else ""),
+            )
 
     def _render_pendentes(self) -> None:
         for item in self.tree_pend_p.get_children():
@@ -6792,6 +6949,23 @@ class App(tk.Tk):
     def _render_aba_conciliados_dominio(self) -> None:
         for item in self.tree_conciliados_dominio.get_children():
             self.tree_conciliados_dominio.delete(item)
+
+        termo = ""
+        if hasattr(self, "filtro_conciliados_dominio"):
+            termo = self.filtro_conciliados_dominio.get().strip().lower()
+        mostradas_ref = [0]  # lista pra permitir mutação em closure
+        total_bruto_ref = [0]
+
+        def _inserir(values, tags=()) -> None:
+            total_bruto_ref[0] += 1
+            if termo and termo not in " ".join(
+                str(v) for v in values
+            ).lower():
+                return
+            self.tree_conciliados_dominio.insert(
+                "", "end", values=values, tags=tags,
+            )
+            mostradas_ref[0] += 1
 
         def _tag_status(status: str) -> str:
             sl = (status or "").lower()
@@ -6900,9 +7074,8 @@ class App(tk.Tk):
                 )
             valor_txt, pago_txt = _valor_e_pago(par.planilha)
             venc_txt = _venc_com_prio_dominio(par.planilha, par.dominio)
-            self.tree_conciliados_dominio.insert(
-                "", "end",
-                values=(
+            _inserir(
+                (
                     tipo_txt,
                     origem,
                     venc_txt,
@@ -6963,9 +7136,8 @@ class App(tk.Tk):
 
             valor_txt, pago_txt = _valor_e_pago(t_p)
             venc_txt = _venc_com_prio_dominio(t_p, t_dom)
-            self.tree_conciliados_dominio.insert(
-                "", "end",
-                values=(
+            _inserir(
+                (
                     "Caixa",                              # Tipo
                     "Caixa geral",                        # Origem
                     venc_txt,
@@ -7023,9 +7195,8 @@ class App(tk.Tk):
 
             valor_txt, pago_txt = _valor_e_pago(t_o)
             venc_txt = _venc_com_prio_dominio(t_o, t_dom)
-            self.tree_conciliados_dominio.insert(
-                "", "end",
-                values=(
+            _inserir(
+                (
                     "OFX",                                # Tipo
                     origem,                               # Origem = banco do OFX
                     venc_txt,
@@ -7049,7 +7220,17 @@ class App(tk.Tk):
             )
 
         total = len(pares) + len(caixa_dominio) + len(ofx_dominio)
-        self._notebook_conciliados.tab(self._aba_conciliados_dominio, text=f"Conciliados × Domínio ({total})")
+        self._notebook_conciliados.tab(
+            self._aba_conciliados_dominio,
+            text=f"Conciliados × Domínio ({total})",
+        )
+        if hasattr(self, "lbl_filtro_conciliados_dominio"):
+            self.lbl_filtro_conciliados_dominio.config(
+                text=(
+                    f"Mostrando {mostradas_ref[0]} de {total_bruto_ref[0]}"
+                    if termo else ""
+                ),
+            )
 
         # Reflete a fila de aprovações que a filtragem construiu.
         self._render_aba_aprovacoes()
@@ -7707,24 +7888,36 @@ class App(tk.Tk):
         for item in self.tree_lancamentos.get_children():
             self.tree_lancamentos.delete(item)
         self.itens_lancamentos.clear()
+        termo = ""
+        if hasattr(self, "filtro_lancamentos"):
+            termo = self.filtro_lancamentos.get().strip().lower()
+        mostradas = 0
         for l in self.lancamentos_contabeis:
-            iid = self.tree_lancamentos.insert(
-                "", "end",
-                values=(
-                    l.data.strftime("%d/%m/%Y"),
-                    l.banco,
-                    f"{l.valor:.2f}",
-                    l.conta,
-                    l.historico,
-                    l.memo_original,
-                    l.padrao_match,
-                ),
+            values = (
+                l.data.strftime("%d/%m/%Y"),
+                l.banco,
+                f"{l.valor:.2f}",
+                l.conta,
+                l.historico,
+                l.memo_original,
+                l.padrao_match,
             )
+            if termo and termo not in " ".join(
+                str(v) for v in values
+            ).lower():
+                continue
+            iid = self.tree_lancamentos.insert("", "end", values=values)
             self.itens_lancamentos[iid] = l
+            mostradas += 1
+        total = len(self.lancamentos_contabeis)
         self._notebook_conciliados.tab(
             self._aba_lancamentos,
-            text=f"Lançamentos contábeis ({len(self.lancamentos_contabeis)})",
+            text=f"Lançamentos contábeis ({total})",
         )
+        if hasattr(self, "lbl_filtro_lancamentos"):
+            self.lbl_filtro_lancamentos.config(
+                text=(f"Mostrando {mostradas} de {total}" if termo else ""),
+            )
         # Atualiza label que indica qual empresa está ativa
         if hasattr(self, "lbl_lancamentos_empresa"):
             emp = self._empresa_selecionada()
