@@ -2948,17 +2948,27 @@ class App(tk.Tk):
         # Tabela
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
-        cols = ("venc", "pagto", "valor", "nf", "cnpj",
-                "fornecedor", "historico", "tipo", "empresa", "origem")
+        # Mesmas colunas da aba Planilha + Empresa (filial) + Arquivo
+        cols = (
+            "linha", "venc", "pagto", "emis",
+            "valor", "valor_pago", "juros", "desconto",
+            "nf", "cnpj", "fornecedor", "historico", "tipo",
+            "empresa", "origem",
+        )
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
+            ("linha", "Linha", 55, "center"),
             ("venc", "Vencimento", 100, "center"),
             ("pagto", "Pagamento", 100, "center"),
+            ("emis", "Emissão", 100, "center"),
             ("valor", "Valor", 100, "e"),
+            ("valor_pago", "Valor pago", 100, "e"),
+            ("juros", "Juros", 85, "e"),
+            ("desconto", "Desconto", 85, "e"),
             ("nf", "Nº NF", 85, "center"),
             ("cnpj", "CNPJ", 130, "w"),
-            ("fornecedor", "Fornecedor", 180, "w"),
-            ("historico", "Histórico", 160, "w"),
+            ("fornecedor", "Fornecedor", 200, "w"),
+            ("historico", "Histórico", 180, "w"),
             ("tipo", "Tipo", 100, "w"),
             ("empresa", "Empresa (filial)", 180, "w"),
             ("origem", "Arquivo", 160, "w"),
@@ -2986,21 +2996,13 @@ class App(tk.Tk):
             termo = self.filtro_planilha_outras_filiais.get().strip().lower()
         mostradas = 0
         for t in self.transacoes_planilha_outras_filiais:
-            pagto = getattr(t, "data_pagamento", None)
             codi = t.extras.get("codi_emp_filial")
             razao = t.extras.get("razao_empresa_filial", "") or ""
             empresa_txt = (
                 f"{codi} - {razao[:30]}" if codi is not None else razao
             )
-            row = (
-                t.data.strftime("%d/%m/%Y") if t.data else "",
-                pagto.strftime("%d/%m/%Y") if pagto else "",
-                f"{t.valor:.2f}",
-                t.extras.get("numero_nf", "") or "",
-                t.extras.get("cnpj", "") or "",
-                t.extras.get("fornecedor", "") or "",
-                t.extras.get("historico", "") or "",
-                t.extras.get("tipo", "") or "",
+            # Reusa _row_planilha (13 colunas) e concatena Empresa+Arquivo
+            row = self._row_planilha(t) + (
                 empresa_txt,
                 t.extras.get("origem_filial", "") or "",
             )
