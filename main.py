@@ -588,6 +588,13 @@ class App(tk.Tk):
         # dedicada e pra exclusão seletiva.
         self.transacoes_ofx_outras_filiais: list[Transacao] = []
         self.caminhos_ofx_outras_filiais: list[Path] = []
+        # Planilha de OUTRAS empresas do grupo — espelho do OFX. Casos
+        # em que a planilha de controle de outra empresa contém
+        # lançamentos que serão pagos via OFX da empresa atual. Marcadas
+        # com extras['origem_filial']; entram em transacoes_planilha pra
+        # participar da conciliação com o OFX principal.
+        self.transacoes_planilha_outras_filiais: list[Transacao] = []
+        self.caminhos_planilha_outras_filiais: list[Path] = []
         self.caminho_planilha: Path | None = None
         self.caminhos_ofx: list[Path] = []
         self.estrutura_planilha: EstruturaPlanilha | None = None
@@ -896,6 +903,13 @@ class App(tk.Tk):
             state="disabled", width=26,
         )
         self.btn_ofx_outras_filiais.pack(fill="x", pady=2)
+        # Mesmo comportamento: habilita quando grupo empresarial detectado
+        self.btn_planilha_outras_filiais = ttk.Button(
+            self._sidebar, text="Planilha outras filiais",
+            command=self._abrir_planilha_outras_filiais,
+            state="disabled", width=26,
+        )
+        self.btn_planilha_outras_filiais.pack(fill="x", pady=2)
 
         # --- Grupo 3: Domínio (carregar)
         _sep()
@@ -981,6 +995,9 @@ class App(tk.Tk):
 
         # Abas de dados crus (origem) — vêm primeiro no fluxo de leitura
         self._monta_aba_planilha_dados()
+        # Aba de planilha de outras filiais — logo ao lado da Planilha
+        # (só populada quando o grupo empresarial tem 2+ empresas).
+        self._monta_aba_planilha_outras_filiais()
         self._monta_aba_ofx_dados()
         # Aba de OFX de outras filiais — logo ao lado da OFX principal
         # (só populada quando o grupo empresarial tem 2+ empresas).
@@ -2763,6 +2780,120 @@ class App(tk.Tk):
         self._render_aba_aprovacoes()
         self._renderizar_comparacao()
 
+    def _monta_aba_planilha_outras_filiais(self) -> None:
+        """Aba dedicada às planilhas de OUTRAS empresas do grupo. Fica
+        no notebook principal, ao lado da aba Planilha — visualização e
+        rastreio das transações marcadas com extras['origem_filial'].
+        Elas também entram em self.transacoes_planilha pra participar
+        da conciliação normal com o OFX. Pendentes (não casadas) NÃO
+        vão pras abas Pendentes / Comparação / etc — ficam só aqui."""
+        aba = ttk.Frame(self.notebook)
+        self.notebook.add(aba, text="Planilha outras filiais (0)")
+        self._aba_planilha_outras_filiais = aba
+
+        ttk.Label(
+            aba,
+            text=(
+                "Lançamentos de planilhas de outras empresas do grupo. "
+                "Participam da conciliação com o OFX da empresa atual "
+                "(útil quando a empresa atual paga boletos das outras). "
+                "As linhas que não casarem ficam só aqui — não vão pras "
+                "abas Pendentes / Comparação."
+            ),
+            wraplength=900, foreground="#555", justify="left",
+        ).pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        # Barra de filtro/busca
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_planilha_outras_filiais = tk.StringVar()
+        self.filtro_planilha_outras_filiais.trace_add(
+            "write",
+            lambda *_a: self._render_aba_planilha_outras_filiais(),
+        )
+        ttk.Entry(
+            topo, textvariable=self.filtro_planilha_outras_filiais,
+            width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_planilha_outras_filiais.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_planilha_outras_filiais = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_planilha_outras_filiais.pack(side="left", padx=8)
+
+        # Tabela
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
+        cols = ("venc", "pagto", "valor", "nf", "cnpj",
+                "fornecedor", "historico", "tipo", "origem")
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("venc", "Vencimento", 100, "center"),
+            ("pagto", "Pagamento", 100, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 85, "center"),
+            ("cnpj", "CNPJ", 130, "w"),
+            ("fornecedor", "Fornecedor", 200, "w"),
+            ("historico", "Histórico", 180, "w"),
+            ("tipo", "Tipo", 100, "w"),
+            ("origem", "Origem (arquivo)", 180, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self.tree_planilha_outras_filiais = tree
+
+    def _render_aba_planilha_outras_filiais(self) -> None:
+        """Popula a aba dedicada. Chamado depois de importar novos
+        arquivos, ao limpar ou quando muda o filtro de busca."""
+        if not hasattr(self, "tree_planilha_outras_filiais"):
+            return
+        tree = self.tree_planilha_outras_filiais
+        for iid in tree.get_children():
+            tree.delete(iid)
+        termo = ""
+        if hasattr(self, "filtro_planilha_outras_filiais"):
+            termo = self.filtro_planilha_outras_filiais.get().strip().lower()
+        mostradas = 0
+        for t in self.transacoes_planilha_outras_filiais:
+            pagto = getattr(t, "data_pagamento", None)
+            row = (
+                t.data.strftime("%d/%m/%Y") if t.data else "",
+                pagto.strftime("%d/%m/%Y") if pagto else "",
+                f"{t.valor:.2f}",
+                t.extras.get("numero_nf", "") or "",
+                t.extras.get("cnpj", "") or "",
+                t.extras.get("fornecedor", "") or "",
+                t.extras.get("historico", "") or "",
+                t.extras.get("tipo", "") or "",
+                t.extras.get("origem_filial", "") or "",
+            )
+            if termo and termo not in " ".join(row).lower():
+                continue
+            tree.insert("", "end", values=row)
+            mostradas += 1
+        total = len(self.transacoes_planilha_outras_filiais)
+        self.notebook.tab(
+            self._aba_planilha_outras_filiais,
+            text=f"Planilha outras filiais ({total})",
+        )
+        if hasattr(self, "lbl_filtro_planilha_outras_filiais"):
+            self.lbl_filtro_planilha_outras_filiais.config(
+                text=(
+                    f"Mostrando {mostradas} de {total}"
+                    if termo else f"{total} lançamento(s)"
+                ),
+            )
+
     def _monta_aba_ofx_outras_filiais(self) -> None:
         """Aba dedicada aos OFX importados de outras empresas do grupo
         (matriz+filiais). Fica no notebook principal, ao lado da aba OFX
@@ -3122,8 +3253,12 @@ class App(tk.Tk):
         self.caminhos_ofx = []
         self.transacoes_ofx_outras_filiais = []
         self.caminhos_ofx_outras_filiais = []
+        self.transacoes_planilha_outras_filiais = []
+        self.caminhos_planilha_outras_filiais = []
         if hasattr(self, "btn_ofx_outras_filiais"):
             self.btn_ofx_outras_filiais.config(state="disabled")
+        if hasattr(self, "btn_planilha_outras_filiais"):
+            self.btn_planilha_outras_filiais.config(state="disabled")
         self.lbl_ofx.config(text="(nenhum OFX carregado)")
         self.btn_limpar_ofx.config(state="disabled")
         # Domínio (pagamentos da empresa antiga)
@@ -3309,11 +3444,16 @@ class App(tk.Tk):
         # Guarda a lista de empresas do grupo pra o botão de OFX de
         # outras filiais saber quais opções mostrar.
         self._empresas_grupo = empresas_pra_carregar
-        # Habilita o botão "OFX outras filiais" só quando o grupo tem
+        # Habilita os botões de "outras filiais" só quando o grupo tem
         # mais de 1 empresa.
+        eh_grupo = len(empresas_pra_carregar) > 1
         if hasattr(self, "btn_ofx_outras_filiais"):
             self.btn_ofx_outras_filiais.config(
-                state=("normal" if len(empresas_pra_carregar) > 1 else "disabled"),
+                state=("normal" if eh_grupo else "disabled"),
+            )
+        if hasattr(self, "btn_planilha_outras_filiais"):
+            self.btn_planilha_outras_filiais.config(
+                state=("normal" if eh_grupo else "disabled"),
             )
 
         # Se carregou de várias empresas, avisa
@@ -4200,6 +4340,124 @@ class App(tk.Tk):
                 self._render_aba_ofx_outras_filiais()
             self._limpa_resultados()
 
+    def _abrir_planilha_outras_filiais(self) -> None:
+        """Importa planilhas .xlsx de OUTRAS empresas do grupo. Cada
+        transação é marcada com extras['origem_filial'] = <arquivo>. As
+        transações entram em self.transacoes_planilha pra participar da
+        conciliação com o OFX principal, mas as que não casarem são
+        DESCARTADAS (não vão pras abas de pendentes/comparação — ficam
+        só na aba dedicada 'Planilha outras filiais' pra rastreio)."""
+        # Precisa ter grupo detectado
+        empresas = getattr(self, "_empresas_grupo", [])
+        if len(empresas) < 2:
+            messagebox.showwarning(
+                "Grupo empresarial não detectado",
+                "Este botão só funciona quando o Domínio identificou "
+                "mais de uma empresa com o mesmo CNPJ raiz.\n\n"
+                "Passos: Conectar Domínio → Selecionar empresa → "
+                "Carregar pagamentos.",
+            )
+            return
+        # Período (filtra pela data de pagamento — mesma regra da planilha)
+        periodo = self._pedir_periodo(
+            "Período da planilha (outras filiais)",
+            "Só serão importadas linhas cuja data de pagamento cair no "
+            "intervalo. Deixe em branco pra importar tudo.",
+        )
+        if periodo is None:
+            return
+        caminhos = filedialog.askopenfilenames(
+            title=(
+                "Selecione as planilhas .xlsx das OUTRAS empresas do grupo "
+                "(Ctrl+clique pra várias)"
+            ),
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+        )
+        if not caminhos:
+            return
+
+        total_novos = 0
+        erros: list[str] = []
+        for caminho in caminhos:
+            nome_arq = Path(caminho).name
+            try:
+                with self._carregando(
+                    f"Lendo {nome_arq}...", "Detectando estrutura...",
+                ):
+                    estrutura = descobrir_estrutura(caminho)
+            except Exception as e:
+                erros.append(f"{nome_arq}: {e}")
+                continue
+            if not estrutura.cabecalho:
+                erros.append(f"{nome_arq}: planilha vazia")
+                continue
+
+            # Tenta mapear com o que já está salvo pra empresa atual —
+            # se casar todos os campos, importa direto sem perguntar.
+            # Se faltar algum campo, o operador precisa mapear manualmente.
+            mapa_resolvido, faltando = self._resolver_mapeamento_salvo(
+                estrutura.cabecalho,
+            )
+            mapeamento_final = None
+            if mapa_resolvido and not faltando:
+                mapeamento_final = mapa_resolvido
+            else:
+                if mapa_resolvido:
+                    estrutura.sugestao = {
+                        **estrutura.sugestao, **mapa_resolvido,
+                    }
+                dlg = DialogoMapeamento(self, estrutura)
+                self.wait_window(dlg)
+                if dlg.mapeamento is None:
+                    continue  # cancelou este arquivo, tenta o proximo
+                mapeamento_final = dlg.mapeamento
+
+            try:
+                with self._carregando(
+                    "Processando planilha...",
+                    f"Convertendo linhas de {nome_arq}...",
+                ):
+                    transacoes = extrair_transacoes(estrutura, mapeamento_final)
+            except Exception as e:
+                erros.append(f"{nome_arq}: {e}")
+                continue
+
+            # Filtro por periodo (data de pagamento)
+            ini, fim = periodo
+            if ini is not None or fim is not None:
+                transacoes = [
+                    t for t in transacoes
+                    if self._dentro_periodo(t, ini, fim, usar_pagamento=True)
+                ]
+
+            # Marca origem
+            for t in transacoes:
+                t.extras["origem_filial"] = nome_arq
+
+            self.transacoes_planilha.extend(transacoes)
+            self.transacoes_planilha_outras_filiais.extend(transacoes)
+            self.caminhos_planilha_outras_filiais.append(Path(caminho))
+            total_novos += len(transacoes)
+
+        if erros:
+            messagebox.showerror(
+                "Erro ao ler uma ou mais planilhas", "\n".join(erros),
+            )
+
+        if total_novos:
+            messagebox.showinfo(
+                "Planilha de outras filiais importada",
+                f"{total_novos} lançamento(s) adicionado(s) ao fluxo de "
+                "conciliação. Aparecem na aba Planilha e na aba "
+                "'Planilha outras filiais' pra rastreio.",
+            )
+            self._atualiza_label_planilha()
+            self._atualiza_botao()
+            self._render_aba_planilha()
+            if hasattr(self, "_render_aba_planilha_outras_filiais"):
+                self._render_aba_planilha_outras_filiais()
+            self._limpa_resultados()
+
     def _limpar_planilha(self) -> None:
         """Remove a planilha importada. Pendentes e sugestões são
         descartados, MAS os pares já conciliados, os matches com Domínio
@@ -4234,6 +4492,10 @@ class App(tk.Tk):
         if not messagebox.askyesno("Confirmar", msg):
             return
         self.transacoes_planilha = []
+        # Limpa tambem planilhas de outras filiais — foram concatenadas
+        # em transacoes_planilha, entao limpar tudo é o esperado.
+        self.transacoes_planilha_outras_filiais = []
+        self.caminhos_planilha_outras_filiais = []
         self.caminho_planilha = None
         self.estrutura_planilha = None
         self.mapeamento_planilha = None
@@ -4242,6 +4504,8 @@ class App(tk.Tk):
         self.btn_limpar_planilha.config(state="disabled")
         self._atualiza_botao()
         self._render_aba_planilha()
+        if hasattr(self, "_render_aba_planilha_outras_filiais"):
+            self._render_aba_planilha_outras_filiais()
         # Preserva pendentes do OFX que ainda estão carregados (não deve
         # apagar pendentes OFX só porque a planilha foi limpa).
         self._limpa_resultados(
@@ -4402,16 +4666,18 @@ class App(tk.Tk):
             # Adiciona os NOVOS pares aos existentes (preservados)
             self.pares_conciliados.extend(novos_pares)
             # Brutos são a fonte da verdade; visível é derivado depois.
-            self.pendentes_planilha_brutos = list(pend_p)
-            self.pendentes_planilha = list(pend_p)
-            # Descarta pendentes vindos de OFX de OUTRAS filiais: se
-            # nao casaram com a planilha desta empresa, sao movimentacoes
-            # que pertencem a outra empresa do grupo — nao entram nas
-            # abas Pendentes, Comparacao, Conciliados x Dominio etc.
-            pend_o_filtrada = [
-                t for t in pend_o
-                if not t.extras.get("origem_filial")
+            # Descarta pendentes vindos de PLANILHA e OFX de OUTRAS filiais:
+            # se não casaram com a fonte principal desta empresa, são
+            # lançamentos que pertencem a outra empresa do grupo — não
+            # entram nas abas Pendentes, Comparação, Conciliados x Domínio.
+            pend_p_filtrada = [
+                t for t in pend_p if not t.extras.get("origem_filial")
             ]
+            pend_o_filtrada = [
+                t for t in pend_o if not t.extras.get("origem_filial")
+            ]
+            self.pendentes_planilha_brutos = list(pend_p_filtrada)
+            self.pendentes_planilha = list(pend_p_filtrada)
             self.pendentes_ofx_brutos = list(pend_o_filtrada)
             self.pendentes_ofx = list(pend_o_filtrada)
             # Enriquece as Transacoes do OFX com CNPJ/nome/nº doc vindos
