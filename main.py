@@ -969,17 +969,60 @@ class App(tk.Tk):
         # Sidebar esquerda com TODAS as acoes principais, agrupadas.
         # Ordem do fluxo diario: empresa -> importar (planilha/PDF/OFX) ->
         # carregar Dominio -> auxiliares (editar/limpar) -> conciliar/comparar.
-        self._sidebar = ttk.LabelFrame(corpo, text="Ações", padding=8)
+        # Estrutura: LabelFrame (container externo) -> Canvas (scrollable)
+        # -> Frame interno onde ficam todos os widgets. Scrollbar vertical
+        # aparece a direita quando os botoes nao cabem na altura da tela.
+        self._sidebar = ttk.LabelFrame(corpo, text="Ações", padding=4)
         self._sidebar.pack(side="left", fill="y", padx=(0, 8))
+        # Canvas + scrollbar
+        _sidebar_canvas = tk.Canvas(
+            self._sidebar, borderwidth=0, highlightthickness=0, width=230,
+        )
+        _sidebar_sb = ttk.Scrollbar(
+            self._sidebar, orient="vertical",
+            command=_sidebar_canvas.yview,
+        )
+        _sidebar_canvas.configure(yscrollcommand=_sidebar_sb.set)
+        _sidebar_sb.pack(side="right", fill="y")
+        _sidebar_canvas.pack(side="left", fill="both", expand=True)
+        # Frame interno onde tudo vai. É o que os _titulo/_sep/botoes
+        # abaixo esperam como parent — trocamos self._sidebar por
+        # self._sidebar_inner nas construcoes seguintes.
+        self._sidebar_inner = ttk.Frame(_sidebar_canvas, padding=4)
+        _win = _sidebar_canvas.create_window(
+            (0, 0), window=self._sidebar_inner, anchor="nw",
+        )
+        # Ajusta scrollregion quando o frame interno redimensiona +
+        # faz a largura do inner acompanhar a do canvas (evita canto
+        # cortado horizontal quando a fonte de sistema muda).
+        def _on_inner_configure(_e=None):
+            _sidebar_canvas.configure(
+                scrollregion=_sidebar_canvas.bbox("all"),
+            )
+        def _on_canvas_configure(e):
+            _sidebar_canvas.itemconfigure(_win, width=e.width)
+        self._sidebar_inner.bind("<Configure>", _on_inner_configure)
+        _sidebar_canvas.bind("<Configure>", _on_canvas_configure)
+        # Scroll com roda do mouse quando o cursor esta sobre a sidebar
+        def _on_mousewheel(event):
+            _sidebar_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        _sidebar_canvas.bind(
+            "<Enter>",
+            lambda _e: _sidebar_canvas.bind_all("<MouseWheel>", _on_mousewheel),
+        )
+        _sidebar_canvas.bind(
+            "<Leave>",
+            lambda _e: _sidebar_canvas.unbind_all("<MouseWheel>"),
+        )
 
         def _sep():
-            ttk.Separator(self._sidebar, orient="horizontal").pack(
+            ttk.Separator(self._sidebar_inner, orient="horizontal").pack(
                 fill="x", pady=(8, 4),
             )
 
         def _titulo(txt):
             ttk.Label(
-                self._sidebar, text=txt,
+                self._sidebar_inner, text=txt,
                 foreground="#1f3a68",
                 font=("TkDefaultFont", 8, "bold"),
             ).pack(anchor="w", pady=(4, 2))
@@ -987,7 +1030,7 @@ class App(tk.Tk):
         # --- Grupo 1: Empresa
         _titulo("EMPRESA")
         self.btn_empresa = ttk.Button(
-            self._sidebar, text="Selecionar empresa",
+            self._sidebar_inner, text="Selecionar empresa",
             command=self._selecionar_empresa, state="disabled", width=26,
         )
         self.btn_empresa.pack(fill="x", pady=2)
@@ -996,32 +1039,32 @@ class App(tk.Tk):
         _sep()
         _titulo("IMPORTAR")
         ttk.Button(
-            self._sidebar, text="Abrir planilha (.xlsx)",
+            self._sidebar_inner, text="Abrir planilha (.xlsx)",
             command=self._abrir_planilha, width=26,
         ).pack(fill="x", pady=2)
         ttk.Button(
-            self._sidebar, text="Importar comprovantes PDF",
+            self._sidebar_inner, text="Importar comprovantes PDF",
             command=self._importar_comprovantes_pdf, width=26,
         ).pack(fill="x", pady=2)
         ttk.Button(
-            self._sidebar, text="Importar comprovantes PIX",
+            self._sidebar_inner, text="Importar comprovantes PIX",
             command=self._importar_comprovantes_pix, width=26,
         ).pack(fill="x", pady=2)
         ttk.Button(
-            self._sidebar, text="Importar OFX",
+            self._sidebar_inner, text="Importar OFX",
             command=self._abrir_ofx, width=26,
         ).pack(fill="x", pady=2)
         # Botão só habilita quando o grupo empresarial (matriz+filiais)
         # tem mais de 1 empresa carregada no Domínio.
         self.btn_ofx_outras_filiais = ttk.Button(
-            self._sidebar, text="OFX outras filiais",
+            self._sidebar_inner, text="OFX outras filiais",
             command=self._abrir_ofx_outras_filiais,
             state="disabled", width=26,
         )
         self.btn_ofx_outras_filiais.pack(fill="x", pady=2)
         # Mesmo comportamento: habilita quando grupo empresarial detectado
         self.btn_planilha_outras_filiais = ttk.Button(
-            self._sidebar, text="Planilha outras filiais",
+            self._sidebar_inner, text="Planilha outras filiais",
             command=self._abrir_planilha_outras_filiais,
             state="disabled", width=26,
         )
@@ -1031,12 +1074,12 @@ class App(tk.Tk):
         _sep()
         _titulo("DOMÍNIO")
         self.btn_carregar_dominio = ttk.Button(
-            self._sidebar, text="Carregar pagamentos",
+            self._sidebar_inner, text="Carregar pagamentos",
             command=self._carregar_dominio, state="disabled", width=26,
         )
         self.btn_carregar_dominio.pack(fill="x", pady=2)
         self.btn_carregar_plano = ttk.Button(
-            self._sidebar, text="Carregar plano contas",
+            self._sidebar_inner, text="Carregar plano contas",
             command=self._carregar_plano_contas, state="disabled", width=26,
         )
         self.btn_carregar_plano.pack(fill="x", pady=2)
@@ -1045,24 +1088,24 @@ class App(tk.Tk):
         _sep()
         _titulo("EDITAR / LIMPAR")
         self.btn_editar_colunas = ttk.Button(
-            self._sidebar, text="Editar colunas",
+            self._sidebar_inner, text="Editar colunas",
             command=self._editar_colunas, state="disabled", width=26,
         )
         self.btn_editar_colunas.pack(fill="x", pady=2)
         self.btn_limpar_planilha = ttk.Button(
-            self._sidebar, text="Limpar planilha",
+            self._sidebar_inner, text="Limpar planilha",
             command=self._limpar_planilha, state="disabled", width=26,
         )
         self.btn_limpar_planilha.pack(fill="x", pady=2)
         self.btn_limpar_ofx = ttk.Button(
-            self._sidebar, text="Limpar OFX",
+            self._sidebar_inner, text="Limpar OFX",
             command=self._limpar_ofx, state="disabled", width=26,
         )
         self.btn_limpar_ofx.pack(fill="x", pady=2)
         # Botão Status: abre popup com o que foi importado (planilha, PDF,
         # OFX, Domínio). Substitui os labels de status que ficavam aqui.
         ttk.Button(
-            self._sidebar, text="ℹ Status das importações",
+            self._sidebar_inner, text="ℹ Status das importações",
             command=self._abrir_status, width=26,
         ).pack(fill="x", pady=2)
 
@@ -1070,21 +1113,21 @@ class App(tk.Tk):
         _sep()
         _titulo("CONCILIAR")
         self.btn_conciliar = ttk.Button(
-            self._sidebar, text="Conciliar",
+            self._sidebar_inner, text="Conciliar",
             command=self._executar_conciliacao, state="disabled", width=26,
         )
         self.btn_conciliar.pack(fill="x", pady=2)
         self.btn_comparar_dominio = ttk.Button(
-            self._sidebar, text="Comparar com Domínio",
+            self._sidebar_inner, text="Comparar com Domínio",
             command=self._comparar_com_dominio, width=26,
         )
         self.btn_comparar_dominio.pack(fill="x", pady=2)
         ttk.Button(
-            self._sidebar, text="Configurar taxas",
+            self._sidebar_inner, text="Configurar taxas",
             command=self._abrir_config_taxas, width=26,
         ).pack(fill="x", pady=2)
         self.lbl_resumo = ttk.Label(
-            self._sidebar, text="",
+            self._sidebar_inner, text="",
             foreground="#1f3a68", font=("TkDefaultFont", 8, "bold"),
             wraplength=200,
         )
@@ -1093,7 +1136,7 @@ class App(tk.Tk):
         # --- Recolher sidebar
         _sep()
         ttk.Button(
-            self._sidebar, text="◀ Recolher",
+            self._sidebar_inner, text="◀ Recolher",
             command=self._toggle_sidebar, width=26,
         ).pack(fill="x", pady=(0, 0))
 
