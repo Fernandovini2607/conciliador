@@ -6741,7 +6741,17 @@ class App(tk.Tk):
         filtros = getattr(self, "filtros_col_planilha", {})
         tem_filtro_col = any(v is not None for v in filtros.values())
         mostradas = 0
-        for t in self.transacoes_planilha:
+        # Aba Planilha mostra APENAS transações da empresa atualmente
+        # selecionada. As de outras filiais ficam na aba dedicada — evita
+        # confundir o operador vendo tudo misturado.
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+        transacoes_visiveis = [
+            t for t in self.transacoes_planilha
+            if t.extras.get("codi_emp_filial") == codi_atual
+            or t.extras.get("codi_emp_filial") is None
+        ] if codi_atual is not None else list(self.transacoes_planilha)
+        for t in transacoes_visiveis:
             row = self._row_planilha(t)
             if termo and termo not in " ".join(row).lower():
                 continue
@@ -6757,7 +6767,9 @@ class App(tk.Tk):
             if hasattr(self, "itens_tree_planilha"):
                 self.itens_tree_planilha[iid] = t
             mostradas += 1
-        total = len(self.transacoes_planilha)
+        # Contador da aba mostra o total da EMPRESA ATUAL (o que aparece
+        # visualmente), não o total misturado com outras filiais.
+        total = len(transacoes_visiveis)
         self.notebook.tab(self._aba_planilha, text=f"Planilha ({total})")
         if hasattr(self, "lbl_filtro_planilha"):
             tem_filtro = termo or tem_filtro_col
@@ -6775,7 +6787,16 @@ class App(tk.Tk):
         filtros = getattr(self, "filtros_col_ofx", {})
         tem_filtro_col = any(v is not None for v in filtros.values())
         mostradas = 0
-        for t in self.transacoes_ofx:
+        # Aba OFX mostra APENAS movimentações da empresa atual — as de
+        # outras filiais ficam na aba dedicada.
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+        transacoes_visiveis = [
+            t for t in self.transacoes_ofx
+            if t.extras.get("codi_emp_filial") == codi_atual
+            or t.extras.get("codi_emp_filial") is None
+        ] if codi_atual is not None else list(self.transacoes_ofx)
+        for t in transacoes_visiveis:
             row = self._row_ofx(t)
             if termo and termo not in " ".join(row).lower():
                 continue
@@ -6793,9 +6814,10 @@ class App(tk.Tk):
             if hasattr(self, "itens_tree_ofx"):
                 self.itens_tree_ofx[iid] = t
             mostradas += 1
-        total = len(self.transacoes_ofx)
+        # Contador da aba: total da empresa atual (o que o operador ve).
+        total = len(transacoes_visiveis)
         n_enriq = sum(
-            1 for t in self.transacoes_ofx
+            1 for t in transacoes_visiveis
             if t.extras.get("enriquecido_por_pdf")
         )
         label_tab = f"OFX ({total})"
