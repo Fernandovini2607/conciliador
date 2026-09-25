@@ -6863,6 +6863,14 @@ class App(tk.Tk):
             self._render_aba_ofx()
         # Atualiza Comparação também (no-op se Domínio não carregado)
         self._recalcular_comparacao()
+        # Abas de grupo empresarial: são independentes do Domínio, então
+        # precisam re-renderizar aqui (o _recalcular_comparacao acima só
+        # roda quando o Domínio já foi carregado). Sem isso, ficam vazias
+        # depois de Conciliar em grupo empresarial sem clicar Comparar.
+        if hasattr(self, "_render_aba_pagos_por_outra"):
+            self._render_aba_pagos_por_outra()
+        if hasattr(self, "_render_aba_conciliados_anteriores"):
+            self._render_aba_conciliados_anteriores()
         self._notebook_conciliados.tab(self._aba_conciliados, text=f"Conciliados ({len(self.pares_conciliados)})")
         self._notebook_conciliados.tab(
             self._aba_pendentes, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
