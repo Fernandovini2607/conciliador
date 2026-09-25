@@ -3634,9 +3634,49 @@ class App(tk.Tk):
         self.cfg["dominio_empresa"] = dlg.empresa
         config.salvar(self.cfg)
         self._atualiza_label_dominio()
+        # Detecta grupo empresarial (matriz+filiais) já na seleção da
+        # empresa — evita ter que carregar pagamentos antes de habilitar
+        # os botões de FILIAIS e Trocar filial.
+        self._detectar_grupo_empresarial()
         # Regras de taxas mudam com a empresa — recalcula lançamentos
         self._gerar_lancamentos_contabeis()
         self._redesenha_abas()
+
+    def _detectar_grupo_empresarial(self) -> None:
+        """Consulta o Domínio pra identificar as empresas do grupo (mesmo
+        CNPJ raiz) e guarda em self._empresas_grupo. Habilita os botões
+        que dependem disso: OFX outras empresas, Planilha outras empresas
+        e Trocar filial. Chamado após a seleção da empresa — permite ao
+        operador usar esses botões sem antes carregar pagamentos.
+
+        Falha silenciosa: se a consulta der erro (SQL da fonte não
+        configurada, conexão caiu, etc), apenas não habilita — os botões
+        continuam disabled e o _carregar_dominio ainda vai tentar."""
+        emp = self.cfg.get("dominio_empresa") or {}
+        cnpj = emp.get("cnpj", "") or ""
+        if not cnpj or self.conn_dominio is None:
+            self._empresas_grupo = []
+        else:
+            try:
+                filiais = parser_dominio.listar_filiais(
+                    self.conn_dominio, cnpj,
+                )
+                self._empresas_grupo = filiais if filiais else []
+            except Exception:
+                self._empresas_grupo = []
+        eh_grupo = len(self._empresas_grupo) > 1
+        if hasattr(self, "btn_ofx_outras_filiais"):
+            self.btn_ofx_outras_filiais.config(
+                state=("normal" if eh_grupo else "disabled"),
+            )
+        if hasattr(self, "btn_planilha_outras_filiais"):
+            self.btn_planilha_outras_filiais.config(
+                state=("normal" if eh_grupo else "disabled"),
+            )
+        if hasattr(self, "btn_trocar_filial"):
+            self.btn_trocar_filial.config(
+                state=("normal" if eh_grupo else "disabled"),
+            )
 
     def _limpar_dados_empresa(self) -> None:
         """Limpa planilha, OFX, Domínio e plano de contas — invocado ao
