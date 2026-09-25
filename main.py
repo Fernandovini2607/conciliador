@@ -1054,17 +1054,19 @@ class App(tk.Tk):
             self._sidebar_inner, text="Importar OFX",
             command=self._abrir_ofx, width=26,
         ).pack(fill="x", pady=2)
-        # Botão só habilita quando o grupo empresarial (matriz+filiais)
-        # tem mais de 1 empresa carregada no Domínio.
+
+        # --- Grupo 2b: Filiais (só habilita quando grupo empresarial
+        # detectado — 2+ empresas com mesmo CNPJ raiz)
+        _sep()
+        _titulo("FILIAIS")
         self.btn_ofx_outras_filiais = ttk.Button(
-            self._sidebar_inner, text="OFX outras filiais",
+            self._sidebar_inner, text="OFX outras empresas",
             command=self._abrir_ofx_outras_filiais,
             state="disabled", width=26,
         )
         self.btn_ofx_outras_filiais.pack(fill="x", pady=2)
-        # Mesmo comportamento: habilita quando grupo empresarial detectado
         self.btn_planilha_outras_filiais = ttk.Button(
-            self._sidebar_inner, text="Planilha outras filiais",
+            self._sidebar_inner, text="Planilha outras empresas",
             command=self._abrir_planilha_outras_filiais,
             state="disabled", width=26,
         )
