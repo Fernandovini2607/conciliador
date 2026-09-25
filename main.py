@@ -3099,6 +3099,9 @@ class App(tk.Tk):
         vão pras abas Pendentes / Comparação / etc — ficam só aqui."""
         aba = ttk.Frame(self.notebook)
         self.notebook.add(aba, text="Planilha outras filiais (0)")
+        # Começa oculta — só aparece quando _detectar_grupo_empresarial
+        # confirmar que a empresa faz parte de grupo (matriz+filiais).
+        self.notebook.tab(aba, state="hidden")
         self._aba_planilha_outras_filiais = aba
 
         ttk.Label(
@@ -3221,6 +3224,8 @@ class App(tk.Tk):
         pra participar da conciliação normal."""
         aba = ttk.Frame(self.notebook)
         self.notebook.add(aba, text="OFX outras filiais (0)")
+        # Oculta ate detectar grupo empresarial (ver _detectar_grupo_empresarial)
+        self.notebook.tab(aba, state="hidden")
         self._aba_ofx_outras_filiais = aba
 
         # Cabeçalho explicativo
@@ -3340,6 +3345,8 @@ class App(tk.Tk):
         mesma sessão."""
         aba = ttk.Frame(self._notebook_conciliados)
         self._notebook_conciliados.add(aba, text="Conciliados anteriores (0)")
+        # Oculta ate detectar grupo empresarial
+        self._notebook_conciliados.tab(aba, state="hidden")
         self._aba_conciliados_anteriores = aba
 
         ttk.Label(
@@ -3569,6 +3576,11 @@ class App(tk.Tk):
         if self.cfg.get("dominio_fonte_plano_contas", {}).get("mapeamento"):
             self.btn_carregar_plano.config(state="normal")
         self._atualiza_label_dominio()
+        # Detecta grupo da empresa que já estava salva do session
+        # anterior — assim as abas/botoes de filiais aparecem
+        # imediatamente sem precisar reselecionar a empresa.
+        if self.cfg.get("dominio_empresa"):
+            self._detectar_grupo_empresarial()
 
     def _auto_conectar_dominio(self) -> None:
         """Tenta abrir a conexão com o Domínio automaticamente usando as
@@ -3676,6 +3688,21 @@ class App(tk.Tk):
         if hasattr(self, "btn_trocar_filial"):
             self.btn_trocar_filial.config(
                 state=("normal" if eh_grupo else "disabled"),
+            )
+        # Abas de grupo empresarial só existem quando faz sentido — se a
+        # empresa nao tem filiais, as 3 abas somem do notebook.
+        estado_abas = "normal" if eh_grupo else "hidden"
+        if hasattr(self, "_aba_planilha_outras_filiais"):
+            self.notebook.tab(
+                self._aba_planilha_outras_filiais, state=estado_abas,
+            )
+        if hasattr(self, "_aba_ofx_outras_filiais"):
+            self.notebook.tab(
+                self._aba_ofx_outras_filiais, state=estado_abas,
+            )
+        if hasattr(self, "_aba_conciliados_anteriores"):
+            self._notebook_conciliados.tab(
+                self._aba_conciliados_anteriores, state=estado_abas,
             )
 
     def _limpar_dados_empresa(self) -> None:
