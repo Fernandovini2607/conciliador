@@ -3628,6 +3628,15 @@ class App(tk.Tk):
         )
         self.lbl_filtro_pagos_de_outra.pack(side="left", padx=8)
 
+        # Rodape com botao de desfazer — packado ANTES do corpo pra
+        # ficar ancorado embaixo (mesma tecnica das outras abas)
+        rodape = ttk.Frame(aba)
+        rodape.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            rodape, text="Desfazer conciliação",
+            command=self._desfazer_conciliacao_pagos_de_outra,
+        ).pack(side="left", padx=2)
+
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
         cols = (
@@ -3656,6 +3665,8 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         self.tree_pagos_de_outra = tree
+        # iid -> Par (para resolver seleção no botão Desfazer)
+        self.itens_pagos_de_outra: dict[str, Par] = {}
 
     def _render_aba_pagos_de_outra(self) -> None:
         """Popula a aba 'Pagos de outra empresa' — só pares em que
@@ -3665,6 +3676,8 @@ class App(tk.Tk):
         tree = self.tree_pagos_de_outra
         for iid in tree.get_children():
             tree.delete(iid)
+        if hasattr(self, "itens_pagos_de_outra"):
+            self.itens_pagos_de_outra.clear()
 
         termo = ""
         if hasattr(self, "filtro_pagos_de_outra"):
@@ -3711,7 +3724,11 @@ class App(tk.Tk):
                 str(v) for v in values
             ).lower():
                 continue
-            tree.insert("", "end", values=values, tags=("lanc_aqui",))
+            iid = tree.insert(
+                "", "end", values=values, tags=("lanc_aqui",),
+            )
+            if hasattr(self, "itens_pagos_de_outra"):
+                self.itens_pagos_de_outra[iid] = par
             n += 1
 
         self._notebook_conciliados.tab(
@@ -3722,6 +3739,56 @@ class App(tk.Tk):
             self.lbl_filtro_pagos_de_outra.config(
                 text=(f"Mostrando {n} de {total_bruto}" if termo else ""),
             )
+
+    def _desfazer_conciliacao_pagos_de_outra(self) -> None:
+        """Desfaz o par selecionado na aba 'Pagos de outra empresa'.
+
+        Como estes pares sao cross-filial (OFX = empresa atual, planilha =
+        outra filial), o comportamento e:
+        - Remove o par de self.pares_conciliados.
+        - O OFX volta pra self.pendentes_ofx_brutos (empresa atual — vai
+          aparecer na aba Pendentes daqui pra o operador re-conciliar).
+        - A planilha (de outra filial) NAO volta pros pendentes daqui —
+          ela continua em transacoes_planilha_outras_filiais e sera
+          re-considerada num proximo Conciliar (ou quando o operador
+          trocar pra aquela filial).
+        - Regera lancamentos + Dominio + redesenha tudo (o par some da
+          lista de Conciliados / Comparacao / etc.).
+        """
+        sel = self.tree_pagos_de_outra.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Selecione um lançamento",
+                "Escolha uma linha na tabela para desfazer a conciliação.",
+            )
+            return
+        par = self.itens_pagos_de_outra.get(sel[0])
+        if par is None:
+            return
+        if not messagebox.askyesno(
+            "Desfazer conciliação cross-filial",
+            "Desfazer este par?\n\n"
+            "• O extrato bancário (OFX daqui) volta pra aba Pendentes "
+            "desta empresa.\n"
+            "• A linha da planilha (que era da outra filial) fica "
+            "novamente disponível pra pareamento no próximo Conciliar.",
+        ):
+            return
+        try:
+            self.pares_conciliados.remove(par)
+        except ValueError:
+            # Par ja tinha sido removido por outro caminho — segue vida.
+            pass
+        # OFX pertence a empresa atual: entra em pendentes_ofx_brutos.
+        # (a planilha e de outra filial e nao vai pros pendentes daqui)
+        if par.ofx not in self.pendentes_ofx_brutos:
+            self.pendentes_ofx_brutos.append(par.ofx)
+            self.pendentes_ofx_brutos.sort(key=lambda t: (t.data, t.valor))
+        self._gerar_lancamentos_contabeis()
+        self._recalcula_sugestoes()
+        self._filtrar_conciliados_por_dominio()
+        self._redesenha_abas()
+        self._atualiza_resumo()
 
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
@@ -6943,8 +7010,26 @@ class App(tk.Tk):
         termo = ""
         if hasattr(self, "filtro_conciliados"):
             termo = self.filtro_conciliados.get().strip().lower()
+        # Filtro por empresa atual (grupo empresarial): so aparecem pares
+        # cuja PLANILHA e da empresa selecionada. Pares cross-filial
+        # (planilha de outra, OFX daqui) ficam na aba 'Pagos de outra
+        # empresa'; os inversos ficam em 'Pagos por outra empresa'.
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+
+        def _pertence_a_empresa_atual(par) -> bool:
+            if codi_atual is None:
+                return True  # empresa nao definida — comportamento antigo
+            codi_p = par.planilha.extras.get("codi_emp_filial")
+            # None = transacao ainda nao marcada por filial (pre-grupo);
+            # deixa passar pra nao esconder dados legados.
+            return codi_p is None or codi_p == codi_atual
+
         mostradas = 0
-        for par in self.pares_conciliados:
+        pares_visiveis = [
+            p for p in self.pares_conciliados if _pertence_a_empresa_atual(p)
+        ]
+        for par in pares_visiveis:
             diff_txt = ""
             if par.diff_dias or par.diff_valor:
                 diff_txt = f"Δ {par.diff_dias}d, R$ {par.diff_valor:.2f}"
@@ -6975,7 +7060,7 @@ class App(tk.Tk):
             )
             self.itens_pares[iid] = par
             mostradas += 1
-        total = len(self.pares_conciliados)
+        total = len(pares_visiveis)
         if hasattr(self, "lbl_filtro_conciliados"):
             self.lbl_filtro_conciliados.config(
                 text=(f"Mostrando {mostradas} de {total}" if termo else ""),
@@ -6983,7 +7068,9 @@ class App(tk.Tk):
         # Atualiza o contador no titulo da aba junto com a tabela pra
         # nunca dessincronizarem (ex.: '_render_conciliados' chamado
         # sozinho via trace do filtro nao passava por _redesenha_abas
-        # e o contador ficava velho).
+        # e o contador ficava velho). Usa 'pares_visiveis' — que ja
+        # filtra os pares cuja planilha e da empresa atual — pra o
+        # numero bater com o que aparece na tabela.
         if hasattr(self, "_aba_conciliados"):
             self._notebook_conciliados.tab(
                 self._aba_conciliados, text=f"Conciliados ({total})",
@@ -7072,10 +7159,28 @@ class App(tk.Tk):
         termo = ""
         if hasattr(self, "filtro_conciliados_dominio"):
             termo = self.filtro_conciliados_dominio.get().strip().lower()
+        # Filtro por empresa do Dominio (grupo empresarial): so aparecem
+        # linhas cuja parcela do Dominio foi cadastrada na empresa atual
+        # (via extras['codi_emp_origem']). Quando o Dominio nao veio de
+        # grupo empresarial (so a matriz), codi_emp_origem e None em
+        # todas as parcelas — a checagem deixa passar.
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_emp_atual = emp_atual.get("codi_emp")
+
+        def _dom_pertence_a_empresa(t_dom) -> bool:
+            if codi_emp_atual is None or t_dom is None:
+                return True
+            codi_dom = t_dom.extras.get("codi_emp_origem")
+            # None = parcela sem marcação de empresa (Domínio pre-grupo);
+            # deixa passar pra nao esconder legado.
+            return codi_dom is None or codi_dom == codi_emp_atual
+
         mostradas_ref = [0]  # lista pra permitir mutação em closure
         total_bruto_ref = [0]
 
-        def _inserir(values, tags=()) -> None:
+        def _inserir(values, tags=(), t_dom=None) -> None:
+            if not _dom_pertence_a_empresa(t_dom):
+                return
             total_bruto_ref[0] += 1
             if termo and termo not in " ".join(
                 str(v) for v in values
@@ -7084,6 +7189,7 @@ class App(tk.Tk):
             self.tree_conciliados_dominio.insert(
                 "", "end", values=values, tags=tags,
             )
+            mostradas_ref[0] += 1
             mostradas_ref[0] += 1
 
         def _tag_status(status: str) -> str:
@@ -7213,6 +7319,7 @@ class App(tk.Tk):
                     status,
                 ),
                 tags=(_tag_status(status),) if _tag_status(status) else (),
+                t_dom=par.dominio,
             )
 
         # 2) Pendentes da planilha (Caixa geral) que casaram com Domínio
@@ -7275,6 +7382,7 @@ class App(tk.Tk):
                     status,
                 ),
                 tags=(_tag_status(status),) if _tag_status(status) else (),
+                t_dom=t_dom,
             )
 
         # 3) Pendentes do OFX (sem planilha) que casaram com Domínio
@@ -7336,9 +7444,13 @@ class App(tk.Tk):
                     status,
                 ),
                 tags=(_tag_status(status),) if _tag_status(status) else (),
+                t_dom=t_dom,
             )
 
-        total = len(pares) + len(caixa_dominio) + len(ofx_dominio)
+        # Contador exibe o TOTAL_bruto (linhas que passaram no filtro por
+        # empresa do Dominio) — nao o len absoluto dos 3 blocos, que
+        # inclui parcelas de outras filiais que nao aparecem na tabela.
+        total = total_bruto_ref[0]
         self._notebook_conciliados.tab(
             self._aba_conciliados_dominio,
             text=f"Conciliados × Domínio ({total})",
