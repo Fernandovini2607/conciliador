@@ -3648,23 +3648,51 @@ class App(tk.Tk):
             pass
 
         # Devolve pros pendentes daqui apenas o lado que pertence
-        # a empresa atual.
+        # a empresa atual. Compara como string pra lidar com codi_emp
+        # que pode vir como int em um lado e str em outro.
+        def _mesma_empresa(a, b) -> bool:
+            if a is None or b is None:
+                return False
+            return str(a) == str(b)
+
+        planilha_devolvida = False
+        ofx_devolvido = False
         if codi_atual is not None:
-            if codi_p == codi_atual and par.planilha not in self.pendentes_planilha_brutos:
-                self.pendentes_planilha_brutos.append(par.planilha)
-                self.pendentes_planilha_brutos.sort(
-                    key=lambda t: (t.data, t.valor),
-                )
-            if codi_o == codi_atual and par.ofx not in self.pendentes_ofx_brutos:
-                self.pendentes_ofx_brutos.append(par.ofx)
-                self.pendentes_ofx_brutos.sort(
-                    key=lambda t: (t.data, t.valor),
-                )
+            if _mesma_empresa(codi_p, codi_atual):
+                # Limpa match antigo com Dominio pra a transacao nao
+                # 'cair direto' como caixa_ok e sumir de Pendentes.
+                self.pendentes_planilha_dominio.pop(id(par.planilha), None)
+                if par.planilha not in self.pendentes_planilha_brutos:
+                    self.pendentes_planilha_brutos.append(par.planilha)
+                    self.pendentes_planilha_brutos.sort(
+                        key=lambda t: (t.data, t.valor),
+                    )
+                planilha_devolvida = True
+            if _mesma_empresa(codi_o, codi_atual):
+                self.pendentes_ofx_dominio.pop(id(par.ofx), None)
+                if par.ofx not in self.pendentes_ofx_brutos:
+                    self.pendentes_ofx_brutos.append(par.ofx)
+                    self.pendentes_ofx_brutos.sort(
+                        key=lambda t: (t.data, t.valor),
+                    )
+                ofx_devolvido = True
+        # Regenera lancamentos + sugestoes. NAO chama
+        # _filtrar_conciliados_por_dominio aqui: se a transacao bate com
+        # o Dominio, ela viraria caixa_ok/ofx_ok imediatamente e sumiria
+        # de Pendentes — o operador nao veria o efeito do desfazer. O
+        # botao 'Comparar com Dominio' re-avalia quando o operador
+        # quiser reclassificar.
         self._gerar_lancamentos_contabeis()
         self._recalcula_sugestoes()
-        self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
+        # Forca repaint imediato do Tk (evita a UI so atualizar no
+        # proximo evento — sintoma anterior era 'so atualiza ao clicar
+        # em Limpar no filtro').
+        try:
+            self.update_idletasks()
+        except tk.TclError:
+            pass
 
     def _monta_aba_pagos_de_outra(self) -> None:
         """Aba com pares em que o OFX é da empresa atual (o pagamento
@@ -3868,14 +3896,24 @@ class App(tk.Tk):
             pass
         # OFX pertence a empresa atual: entra em pendentes_ofx_brutos.
         # (a planilha e de outra filial e nao vai pros pendentes daqui)
+        # Limpa match antigo com Dominio pra o OFX nao 'cair direto'
+        # como ofx_ok e sumir da aba Pendentes.
+        self.pendentes_ofx_dominio.pop(id(par.ofx), None)
         if par.ofx not in self.pendentes_ofx_brutos:
             self.pendentes_ofx_brutos.append(par.ofx)
             self.pendentes_ofx_brutos.sort(key=lambda t: (t.data, t.valor))
+        # NAO chama _filtrar_conciliados_por_dominio aqui: se o OFX bate
+        # com o Dominio, ele viraria ofx_ok imediatamente e sumiria de
+        # Pendentes — o operador nao veria o efeito do desfazer. O botao
+        # 'Comparar com Dominio' re-avalia quando o operador quiser.
         self._gerar_lancamentos_contabeis()
         self._recalcula_sugestoes()
-        self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
+        try:
+            self.update_idletasks()
+        except tk.TclError:
+            pass
 
     def _exportar_pagos_por_outra(self) -> None:
         """Exporta a aba 'Pagos por outra empresa' para .xlsx —
