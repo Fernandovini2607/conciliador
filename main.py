@@ -7414,11 +7414,27 @@ class App(tk.Tk):
         consomem a transação correspondente dos Pendentes.
         """
         regras = self._get_regras_empresa()
+        # Filtra pares pra gerar lançamento SÓ na empresa que efetivamente
+        # PAGOU (a dona do OFX). Contexto: em grupo empresarial, o cross-
+        # matching gera pares planilha_A × OFX_B. Se aqui não filtrasse,
+        # esses pares virariam lançamento contábil na empresa atual mesmo
+        # quando o dinheiro saiu do banco de OUTRA empresa.
+        # Regra: gera lançamento aqui só quando OFX é da empresa atual
+        # (ou quando OFX não tem marcação de filial — retrocompat).
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+
+        def _ofx_e_da_empresa_atual(par) -> bool:
+            if codi_atual is None:
+                return True  # sem empresa selecionada, comportamento antigo
+            codi_ofx = par.ofx.extras.get("codi_emp_filial")
+            return codi_ofx == codi_atual or codi_ofx is None
+
         # Candidatos a "fornecedor": pares P×O sem match no Domínio
-        # E também pendentes da planilha (que não casaram com OFX) —
-        # essas regras viram lançamento com banco='Caixa geral'.
+        # E cujo OFX pertence à empresa atual.
         pares_sem_dominio = [
-            p for p in self.pares_conciliados if p.dominio is None
+            p for p in self.pares_conciliados
+            if p.dominio is None and _ofx_e_da_empresa_atual(p)
         ]
         automaticos = gerar_lancamentos_contabeis(
             self.pendentes_ofx_brutos, regras, pares_sem_dominio,
