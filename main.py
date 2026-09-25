@@ -6874,30 +6874,44 @@ class App(tk.Tk):
     # ----------------------------------------------- Render das tabelas
 
     def _redesenha_abas(self) -> None:
-        self._render_conciliados()
-        self._render_pendentes()
-        self._render_sugestoes()
-        self._render_aba_conciliados_dominio()
+        # Encapsula cada render num try — assim uma falha isolada nao
+        # bloqueia as demais abas (era o padrao de "so uma aba atualiza"
+        # quando um render entrava em curto por atributo ausente).
+        import traceback as _tb
+
+        def _safe(nome: str, fn) -> None:
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                print(f"[_redesenha_abas] falha em {nome}:")
+                _tb.print_exc()
+
+        _safe("conciliados", self._render_conciliados)
+        _safe("pendentes", self._render_pendentes)
+        _safe("sugestoes", self._render_sugestoes)
+        _safe("conciliados_dominio", self._render_aba_conciliados_dominio)
         # Também re-renderiza a aba OFX (dados crus) — assim o
         # enriquecimento por PDF (fornecedor/CNPJ nas colunas + tag azul)
         # aparece imediatamente após clicar em Conciliar.
         if hasattr(self, "tree_ofx"):
-            self._render_aba_ofx()
+            _safe("ofx", self._render_aba_ofx)
         # Atualiza Comparação também (no-op se Domínio não carregado)
-        self._recalcular_comparacao()
+        _safe("comparacao", self._recalcular_comparacao)
         # Abas de grupo empresarial: são independentes do Domínio, então
         # precisam re-renderizar aqui (o _recalcular_comparacao acima só
         # roda quando o Domínio já foi carregado). Sem isso, ficam vazias
         # depois de Conciliar em grupo empresarial sem clicar Comparar.
         if hasattr(self, "_render_aba_pagos_por_outra"):
-            self._render_aba_pagos_por_outra()
+            _safe("pagos_por_outra", self._render_aba_pagos_por_outra)
         if hasattr(self, "_render_aba_conciliados_anteriores"):
-            self._render_aba_conciliados_anteriores()
-        self._notebook_conciliados.tab(self._aba_conciliados, text=f"Conciliados ({len(self.pares_conciliados)})")
-        self._notebook_conciliados.tab(
-            self._aba_pendentes, text=f"Pendentes ({len(self.pendentes_planilha)}/{len(self.pendentes_ofx)})",
-        )
-        self._notebook_conciliados.tab(self._aba_sugestoes, text=f"Sugestões ({len(self.sugestoes)})")
+            _safe("conciliados_anteriores",
+                  self._render_aba_conciliados_anteriores)
+        # Força repaint imediato do Tk — evita casos em que a UI so
+        # atualiza no proximo evento (ex.: clicar Limpar no filtro).
+        try:
+            self.update_idletasks()
+        except tk.TclError:
+            pass
 
     def _render_conciliados(self) -> None:
         for item in self.tree_conciliados.get_children():
