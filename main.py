@@ -3477,10 +3477,14 @@ class App(tk.Tk):
         )
         self.lbl_filtro_pagos_por_outra.pack(side="left", padx=8)
 
-        # Rodape com botao Exportar — packado ANTES do corpo pra ficar
-        # ancorado embaixo (mesmo padrao das outras abas).
+        # Rodape com botoes — packado ANTES do corpo pra ficar ancorado
+        # embaixo (mesmo padrao das outras abas).
         rodape = ttk.Frame(aba)
         rodape.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            rodape, text="Desfazer conciliação",
+            command=self._desfazer_conciliacao_pagos_por_outra,
+        ).pack(side="left", padx=2)
         ttk.Button(
             rodape, text="Exportar para Excel (.xlsx)",
             command=self._exportar_pagos_por_outra,
@@ -3516,6 +3520,8 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         self.tree_pagos_por_outra = tree
+        # iid -> Par (para resolver seleção no botão Desfazer)
+        self.itens_pagos_por_outra: dict[str, Par] = {}
 
     def _render_aba_pagos_por_outra(self) -> None:
         """Popula a aba 'Pagos por outra empresa' com os pares cujos
@@ -3525,6 +3531,8 @@ class App(tk.Tk):
         tree = self.tree_pagos_por_outra
         for iid in tree.get_children():
             tree.delete(iid)
+        if hasattr(self, "itens_pagos_por_outra"):
+            self.itens_pagos_por_outra.clear()
 
         termo = ""
         if hasattr(self, "filtro_pagos_por_outra"):
@@ -3582,7 +3590,9 @@ class App(tk.Tk):
                 str(v) for v in values
             ).lower():
                 continue
-            tree.insert("", "end", values=values, tags=(tag,))
+            iid = tree.insert("", "end", values=values, tags=(tag,))
+            if hasattr(self, "itens_pagos_por_outra"):
+                self.itens_pagos_por_outra[iid] = par
             n += 1
 
         self._notebook_conciliados.tab(
@@ -3593,6 +3603,68 @@ class App(tk.Tk):
             self.lbl_filtro_pagos_por_outra.config(
                 text=(f"Mostrando {n} de {total_bruto}" if termo else ""),
             )
+
+    def _desfazer_conciliacao_pagos_por_outra(self) -> None:
+        """Desfaz o par cross-filial selecionado na aba 'Pagos por outra
+        empresa'. O par pode ter dois sentidos:
+
+        - OFX daqui × planilha de outra → OFX volta pra pendentes desta
+          empresa; a planilha (de outra filial) continua disponivel pra
+          novo pareamento em transacoes_planilha_outras_filiais.
+        - Planilha daqui × OFX de outra → planilha volta pra pendentes
+          desta empresa; o OFX (de outra filial) continua disponivel
+          em transacoes_ofx_outras_filiais.
+        - Entre outras filiais → so remove o par; ambas as transacoes
+          pertencem a outras empresas e nao vao pros pendentes daqui.
+        """
+        sel = self.tree_pagos_por_outra.selection()
+        if not sel:
+            messagebox.showinfo(
+                "Selecione um lançamento",
+                "Escolha uma linha na tabela para desfazer a conciliação.",
+            )
+            return
+        par = self.itens_pagos_por_outra.get(sel[0])
+        if par is None:
+            return
+        if not messagebox.askyesno(
+            "Desfazer conciliação cross-filial",
+            "Desfazer este par?\n\n"
+            "A transação da empresa atual volta pra aba Pendentes daqui. "
+            "A transação da outra filial fica novamente disponível pra "
+            "pareamento no próximo Conciliar.",
+        ):
+            return
+
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+        codi_p = par.planilha.extras.get("codi_emp_filial")
+        codi_o = par.ofx.extras.get("codi_emp_filial")
+
+        try:
+            self.pares_conciliados.remove(par)
+        except ValueError:
+            # Par ja tinha sido removido por outro caminho — segue vida.
+            pass
+
+        # Devolve pros pendentes daqui apenas o lado que pertence
+        # a empresa atual.
+        if codi_atual is not None:
+            if codi_p == codi_atual and par.planilha not in self.pendentes_planilha_brutos:
+                self.pendentes_planilha_brutos.append(par.planilha)
+                self.pendentes_planilha_brutos.sort(
+                    key=lambda t: (t.data, t.valor),
+                )
+            if codi_o == codi_atual and par.ofx not in self.pendentes_ofx_brutos:
+                self.pendentes_ofx_brutos.append(par.ofx)
+                self.pendentes_ofx_brutos.sort(
+                    key=lambda t: (t.data, t.valor),
+                )
+        self._gerar_lancamentos_contabeis()
+        self._recalcula_sugestoes()
+        self._filtrar_conciliados_por_dominio()
+        self._redesenha_abas()
+        self._atualiza_resumo()
 
     def _monta_aba_pagos_de_outra(self) -> None:
         """Aba com pares em que o OFX é da empresa atual (o pagamento
