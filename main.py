@@ -1186,6 +1186,10 @@ class App(tk.Tk):
         # Pares cross-filial (compromisso desta empresa pago por outra,
         # ou pagamento desta empresa que quitou compromisso de outra).
         self._monta_aba_pagos_por_outra()
+        # Aba dedicada: OFX da empresa atual x planilha de OUTRA filial
+        # (a empresa atual pagou compromissos que estavam nas planilhas
+        # de outras filiais).
+        self._monta_aba_pagos_de_outra()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
@@ -1361,9 +1365,11 @@ class App(tk.Tk):
         if self.transacoes_dominio:
             self._renderizar_comparacao()
         else:
-            # Sem Domínio carregado ainda: só atualiza a aba Pagos por outra
+            # Sem Domínio carregado ainda: só atualiza as abas cross-filial
             if hasattr(self, "_render_aba_pagos_por_outra"):
                 self._render_aba_pagos_por_outra()
+            if hasattr(self, "_render_aba_pagos_de_outra"):
+                self._render_aba_pagos_de_outra()
         self._redesenha_abas()
         self._atualiza_resumo()
         self._atualiza_botao_comparar()
@@ -3699,6 +3705,146 @@ class App(tk.Tk):
                 text=(f"Mostrando {n} de {total_bruto}" if termo else ""),
             )
 
+    def _monta_aba_pagos_de_outra(self) -> None:
+        """Aba com pares em que o OFX é da empresa atual (o pagamento
+        saiu do banco daqui) mas a planilha é de OUTRA filial (o
+        compromisso estava na planilha dela). Interpretação: a empresa
+        atual quitou boletos/despesas de outra filial. Estes pares
+        geram lançamento contábil aqui (o dinheiro saiu daqui) e
+        podem virar transferência entre matriz e filial no Domínio."""
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Pagos de outra empresa (0)")
+        # Oculta até detectar grupo empresarial
+        self._notebook_conciliados.tab(aba, state="hidden")
+        self._aba_pagos_de_outra = aba
+
+        ttk.Label(
+            aba,
+            text=(
+                "Pagamentos que SAÍRAM do banco da empresa atual (OFX aqui) "
+                "mas quitaram boletos/despesas cuja planilha pertence a "
+                "OUTRA filial do grupo. Coluna 'Compromisso de' mostra "
+                "de qual filial vinha o boleto/despesa. O lançamento "
+                "contábil sai nesta empresa (o dinheiro saiu daqui)."
+            ),
+            wraplength=900, foreground="#555", justify="left",
+        ).pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        # Barra de filtro
+        topo = ttk.Frame(aba)
+        topo.pack(side="top", fill="x", padx=6, pady=(0, 4))
+        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
+        self.filtro_pagos_de_outra = tk.StringVar()
+        self.filtro_pagos_de_outra.trace_add(
+            "write", lambda *_a: self._render_aba_pagos_de_outra(),
+        )
+        ttk.Entry(
+            topo, textvariable=self.filtro_pagos_de_outra, width=40,
+        ).pack(side="left")
+        ttk.Button(
+            topo, text="Limpar",
+            command=lambda: self.filtro_pagos_de_outra.set(""),
+        ).pack(side="left", padx=4)
+        self.lbl_filtro_pagos_de_outra = ttk.Label(
+            topo, text="", foreground="#666",
+        )
+        self.lbl_filtro_pagos_de_outra.pack(side="left", padx=8)
+
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
+        cols = (
+            "compromisso_de", "venc", "pagto", "valor", "nf",
+            "fornecedor", "banco_ofx", "memo_ofx",
+        )
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("compromisso_de", "Compromisso de (filial)", 220, "w"),
+            ("venc", "Vencimento", 90, "center"),
+            ("pagto", "Pagamento", 90, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 80, "center"),
+            ("fornecedor", "Fornecedor", 200, "w"),
+            ("banco_ofx", "Banco (OFX daqui)", 150, "w"),
+            ("memo_ofx", "Memo OFX", 240, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        # Cor verde: lancamento contabil sai nesta empresa
+        tree.tag_configure("lanc_aqui", background="#d4edda")
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self.tree_pagos_de_outra = tree
+
+    def _render_aba_pagos_de_outra(self) -> None:
+        """Popula a aba 'Pagos de outra empresa' — só pares em que
+        OFX é da empresa atual E planilha é de outra filial."""
+        if not hasattr(self, "tree_pagos_de_outra"):
+            return
+        tree = self.tree_pagos_de_outra
+        for iid in tree.get_children():
+            tree.delete(iid)
+
+        termo = ""
+        if hasattr(self, "filtro_pagos_de_outra"):
+            termo = self.filtro_pagos_de_outra.get().strip().lower()
+
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+
+        def _razao(t) -> str:
+            r = t.extras.get("razao_empresa_filial", "") or ""
+            c = t.extras.get("codi_emp_filial")
+            if c is None and not r:
+                return "(sem marcação)"
+            if c is None:
+                return r[:30]
+            return f"[{c}] {r[:26]}"
+
+        total_bruto = 0
+        n = 0
+        for par in self.pares_conciliados:
+            codi_p = par.planilha.extras.get("codi_emp_filial")
+            codi_o = par.ofx.extras.get("codi_emp_filial")
+            # Regra: OFX aqui, planilha em OUTRA filial
+            if codi_atual is None:
+                continue
+            if codi_o != codi_atual:
+                continue
+            if codi_p is None or codi_p == codi_atual:
+                continue
+
+            pagto = par.planilha.data_pagamento or par.ofx.data
+            values = (
+                _razao(par.planilha),
+                par.planilha.data.strftime("%d/%m/%Y") if par.planilha.data else "",
+                pagto.strftime("%d/%m/%Y") if pagto else "",
+                f"{par.planilha.valor:.2f}",
+                par.planilha.extras.get("numero_nf", "") or "",
+                par.planilha.extras.get("fornecedor", "") or "",
+                par.ofx.extras.get("banco", "") or "",
+                par.ofx.descricao or "",
+            )
+            total_bruto += 1
+            if termo and termo not in " ".join(
+                str(v) for v in values
+            ).lower():
+                continue
+            tree.insert("", "end", values=values, tags=("lanc_aqui",))
+            n += 1
+
+        self._notebook_conciliados.tab(
+            self._aba_pagos_de_outra,
+            text=f"Pagos de outra empresa ({total_bruto})",
+        )
+        if hasattr(self, "lbl_filtro_pagos_de_outra"):
+            self.lbl_filtro_pagos_de_outra.config(
+                text=(f"Mostrando {n} de {total_bruto}" if termo else ""),
+            )
+
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
         self._notebook_conciliados.add(aba, text="Lançamentos contábeis (0)")
@@ -4011,6 +4157,10 @@ class App(tk.Tk):
         if hasattr(self, "_aba_pagos_por_outra"):
             self._notebook_conciliados.tab(
                 self._aba_pagos_por_outra, state=estado_abas,
+            )
+        if hasattr(self, "_aba_pagos_de_outra"):
+            self._notebook_conciliados.tab(
+                self._aba_pagos_de_outra, state=estado_abas,
             )
 
     def _limpar_dados_empresa(self) -> None:
@@ -6903,6 +7053,8 @@ class App(tk.Tk):
         # depois de Conciliar em grupo empresarial sem clicar Comparar.
         if hasattr(self, "_render_aba_pagos_por_outra"):
             _safe("pagos_por_outra", self._render_aba_pagos_por_outra)
+        if hasattr(self, "_render_aba_pagos_de_outra"):
+            _safe("pagos_de_outra", self._render_aba_pagos_de_outra)
         if hasattr(self, "_render_aba_conciliados_anteriores"):
             _safe("conciliados_anteriores",
                   self._render_aba_conciliados_anteriores)
