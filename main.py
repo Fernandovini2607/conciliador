@@ -1183,6 +1183,9 @@ class App(tk.Tk):
         self._monta_aba_lancamentos()
         # Conciliados anteriores (de outras filiais, ao trocar empresa)
         self._monta_aba_conciliados_anteriores()
+        # Pares cross-filial (compromisso desta empresa pago por outra,
+        # ou pagamento desta empresa que quitou compromisso de outra).
+        self._monta_aba_pagos_por_outra()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
@@ -1325,6 +1328,8 @@ class App(tk.Tk):
             self._render_aba_ofx_outras_filiais()
         if hasattr(self, "_render_aba_conciliados_anteriores"):
             self._render_aba_conciliados_anteriores()
+        if hasattr(self, "_render_aba_pagos_por_outra"):
+            self._render_aba_pagos_por_outra()
         # Limpa resultados (pendentes/sugestões) — a base mudou
         self._limpa_resultados(
             preservar_lancamentos=True,
@@ -2613,6 +2618,7 @@ class App(tk.Tk):
         cols = (
             "status", "vencimento", "pagamento", "valor", "emissao", "nf",
             "cnpj", "fornecedor", "historico", "tipo", "memo_ofx",
+            "pago_por",
         )
         tree = ttk.Treeview(aba, columns=cols, show="headings")
         tree.heading("status", text="Status")
@@ -2626,6 +2632,7 @@ class App(tk.Tk):
         tree.heading("historico", text="Histórico")
         tree.heading("tipo", text="Tipo")
         tree.heading("memo_ofx", text="Memo OFX")
+        tree.heading("pago_por", text="Pago por")
         tree.column("status", width=180, anchor="w")
         tree.column("vencimento", width=85, anchor="center")
         tree.column("pagamento", width=85, anchor="center")
@@ -2637,6 +2644,7 @@ class App(tk.Tk):
         tree.column("historico", width=200, anchor="w")
         tree.column("tipo", width=100, anchor="w")
         tree.column("memo_ofx", width=200, anchor="w")
+        tree.column("pago_por", width=180, anchor="w")
         tree.tag_configure("ok", background="#d4edda")
         tree.tag_configure("falta_dominio", background="#fff3cd")
         tree.tag_configure("falta_concil", background="#f8d7da")
@@ -3415,6 +3423,126 @@ class App(tk.Tk):
             text=f"Conciliados anteriores ({total})",
         )
 
+    def _monta_aba_pagos_por_outra(self) -> None:
+        """Aba com os pares em que planilha e OFX pertencem a empresas
+        diferentes do grupo. Dois casos:
+        - Compromisso da empresa atual pago pelo banco de OUTRA filial:
+          NÃO gera lançamento contábil aqui (sai na dona do OFX).
+        - Compromisso de outra filial pago pelo banco da empresa atual:
+          GERA lançamento contábil aqui (o dinheiro saiu daqui).
+        Serve pra o operador conferir os fluxos cruzados que costumam
+        acontecer em grupo empresarial (matriz paga por filial e
+        vice-versa)."""
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Pagos por outra empresa (0)")
+        # Oculta até detectar grupo empresarial
+        self._notebook_conciliados.tab(aba, state="hidden")
+        self._aba_pagos_por_outra = aba
+
+        ttk.Label(
+            aba,
+            text=(
+                "Pares Planilha × OFX em que a planilha e o extrato "
+                "pertencem a EMPRESAS DIFERENTES do grupo. Coluna "
+                "'Pago por' diz de qual banco o dinheiro saiu. O "
+                "lançamento contábil sai só na empresa dona do OFX."
+            ),
+            wraplength=900, foreground="#555", justify="left",
+        ).pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
+        cols = (
+            "sentido", "compromisso_de", "pago_por", "venc", "pagto",
+            "valor", "nf", "fornecedor", "memo_ofx",
+        )
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("sentido", "Sentido", 220, "w"),
+            ("compromisso_de", "Compromisso de", 180, "w"),
+            ("pago_por", "Pago por", 180, "w"),
+            ("venc", "Vencimento", 90, "center"),
+            ("pagto", "Pagamento", 90, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 80, "center"),
+            ("fornecedor", "Fornecedor", 200, "w"),
+            ("memo_ofx", "Memo OFX", 240, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        # Cores: verde-claro se o lançamento sai aqui, cinza se sai lá
+        tree.tag_configure("lanc_aqui", background="#d4edda")
+        tree.tag_configure("lanc_la", background="#e2e3e5")
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self.tree_pagos_por_outra = tree
+
+    def _render_aba_pagos_por_outra(self) -> None:
+        """Popula a aba 'Pagos por outra empresa' com os pares cujos
+        lados (planilha e OFX) pertencem a empresas diferentes."""
+        if not hasattr(self, "tree_pagos_por_outra"):
+            return
+        tree = self.tree_pagos_por_outra
+        for iid in tree.get_children():
+            tree.delete(iid)
+
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+
+        def _razao(t) -> str:
+            r = t.extras.get("razao_empresa_filial", "") or ""
+            c = t.extras.get("codi_emp_filial")
+            if c is None and not r:
+                return "(sem marcação)"
+            if c is None:
+                return r[:30]
+            return f"[{c}] {r[:26]}"
+
+        n = 0
+        for par in self.pares_conciliados:
+            codi_p = par.planilha.extras.get("codi_emp_filial")
+            codi_o = par.ofx.extras.get("codi_emp_filial")
+            # Só interessa quando planilha e OFX vêm de empresas diferentes
+            if codi_p is None or codi_o is None or codi_p == codi_o:
+                continue
+
+            ofx_e_daqui = (codi_atual is not None and codi_o == codi_atual)
+            planilha_e_daqui = (codi_atual is not None and codi_p == codi_atual)
+
+            if ofx_e_daqui and not planilha_e_daqui:
+                sentido = "Paguei compromisso de outra filial"
+                tag = "lanc_aqui"
+            elif planilha_e_daqui and not ofx_e_daqui:
+                sentido = "Meu compromisso pago por outra filial"
+                tag = "lanc_la"
+            else:
+                # Ambos são de outras empresas (raro — só em conciliados_anteriores)
+                sentido = "Entre outras filiais"
+                tag = "lanc_la"
+
+            pagto = par.planilha.data_pagamento or par.ofx.data
+            tree.insert("", "end", values=(
+                sentido,
+                _razao(par.planilha),
+                _razao(par.ofx),
+                par.planilha.data.strftime("%d/%m/%Y") if par.planilha.data else "",
+                pagto.strftime("%d/%m/%Y") if pagto else "",
+                f"{par.planilha.valor:.2f}",
+                par.planilha.extras.get("numero_nf", "") or "",
+                par.planilha.extras.get("fornecedor", "") or "",
+                par.ofx.descricao or "",
+            ), tags=(tag,))
+            n += 1
+
+        self._notebook_conciliados.tab(
+            self._aba_pagos_por_outra,
+            text=f"Pagos por outra empresa ({n})",
+        )
+
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
         self._notebook_conciliados.add(aba, text="Lançamentos contábeis (0)")
@@ -3703,6 +3831,10 @@ class App(tk.Tk):
         if hasattr(self, "_aba_conciliados_anteriores"):
             self._notebook_conciliados.tab(
                 self._aba_conciliados_anteriores, state=estado_abas,
+            )
+        if hasattr(self, "_aba_pagos_por_outra"):
+            self._notebook_conciliados.tab(
+                self._aba_pagos_por_outra, state=estado_abas,
             )
 
     def _limpar_dados_empresa(self) -> None:
@@ -4171,6 +4303,9 @@ class App(tk.Tk):
         sobras_dominio = [t for t in self.transacoes_dominio if id(t) not in usados]
 
         self._render_aba_dominio(resultados, sobras_dominio)
+        # Atualiza a aba "Pagos por outra empresa" — usa a mesma lista de
+        # pares, então faz sentido re-renderizar junto.
+        self._render_aba_pagos_por_outra()
 
     def _render_aba_dominio(
         self,
@@ -4248,6 +4383,20 @@ class App(tk.Tk):
                 data_pagto = t_ofx.data
             pagto_txt = data_pagto.strftime("%d/%m/%Y") if data_pagto else ""
 
+            # Coluna "Pago por": só preenche quando o OFX é de OUTRA
+            # empresa do grupo (diferente da atual). Deixa visualmente
+            # claro na Comparação que aquele par é cross-filial.
+            emp_cur = self.cfg.get("dominio_empresa") or {}
+            codi_cur = emp_cur.get("codi_emp")
+            pago_por = ""
+            if t_ofx is not None and codi_cur is not None:
+                codi_ofx = t_ofx.extras.get("codi_emp_filial")
+                if codi_ofx is not None and codi_ofx != codi_cur:
+                    razao_ofx = (
+                        t_ofx.extras.get("razao_empresa_filial", "") or ""
+                    )[:26]
+                    pago_por = f"[{codi_ofx}] {razao_ofx}"
+
             iid = self.tree_dominio.insert(
                 "", "end",
                 values=(
@@ -4262,6 +4411,7 @@ class App(tk.Tk):
                     historico,
                     tipo,
                     memo,
+                    pago_por,
                 ),
                 tags=(status,),
             )
