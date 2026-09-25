@@ -700,9 +700,6 @@ class App(tk.Tk):
         # participar da conciliação com o OFX principal.
         self.transacoes_planilha_outras_filiais: list[Transacao] = []
         self.caminhos_planilha_outras_filiais: list[Path] = []
-        # Pares conciliados em OUTRA filial (antes de trocar de empresa).
-        # Preservados na nova aba "Conciliados anteriores" pra rastreio.
-        self.pares_conciliados_anteriores: list[Par] = []
         self.caminho_planilha: Path | None = None
         self.caminhos_ofx: list[Path] = []
         self.estrutura_planilha: EstruturaPlanilha | None = None
@@ -1181,8 +1178,6 @@ class App(tk.Tk):
         self._monta_aba_dominio()
         self._monta_aba_aprovacoes()
         self._monta_aba_lancamentos()
-        # Conciliados anteriores (de outras filiais, ao trocar empresa)
-        self._monta_aba_conciliados_anteriores()
         # Pares cross-filial (compromisso desta empresa pago por outra,
         # ou pagamento desta empresa que quitou compromisso de outra).
         self._monta_aba_pagos_por_outra()
@@ -1300,18 +1295,15 @@ class App(tk.Tk):
             if t.extras.get("codi_emp_filial") != nova_codi
         ]
 
-        # Pares conciliados: os que não são da nova empresa vão pro
-        # histórico. Consideramos "da nova empresa" quando a Transacao
-        # da planilha OU do OFX tem codi_emp_filial == nova_codi.
-        novos_pares = []
-        for p in self.pares_conciliados:
-            codi_p = p.planilha.extras.get("codi_emp_filial")
-            codi_o = p.ofx.extras.get("codi_emp_filial")
-            if codi_p == nova_codi or codi_o == nova_codi:
-                novos_pares.append(p)
-            else:
-                self.pares_conciliados_anteriores.append(p)
-        self.pares_conciliados = novos_pares
+        # Pares conciliados: mantemos apenas os que envolvem a nova
+        # empresa (planilha OU OFX tem codi_emp_filial == nova_codi).
+        # Os que ficam totalmente fora dela sao descartados — cada
+        # empresa contabiliza os proprios pagamentos na sua sessao.
+        self.pares_conciliados = [
+            p for p in self.pares_conciliados
+            if p.planilha.extras.get("codi_emp_filial") == nova_codi
+            or p.ofx.extras.get("codi_emp_filial") == nova_codi
+        ]
 
         # Atualiza a empresa no cfg
         self.cfg["dominio_empresa"] = {
@@ -1356,8 +1348,6 @@ class App(tk.Tk):
             self._render_aba_planilha_outras_filiais()
         if hasattr(self, "_render_aba_ofx_outras_filiais"):
             self._render_aba_ofx_outras_filiais()
-        if hasattr(self, "_render_aba_conciliados_anteriores"):
-            self._render_aba_conciliados_anteriores()
         # Regera lançamentos contábeis (filtro por OFX da nova empresa
         # acontece dentro de _gerar_lancamentos_contabeis) e re-render
         # das abas Comparação / Pagos por outra empresa.
@@ -3438,118 +3428,6 @@ class App(tk.Tk):
                 ),
             )
 
-    def _monta_aba_conciliados_anteriores(self) -> None:
-        """Aba com os pares conciliados em OUTRA filial — populada quando
-        o operador troca de empresa via botão 'Trocar filial'. Só
-        rastreio: os pares antigos ficam preservados aqui pra o operador
-        ver o que já foi conciliado nas filiais anteriores durante a
-        mesma sessão."""
-        aba = ttk.Frame(self._notebook_conciliados)
-        self._notebook_conciliados.add(aba, text="Conciliados anteriores (0)")
-        # Oculta ate detectar grupo empresarial
-        self._notebook_conciliados.tab(aba, state="hidden")
-        self._aba_conciliados_anteriores = aba
-
-        ttk.Label(
-            aba,
-            text=(
-                "Pares Planilha × OFX que foram conciliados em outra "
-                "filial do grupo (antes de você clicar em 'Trocar filial'). "
-                "Preservados aqui pra rastreio — não fazem parte da "
-                "conciliação atual."
-            ),
-            wraplength=900, foreground="#555", justify="left",
-        ).pack(side="top", fill="x", padx=6, pady=(6, 4))
-
-        # Barra de filtro
-        topo = ttk.Frame(aba)
-        topo.pack(side="top", fill="x", padx=6, pady=(0, 4))
-        ttk.Label(topo, text="Buscar:").pack(side="left", padx=(0, 4))
-        self.filtro_conciliados_anteriores = tk.StringVar()
-        self.filtro_conciliados_anteriores.trace_add(
-            "write", lambda *_a: self._render_aba_conciliados_anteriores(),
-        )
-        ttk.Entry(
-            topo, textvariable=self.filtro_conciliados_anteriores, width=40,
-        ).pack(side="left")
-        ttk.Button(
-            topo, text="Limpar",
-            command=lambda: self.filtro_conciliados_anteriores.set(""),
-        ).pack(side="left", padx=4)
-        self.lbl_filtro_conciliados_anteriores = ttk.Label(
-            topo, text="", foreground="#666",
-        )
-        self.lbl_filtro_conciliados_anteriores.pack(side="left", padx=8)
-
-        corpo = ttk.Frame(aba)
-        corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
-        cols = ("empresa", "venc", "pagto", "valor", "nf",
-                "fornecedor", "banco_ofx", "memo_ofx")
-        tree = ttk.Treeview(corpo, columns=cols, show="headings")
-        for c, t, w, a in [
-            ("empresa", "Empresa (filial)", 180, "w"),
-            ("venc", "Vencimento", 90, "center"),
-            ("pagto", "Pagamento", 90, "center"),
-            ("valor", "Valor", 100, "e"),
-            ("nf", "Nº NF", 80, "center"),
-            ("fornecedor", "Fornecedor", 200, "w"),
-            ("banco_ofx", "Banco (OFX)", 130, "w"),
-            ("memo_ofx", "Memo OFX", 260, "w"),
-        ]:
-            tree.heading(c, text=t)
-            tree.column(c, width=w, anchor=a)
-        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
-        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
-        sb_x.pack(side="bottom", fill="x")
-        sb.pack(side="right", fill="y")
-        tree.pack(side="left", fill="both", expand=True)
-        self.tree_conciliados_anteriores = tree
-
-    def _render_aba_conciliados_anteriores(self) -> None:
-        """Popula a aba de conciliados anteriores."""
-        if not hasattr(self, "tree_conciliados_anteriores"):
-            return
-        tree = self.tree_conciliados_anteriores
-        for iid in tree.get_children():
-            tree.delete(iid)
-        termo = ""
-        if hasattr(self, "filtro_conciliados_anteriores"):
-            termo = self.filtro_conciliados_anteriores.get().strip().lower()
-        mostradas = 0
-        for par in self.pares_conciliados_anteriores:
-            codi = par.planilha.extras.get("codi_emp_filial")
-            razao = par.planilha.extras.get("razao_empresa_filial", "") or ""
-            empresa_txt = (
-                f"{codi} - {razao[:30]}" if codi is not None else razao
-            )
-            pagto = par.planilha.data_pagamento or par.ofx.data
-            values = (
-                empresa_txt,
-                par.planilha.data.strftime("%d/%m/%Y") if par.planilha.data else "",
-                pagto.strftime("%d/%m/%Y") if pagto else "",
-                f"{par.planilha.valor:.2f}",
-                par.planilha.extras.get("numero_nf", "") or "",
-                par.planilha.extras.get("fornecedor", "") or "",
-                par.ofx.extras.get("banco", "") or "",
-                par.ofx.descricao or "",
-            )
-            if termo and termo not in " ".join(
-                str(v) for v in values
-            ).lower():
-                continue
-            tree.insert("", "end", values=values)
-            mostradas += 1
-        total = len(self.pares_conciliados_anteriores)
-        self._notebook_conciliados.tab(
-            self._aba_conciliados_anteriores,
-            text=f"Conciliados anteriores ({total})",
-        )
-        if hasattr(self, "lbl_filtro_conciliados_anteriores"):
-            self.lbl_filtro_conciliados_anteriores.config(
-                text=(f"Mostrando {mostradas} de {total}" if termo else ""),
-            )
-
     def _monta_aba_pagos_por_outra(self) -> None:
         """Aba com os pares em que planilha e OFX pertencem a empresas
         diferentes do grupo. Dois casos:
@@ -3672,7 +3550,7 @@ class App(tk.Tk):
                 sentido = "Meu compromisso pago por outra filial"
                 tag = "lanc_la"
             else:
-                # Ambos são de outras empresas (raro — só em conciliados_anteriores)
+                # Ambos são de outras empresas (raro)
                 sentido = "Entre outras filiais"
                 tag = "lanc_la"
 
@@ -4149,10 +4027,6 @@ class App(tk.Tk):
         if hasattr(self, "_aba_ofx_outras_filiais"):
             self.notebook.tab(
                 self._aba_ofx_outras_filiais, state=estado_abas,
-            )
-        if hasattr(self, "_aba_conciliados_anteriores"):
-            self._notebook_conciliados.tab(
-                self._aba_conciliados_anteriores, state=estado_abas,
             )
         if hasattr(self, "_aba_pagos_por_outra"):
             self._notebook_conciliados.tab(
@@ -7055,9 +6929,6 @@ class App(tk.Tk):
             _safe("pagos_por_outra", self._render_aba_pagos_por_outra)
         if hasattr(self, "_render_aba_pagos_de_outra"):
             _safe("pagos_de_outra", self._render_aba_pagos_de_outra)
-        if hasattr(self, "_render_aba_conciliados_anteriores"):
-            _safe("conciliados_anteriores",
-                  self._render_aba_conciliados_anteriores)
         # Força repaint imediato do Tk — evita casos em que a UI so
         # atualiza no proximo evento (ex.: clicar Limpar no filtro).
         try:
