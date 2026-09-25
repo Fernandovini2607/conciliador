@@ -182,6 +182,111 @@ class DialogoPeriodo(tk.Toplevel):
         self.destroy()
 
 
+class DialogoEscolherFilial(tk.Toplevel):
+    """Dialog que pede pro operador escolher qual filial do grupo ele
+    vai importar (OFX ou planilha). Só lista as OUTRAS empresas do
+    grupo — a atual (contabilizada agora) é filtrada fora.
+
+    Retorna em ``self.filial`` o dict da empresa escolhida (com
+    ``codi_emp``, ``razao``, ``cnpj``) ou None se cancelou."""
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        titulo: str,
+        descricao: str,
+        empresas: list[dict],
+        codi_emp_atual: int | None,
+    ) -> None:
+        super().__init__(master)
+        self.title(titulo)
+        self.transient(master)
+        self.grab_set()
+        self.geometry("580x360")
+        self.resizable(False, True)
+
+        self.filial: dict | None = None
+        # Filtra a empresa atual (que já está sendo contabilizada)
+        self._outras = [
+            e for e in empresas
+            if e.get("codi_emp") != codi_emp_atual
+        ]
+
+        ttk.Label(
+            self, text=titulo,
+            font=("TkDefaultFont", 10, "bold"), foreground="#1f3a68",
+        ).pack(padx=16, pady=(14, 4), anchor="w")
+        ttk.Label(
+            self, text=descricao,
+            wraplength=540, foreground="#555", justify="left",
+        ).pack(padx=16, pady=(0, 10), anchor="w")
+
+        # Lista com scroll
+        lista_frame = ttk.Frame(self)
+        lista_frame.pack(padx=16, pady=(0, 6), fill="both", expand=True)
+        cols = ("codi", "razao", "cnpj")
+        tree = ttk.Treeview(
+            lista_frame, columns=cols, show="headings", selectmode="browse",
+        )
+        tree.heading("codi", text="Código")
+        tree.heading("razao", text="Razão social")
+        tree.heading("cnpj", text="CNPJ")
+        tree.column("codi", width=70, anchor="center")
+        tree.column("razao", width=320, anchor="w")
+        tree.column("cnpj", width=150, anchor="w")
+        for e in self._outras:
+            tree.insert(
+                "", "end",
+                values=(
+                    e.get("codi_emp", ""),
+                    (e.get("razao", "") or "")[:60],
+                    e.get("cnpj", "") or "",
+                ),
+            )
+        sb = ttk.Scrollbar(lista_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self._tree = tree
+        # Duplo-clique confirma
+        tree.bind("<Double-1>", lambda _e: self._confirmar())
+        # Já seleciona o primeiro pra facilitar
+        if self._outras:
+            first = tree.get_children()[0]
+            tree.selection_set(first)
+            tree.focus(first)
+
+        # Rodapé
+        rodape = ttk.Frame(self)
+        rodape.pack(side="bottom", fill="x", padx=16, pady=(6, 12))
+        ttk.Button(rodape, text="Cancelar", command=self._cancelar).pack(
+            side="right", padx=(6, 0),
+        )
+        ttk.Button(
+            rodape, text="Confirmar", command=self._confirmar,
+        ).pack(side="right")
+
+        self.bind("<Return>", lambda _e: self._confirmar())
+        self.bind("<Escape>", lambda _e: self._cancelar())
+
+    def _confirmar(self) -> None:
+        sel = self._tree.selection()
+        if not sel:
+            messagebox.showwarning(
+                "Sem seleção",
+                "Selecione uma empresa da lista.",
+                parent=self,
+            )
+            return
+        idx = self._tree.index(sel[0])
+        self.filial = self._outras[idx]
+        self.destroy()
+
+    def _cancelar(self) -> None:
+        self.filial = None
+        self.destroy()
+
+
 class DialogoFiltroColuna(tk.Toplevel):
     """Dropdown estilo Excel ao clicar no cabeçalho de uma coluna.
 
@@ -1032,6 +1137,21 @@ class App(tk.Tk):
         dlg = DialogoPeriodo(self, titulo, descricao)
         self.wait_window(dlg)
         return dlg.periodo
+
+    def _pedir_filial(
+        self, titulo: str, descricao: str,
+    ) -> dict | None:
+        """Abre DialogoEscolherFilial listando as OUTRAS empresas do
+        grupo (excluindo a atual). Retorna o dict da filial escolhida
+        ou None se cancelou."""
+        empresas = getattr(self, "_empresas_grupo", [])
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_emp_atual = emp_atual.get("codi_emp")
+        dlg = DialogoEscolherFilial(
+            self, titulo, descricao, empresas, codi_emp_atual,
+        )
+        self.wait_window(dlg)
+        return dlg.filial
 
     @staticmethod
     def _dentro_periodo(
@@ -2829,7 +2949,7 @@ class App(tk.Tk):
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
         cols = ("venc", "pagto", "valor", "nf", "cnpj",
-                "fornecedor", "historico", "tipo", "origem")
+                "fornecedor", "historico", "tipo", "empresa", "origem")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("venc", "Vencimento", 100, "center"),
@@ -2837,10 +2957,11 @@ class App(tk.Tk):
             ("valor", "Valor", 100, "e"),
             ("nf", "Nº NF", 85, "center"),
             ("cnpj", "CNPJ", 130, "w"),
-            ("fornecedor", "Fornecedor", 200, "w"),
-            ("historico", "Histórico", 180, "w"),
+            ("fornecedor", "Fornecedor", 180, "w"),
+            ("historico", "Histórico", 160, "w"),
             ("tipo", "Tipo", 100, "w"),
-            ("origem", "Origem (arquivo)", 180, "w"),
+            ("empresa", "Empresa (filial)", 180, "w"),
+            ("origem", "Arquivo", 160, "w"),
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
@@ -2866,6 +2987,11 @@ class App(tk.Tk):
         mostradas = 0
         for t in self.transacoes_planilha_outras_filiais:
             pagto = getattr(t, "data_pagamento", None)
+            codi = t.extras.get("codi_emp_filial")
+            razao = t.extras.get("razao_empresa_filial", "") or ""
+            empresa_txt = (
+                f"{codi} - {razao[:30]}" if codi is not None else razao
+            )
             row = (
                 t.data.strftime("%d/%m/%Y") if t.data else "",
                 pagto.strftime("%d/%m/%Y") if pagto else "",
@@ -2875,6 +3001,7 @@ class App(tk.Tk):
                 t.extras.get("fornecedor", "") or "",
                 t.extras.get("historico", "") or "",
                 t.extras.get("tipo", "") or "",
+                empresa_txt,
                 t.extras.get("origem_filial", "") or "",
             )
             if termo and termo not in " ".join(row).lower():
@@ -2937,11 +3064,11 @@ class App(tk.Tk):
         )
         self.lbl_filtro_ofx_outras_filiais.pack(side="left", padx=8)
 
-        # Tabela — mesmas colunas da aba OFX + coluna Origem (arquivo)
+        # Tabela — colunas da aba OFX + Empresa (origem) + Arquivo
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
         cols = ("data", "banco", "documento", "valor", "memo",
-                "fornecedor", "cnpj", "origem")
+                "fornecedor", "cnpj", "empresa", "origem")
         tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [
             ("data", "Data pagamento", 110, "center"),
@@ -2951,7 +3078,8 @@ class App(tk.Tk):
             ("memo", "Memo", 220, "w"),
             ("fornecedor", "Fornecedor (via PDF)", 180, "w"),
             ("cnpj", "CNPJ (via PDF)", 130, "w"),
-            ("origem", "Origem (arquivo)", 200, "w"),
+            ("empresa", "Empresa (filial)", 180, "w"),
+            ("origem", "Arquivo", 180, "w"),
         ]:
             tree.heading(c, text=t)
             tree.column(c, width=w, anchor=a)
@@ -2978,6 +3106,11 @@ class App(tk.Tk):
             termo = self.filtro_ofx_outras_filiais.get().strip().lower()
         mostradas = 0
         for t in self.transacoes_ofx_outras_filiais:
+            codi = t.extras.get("codi_emp_filial")
+            razao = t.extras.get("razao_empresa_filial", "") or ""
+            empresa_txt = (
+                f"{codi} - {razao[:30]}" if codi is not None else razao
+            )
             row = (
                 t.data.strftime("%d/%m/%Y") if t.data else "",
                 t.extras.get("banco", "") or "",
@@ -2986,6 +3119,7 @@ class App(tk.Tk):
                 t.descricao or "",
                 t.extras.get("fornecedor", "") or "",
                 t.extras.get("cnpj", "") or "",
+                empresa_txt,
                 t.extras.get("origem_filial", "") or "",
             )
             if termo and termo not in " ".join(row).lower():
@@ -4264,7 +4398,16 @@ class App(tk.Tk):
                 "empresa, este botão habilita.",
             )
             return
-        # Pergunta o período
+        # 1) Escolhe DE QUAL FILIAL os arquivos são
+        filial = self._pedir_filial(
+            "De qual filial é o OFX?",
+            "Escolha a empresa do grupo cujos extratos você vai importar. "
+            "As transações vão participar da conciliação com a planilha da "
+            "empresa que você está contabilizando agora.",
+        )
+        if filial is None:
+            return
+        # 2) Período
         periodo = self._pedir_periodo(
             "Período do extrato OFX (outras filiais)",
             "Só serão importadas movimentações cuja data (do lançamento "
@@ -4273,10 +4416,11 @@ class App(tk.Tk):
         )
         if periodo is None:
             return
+        # 3) Arquivos
         caminhos = filedialog.askopenfilenames(
             title=(
-                "Selecione os OFX das OUTRAS empresas do grupo "
-                "(Ctrl+clique pra vários)"
+                f"OFX de {filial.get('codi_emp')} - "
+                f"{(filial.get('razao','') or '')[:40]}"
             ),
             filetypes=[("OFX", "*.ofx"), ("Todos", "*.*")],
         )
@@ -4309,10 +4453,13 @@ class App(tk.Tk):
                             t, ini, fim, usar_pagamento=False,
                         )
                     ]
-                # Marca as transações com a origem — o arquivo carrega a
-                # identidade da filial (o operador nomeia o arquivo).
+                # Marca as transações com a filial escolhida + o arquivo.
+                # Assim o operador vê codi/razão no cabeçalho da aba
+                # sem depender do nome do arquivo.
                 for t in txs:
                     t.extras["origem_filial"] = nome_arq
+                    t.extras["codi_emp_filial"] = filial.get("codi_emp")
+                    t.extras["razao_empresa_filial"] = filial.get("razao", "") or ""
                 self.transacoes_ofx.extend(txs)
                 self.transacoes_ofx_outras_filiais.extend(txs)
                 self.caminhos_ofx_outras_filiais.append(Path(caminho))
@@ -4358,7 +4505,16 @@ class App(tk.Tk):
                 "Carregar pagamentos.",
             )
             return
-        # Período (filtra pela data de pagamento — mesma regra da planilha)
+        # 1) Escolhe a filial
+        filial = self._pedir_filial(
+            "De qual filial é a planilha?",
+            "Escolha a empresa do grupo cuja planilha você vai importar. "
+            "Os lançamentos vão participar da conciliação com o OFX da "
+            "empresa que você está contabilizando agora.",
+        )
+        if filial is None:
+            return
+        # 2) Período (filtra pela data de pagamento)
         periodo = self._pedir_periodo(
             "Período da planilha (outras filiais)",
             "Só serão importadas linhas cuja data de pagamento cair no "
@@ -4366,10 +4522,11 @@ class App(tk.Tk):
         )
         if periodo is None:
             return
+        # 3) Arquivos
         caminhos = filedialog.askopenfilenames(
             title=(
-                "Selecione as planilhas .xlsx das OUTRAS empresas do grupo "
-                "(Ctrl+clique pra várias)"
+                f"Planilha de {filial.get('codi_emp')} - "
+                f"{(filial.get('razao','') or '')[:40]}"
             ),
             filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
         )
@@ -4430,9 +4587,13 @@ class App(tk.Tk):
                     if self._dentro_periodo(t, ini, fim, usar_pagamento=True)
                 ]
 
-            # Marca origem
+            # Marca origem: arquivo + filial escolhida
             for t in transacoes:
                 t.extras["origem_filial"] = nome_arq
+                t.extras["codi_emp_filial"] = filial.get("codi_emp")
+                t.extras["razao_empresa_filial"] = (
+                    filial.get("razao", "") or ""
+                )
 
             self.transacoes_planilha.extend(transacoes)
             self.transacoes_planilha_outras_filiais.extend(transacoes)
