@@ -5589,12 +5589,34 @@ class App(tk.Tk):
         # outras filiais juntas). Assim um pagamento da planilha desta
         # empresa casa com um OFX de outra filial do grupo (caso onde
         # a matriz paga boletos das filiais ou vice-versa).
+        # Após trocar de filial, transacoes_planilha só tem dados da
+        # empresa atual; os das outras filiais ficam em
+        # transacoes_planilha_outras_filiais. Precisamos unir aqui pra
+        # o cross-matching funcionar (dedup por id caso alguem esteja
+        # em ambas as listas — pode acontecer antes da 1a troca de filial).
+        _vistas: set[int] = set()
+        planilha_todas: list = []
+        for t in list(self.transacoes_planilha) + list(
+            self.transacoes_planilha_outras_filiais,
+        ):
+            if id(t) not in _vistas:
+                _vistas.add(id(t))
+                planilha_todas.append(t)
+        _vistas.clear()
+        ofx_todas: list = []
+        for t in list(self.transacoes_ofx) + list(
+            self.transacoes_ofx_outras_filiais,
+        ):
+            if id(t) not in _vistas:
+                _vistas.add(id(t))
+                ofx_todas.append(t)
+
         planilha_pra_conciliar = [
-            t for t in self.transacoes_planilha
+            t for t in planilha_todas
             if id(t) not in ids_planilha_ja_pareada
         ]
         ofx_pra_conciliar = [
-            t for t in self.transacoes_ofx
+            t for t in ofx_todas
             if id(t) not in ids_ofx_ja_pareado
         ]
 
@@ -6916,10 +6938,18 @@ class App(tk.Tk):
             )
             self.itens_pares[iid] = par
             mostradas += 1
+        total = len(self.pares_conciliados)
         if hasattr(self, "lbl_filtro_conciliados"):
-            total = len(self.pares_conciliados)
             self.lbl_filtro_conciliados.config(
                 text=(f"Mostrando {mostradas} de {total}" if termo else ""),
+            )
+        # Atualiza o contador no titulo da aba junto com a tabela pra
+        # nunca dessincronizarem (ex.: '_render_conciliados' chamado
+        # sozinho via trace do filtro nao passava por _redesenha_abas
+        # e o contador ficava velho).
+        if hasattr(self, "_aba_conciliados"):
+            self._notebook_conciliados.tab(
+                self._aba_conciliados, text=f"Conciliados ({total})",
             )
 
     def _render_pendentes(self) -> None:
@@ -6961,6 +6991,15 @@ class App(tk.Tk):
                 tags=tags,
             )
             self.itens_pendentes_o[iid] = t
+        # Contador sincronizado com o que a tabela mostra.
+        if hasattr(self, "_aba_pendentes"):
+            self._notebook_conciliados.tab(
+                self._aba_pendentes,
+                text=(
+                    f"Pendentes ({len(self.pendentes_planilha)}"
+                    f"/{len(self.pendentes_ofx)})"
+                ),
+            )
 
     def _render_sugestoes(self) -> None:
         for item in self.tree_sugestoes.get_children():
@@ -6983,6 +7022,11 @@ class App(tk.Tk):
                 tags=("destaque",),
             )
             self.itens_sugestoes[iid] = par
+        if hasattr(self, "_aba_sugestoes"):
+            self._notebook_conciliados.tab(
+                self._aba_sugestoes,
+                text=f"Sugestões ({len(self.sugestoes)})",
+            )
 
     def _render_aba_conciliados_dominio(self) -> None:
         for item in self.tree_conciliados_dominio.get_children():
