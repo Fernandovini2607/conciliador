@@ -1317,6 +1317,32 @@ class App(tk.Tk):
         }
         config.salvar(self.cfg)
 
+        # Preserva estado de conciliação — o operador NÃO precisa
+        # rodar Conciliar/Comparar de novo. Re-deriva os pendentes
+        # brutos a partir das novas transações principais, excluindo
+        # tudo que já está em pares_conciliados (survived) ou que
+        # veio de outra filial via 'origem_filial' (não pertence
+        # contabilmente a esta empresa).
+        ids_p_pareadas = {id(p.planilha) for p in self.pares_conciliados}
+        ids_o_pareados = {id(p.ofx) for p in self.pares_conciliados}
+        self.pendentes_planilha_brutos = [
+            t for t in self.transacoes_planilha
+            if id(t) not in ids_p_pareadas
+            and not t.extras.get("origem_filial")
+        ]
+        self.pendentes_ofx_brutos = [
+            t for t in self.transacoes_ofx
+            if id(t) not in ids_o_pareados
+            and not t.extras.get("origem_filial")
+        ]
+        self.pendentes_planilha = list(self.pendentes_planilha_brutos)
+        self.pendentes_ofx = list(self.pendentes_ofx_brutos)
+        # pendentes_planilha_dominio / pendentes_ofx_dominio ficam
+        # intactos: os IDs continuam válidos e as parcelas do Domínio
+        # cobrem todas as filiais (Domínio é carregado uma vez pra
+        # empresa contabilizada, mas as parcelas aparecem por CNPJ
+        # de fornecedor, não por empresa da filial).
+
         # Re-renderiza tudo
         self._atualiza_label_planilha()
         self._atualiza_label_dominio()
@@ -1328,14 +1354,19 @@ class App(tk.Tk):
             self._render_aba_ofx_outras_filiais()
         if hasattr(self, "_render_aba_conciliados_anteriores"):
             self._render_aba_conciliados_anteriores()
-        if hasattr(self, "_render_aba_pagos_por_outra"):
-            self._render_aba_pagos_por_outra()
-        # Limpa resultados (pendentes/sugestões) — a base mudou
-        self._limpa_resultados(
-            preservar_lancamentos=True,
-            preservar_pendentes_planilha=False,
-            preservar_pendentes_ofx=False,
-        )
+        # Regera lançamentos contábeis (filtro por OFX da nova empresa
+        # acontece dentro de _gerar_lancamentos_contabeis) e re-render
+        # das abas Comparação / Pagos por outra empresa.
+        self._gerar_lancamentos_contabeis()
+        if self.transacoes_dominio:
+            self._renderizar_comparacao()
+        else:
+            # Sem Domínio carregado ainda: só atualiza a aba Pagos por outra
+            if hasattr(self, "_render_aba_pagos_por_outra"):
+                self._render_aba_pagos_por_outra()
+        self._redesenha_abas()
+        self._atualiza_resumo()
+        self._atualiza_botao_comparar()
         messagebox.showinfo(
             "Filial trocada",
             f"Empresa atual agora é: {nova_codi} - "
@@ -1345,7 +1376,8 @@ class App(tk.Tk):
             f"Outras filiais: "
             f"{len(self.transacoes_planilha_outras_filiais)} planilha, "
             f"{len(self.transacoes_ofx_outras_filiais)} OFX\n\n"
-            "Clique em 'Conciliar' pra refazer com os novos dados."
+            f"Pares conciliados: {len(self.pares_conciliados)} preservado(s). "
+            "Não é preciso rodar Conciliar nem Comparar com Domínio de novo."
         )
 
     @staticmethod
