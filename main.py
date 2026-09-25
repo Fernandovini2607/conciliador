@@ -1320,20 +1320,20 @@ class App(tk.Tk):
         # Preserva estado de conciliação — o operador NÃO precisa
         # rodar Conciliar/Comparar de novo. Re-deriva os pendentes
         # brutos a partir das novas transações principais, excluindo
-        # tudo que já está em pares_conciliados (survived) ou que
-        # veio de outra filial via 'origem_filial' (não pertence
-        # contabilmente a esta empresa).
+        # apenas o que já está em pares_conciliados. NÃO usa o filtro
+        # 'origem_filial' aqui: transacoes_planilha/transacoes_ofx
+        # acima já foram filtradas pra nova_codi, então tudo que
+        # sobrou é da empresa atual (inclusive itens que originalmente
+        # foram importados via 'outras filiais' na sessão anterior).
         ids_p_pareadas = {id(p.planilha) for p in self.pares_conciliados}
         ids_o_pareados = {id(p.ofx) for p in self.pares_conciliados}
         self.pendentes_planilha_brutos = [
             t for t in self.transacoes_planilha
             if id(t) not in ids_p_pareadas
-            and not t.extras.get("origem_filial")
         ]
         self.pendentes_ofx_brutos = [
             t for t in self.transacoes_ofx
             if id(t) not in ids_o_pareados
-            and not t.extras.get("origem_filial")
         ]
         self.pendentes_planilha = list(self.pendentes_planilha_brutos)
         self.pendentes_ofx = list(self.pendentes_ofx_brutos)
