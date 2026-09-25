@@ -19,6 +19,8 @@ from dialogos_taxas import (
 from exportar_xlsx import (
     exportar_conciliados_dominio,
     exportar_lancamentos_contabeis,
+    exportar_pagos_de_outra,
+    exportar_pagos_por_outra,
     exportar_pendencias_comparacao,
     exportar_pendentes,
 )
@@ -3475,6 +3477,15 @@ class App(tk.Tk):
         )
         self.lbl_filtro_pagos_por_outra.pack(side="left", padx=8)
 
+        # Rodape com botao Exportar — packado ANTES do corpo pra ficar
+        # ancorado embaixo (mesmo padrao das outras abas).
+        rodape = ttk.Frame(aba)
+        rodape.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+        ttk.Button(
+            rodape, text="Exportar para Excel (.xlsx)",
+            command=self._exportar_pagos_por_outra,
+        ).pack(side="left", padx=2)
+
         corpo = ttk.Frame(aba)
         corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
         cols = (
@@ -3628,13 +3639,17 @@ class App(tk.Tk):
         )
         self.lbl_filtro_pagos_de_outra.pack(side="left", padx=8)
 
-        # Rodape com botao de desfazer — packado ANTES do corpo pra
-        # ficar ancorado embaixo (mesma tecnica das outras abas)
+        # Rodape com botoes — packado ANTES do corpo pra ficar ancorado
+        # embaixo (mesma tecnica das outras abas)
         rodape = ttk.Frame(aba)
         rodape.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
         ttk.Button(
             rodape, text="Desfazer conciliação",
             command=self._desfazer_conciliacao_pagos_de_outra,
+        ).pack(side="left", padx=2)
+        ttk.Button(
+            rodape, text="Exportar para Excel (.xlsx)",
+            command=self._exportar_pagos_de_outra,
         ).pack(side="left", padx=2)
 
         corpo = ttk.Frame(aba)
@@ -3789,6 +3804,110 @@ class App(tk.Tk):
         self._filtrar_conciliados_por_dominio()
         self._redesenha_abas()
         self._atualiza_resumo()
+
+    def _exportar_pagos_por_outra(self) -> None:
+        """Exporta a aba 'Pagos por outra empresa' para .xlsx —
+        todos os pares em que planilha e OFX pertencem a empresas
+        diferentes do grupo (ambos os sentidos cruzados)."""
+        pares_cross: list[Par] = []
+        for par in self.pares_conciliados:
+            codi_p = par.planilha.extras.get("codi_emp_filial")
+            codi_o = par.ofx.extras.get("codi_emp_filial")
+            if codi_p is None or codi_o is None or codi_p == codi_o:
+                continue
+            pares_cross.append(par)
+
+        if not pares_cross:
+            messagebox.showinfo(
+                "Sem dados",
+                "Não há pares cross-filial para exportar.",
+            )
+            return
+
+        emp = self.cfg.get("dominio_empresa") or {}
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar Pagos por outra empresa",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+            initialfile=self._sugere_nome_export("pagos_por_outra"),
+        )
+        if not caminho:
+            return
+        try:
+            total = exportar_pagos_por_outra(
+                caminho, pares_cross,
+                codi_emp_atual=emp.get("codi_emp"),
+            )
+        except PermissionError:
+            messagebox.showerror(
+                "Arquivo em uso",
+                f"Não foi possível gravar em:\n{caminho}\n\n"
+                "Feche o arquivo se ele já está aberto no Excel "
+                "e tente novamente.",
+            )
+            return
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("Erro ao exportar", str(e))
+            return
+        messagebox.showinfo(
+            "Exportação concluída",
+            f"{total} linha(s) exportada(s) para:\n{caminho}",
+        )
+
+    def _exportar_pagos_de_outra(self) -> None:
+        """Exporta a aba 'Pagos de outra empresa' — pares em que OFX
+        é da empresa atual e planilha é de OUTRA filial."""
+        emp = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp.get("codi_emp")
+        if codi_atual is None:
+            messagebox.showwarning(
+                "Selecione uma empresa",
+                "Selecione a empresa do Domínio antes de exportar.",
+            )
+            return
+
+        pares_de_outra: list[Par] = []
+        for par in self.pares_conciliados:
+            codi_p = par.planilha.extras.get("codi_emp_filial")
+            codi_o = par.ofx.extras.get("codi_emp_filial")
+            if codi_o != codi_atual:
+                continue
+            if codi_p is None or codi_p == codi_atual:
+                continue
+            pares_de_outra.append(par)
+
+        if not pares_de_outra:
+            messagebox.showinfo(
+                "Sem dados",
+                "Não há pagamentos de outra empresa para exportar.",
+            )
+            return
+
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar Pagos de outra empresa",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+            initialfile=self._sugere_nome_export("pagos_de_outra"),
+        )
+        if not caminho:
+            return
+        try:
+            total = exportar_pagos_de_outra(caminho, pares_de_outra)
+        except PermissionError:
+            messagebox.showerror(
+                "Arquivo em uso",
+                f"Não foi possível gravar em:\n{caminho}\n\n"
+                "Feche o arquivo se ele já está aberto no Excel "
+                "e tente novamente.",
+            )
+            return
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("Erro ao exportar", str(e))
+            return
+        messagebox.showinfo(
+            "Exportação concluída",
+            f"{total} linha(s) exportada(s) para:\n{caminho}",
+        )
 
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)

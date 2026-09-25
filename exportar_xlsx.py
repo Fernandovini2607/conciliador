@@ -606,3 +606,156 @@ def exportar_lancamentos_contabeis(
 
     wb.save(str(caminho))
     return linha - 2
+
+
+def _razao_filial(t) -> str:
+    """Formata '[codi] razao' da filial dona da Transacao.
+    Usado nas duas exportacoes de pares cross-filial."""
+    codi = t.extras.get("codi_emp_filial") if t is not None else None
+    razao = (t.extras.get("razao_empresa_filial", "") or "") if t is not None else ""
+    if codi is None and not razao:
+        return "(sem marcação)"
+    if codi is None:
+        return razao
+    return f"[{codi}] {razao}"
+
+
+def exportar_pagos_por_outra(
+    caminho: str | Path,
+    pares: list["Par"],
+    codi_emp_atual: int | None = None,
+) -> int:
+    """Exporta a aba 'Pagos por outra empresa' para .xlsx.
+
+    Recebe TODOS os pares que a aba mostra (aqueles em que a planilha
+    e o OFX pertencem a empresas diferentes do grupo). Grava com uma
+    coluna 'Sentido' explicando o fluxo de cada linha (compromisso
+    daqui pago por outra, ou vice-versa) e as filiais envolvidas.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pagos por outra empresa"
+
+    colunas = [
+        ("Sentido", 40),
+        ("Compromisso de", 30),
+        ("Pago por", 30),
+        ("Vencimento", 12),
+        ("Pagamento", 12),
+        ("Valor", 14),
+        ("Nº NF", 12),
+        ("Fornecedor", 30),
+        ("Memo OFX", 40),
+    ]
+    _aplica_header(ws, colunas)
+
+    linha = 2
+    for par in pares:
+        codi_p = par.planilha.extras.get("codi_emp_filial")
+        codi_o = par.ofx.extras.get("codi_emp_filial")
+        ofx_e_daqui = (
+            codi_emp_atual is not None and codi_o == codi_emp_atual
+        )
+        planilha_e_daqui = (
+            codi_emp_atual is not None and codi_p == codi_emp_atual
+        )
+        if ofx_e_daqui and not planilha_e_daqui:
+            sentido = "Paguei compromisso de outra filial"
+        elif planilha_e_daqui and not ofx_e_daqui:
+            sentido = "Meu compromisso pago por outra filial"
+        else:
+            sentido = "Entre outras filiais"
+
+        pagto = par.planilha.data_pagamento or par.ofx.data
+        valores = [
+            sentido,
+            _razao_filial(par.planilha),
+            _razao_filial(par.ofx),
+            _fmt_data(par.planilha.data),
+            _fmt_data(pagto),
+            float(par.planilha.valor),
+            par.planilha.extras.get("numero_nf", "") or "",
+            par.planilha.extras.get("fornecedor", "") or "",
+            par.ofx.descricao or "",
+        ]
+        for i, v in enumerate(valores, start=1):
+            cell = ws.cell(row=linha, column=i, value=v)
+            cell.font = FONTE_CELULA
+            if i == 6:
+                cell.number_format = '#,##0.00'
+        linha += 1
+
+    if pares:
+        cell_tot_rot = ws.cell(row=linha, column=5, value="TOTAL")
+        cell_tot_rot.font = Font(name="Arial", size=10, bold=True)
+        cell_tot_rot.alignment = Alignment(horizontal="right")
+        cell_tot = ws.cell(
+            row=linha, column=6,
+            value=f"=SUM(F2:F{linha - 1})",
+        )
+        cell_tot.font = Font(name="Arial", size=10, bold=True)
+        cell_tot.number_format = '#,##0.00'
+
+    wb.save(str(caminho))
+    return linha - 2
+
+
+def exportar_pagos_de_outra(
+    caminho: str | Path,
+    pares: list["Par"],
+) -> int:
+    """Exporta a aba 'Pagos de outra empresa' para .xlsx.
+
+    Especificamente pares em que o OFX e da empresa atual (o dinheiro
+    saiu do banco daqui) e a planilha e de OUTRA filial (o compromisso
+    vinha de la). Gera lancamento contabil aqui.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pagos de outra empresa"
+
+    colunas = [
+        ("Compromisso de (filial)", 32),
+        ("Vencimento", 12),
+        ("Pagamento", 12),
+        ("Valor", 14),
+        ("Nº NF", 12),
+        ("Fornecedor", 30),
+        ("Banco (OFX daqui)", 22),
+        ("Memo OFX", 40),
+    ]
+    _aplica_header(ws, colunas)
+
+    linha = 2
+    for par in pares:
+        pagto = par.planilha.data_pagamento or par.ofx.data
+        valores = [
+            _razao_filial(par.planilha),
+            _fmt_data(par.planilha.data),
+            _fmt_data(pagto),
+            float(par.planilha.valor),
+            par.planilha.extras.get("numero_nf", "") or "",
+            par.planilha.extras.get("fornecedor", "") or "",
+            par.ofx.extras.get("banco", "") or "",
+            par.ofx.descricao or "",
+        ]
+        for i, v in enumerate(valores, start=1):
+            cell = ws.cell(row=linha, column=i, value=v)
+            cell.font = FONTE_CELULA
+            if i == 4:
+                cell.number_format = '#,##0.00'
+        linha += 1
+
+    if pares:
+        cell_tot_rot = ws.cell(row=linha, column=3, value="TOTAL")
+        cell_tot_rot.font = Font(name="Arial", size=10, bold=True)
+        cell_tot_rot.alignment = Alignment(horizontal="right")
+        cell_tot = ws.cell(
+            row=linha, column=4,
+            value=f"=SUM(D2:D{linha - 1})",
+        )
+        cell_tot.font = Font(name="Arial", size=10, bold=True)
+        cell_tot.number_format = '#,##0.00'
+
+    wb.save(str(caminho))
+    return linha - 2
