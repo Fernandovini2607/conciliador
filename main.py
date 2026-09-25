@@ -700,6 +700,9 @@ class App(tk.Tk):
         # participar da conciliação com o OFX principal.
         self.transacoes_planilha_outras_filiais: list[Transacao] = []
         self.caminhos_planilha_outras_filiais: list[Path] = []
+        # Pares conciliados em OUTRA filial (antes de trocar de empresa).
+        # Preservados na nova aba "Conciliados anteriores" pra rastreio.
+        self.pares_conciliados_anteriores: list[Par] = []
         self.caminho_planilha: Path | None = None
         self.caminhos_ofx: list[Path] = []
         self.estrutura_planilha: EstruturaPlanilha | None = None
@@ -926,6 +929,14 @@ class App(tk.Tk):
             topo_user, text="⚙ Configurações",
             command=self._abrir_configuracoes,
         ).pack(side="right", padx=2)
+        # Botão para trocar entre as filiais do grupo — só habilita
+        # quando o Domínio detectou grupo empresarial (>=2 empresas).
+        self.btn_trocar_filial = ttk.Button(
+            topo_user, text="🔄 Trocar filial",
+            command=self._trocar_para_outra_filial,
+            state="disabled",
+        )
+        self.btn_trocar_filial.pack(side="right", padx=2)
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
@@ -1125,6 +1136,8 @@ class App(tk.Tk):
         self._monta_aba_dominio()
         self._monta_aba_aprovacoes()
         self._monta_aba_lancamentos()
+        # Conciliados anteriores (de outras filiais, ao trocar empresa)
+        self._monta_aba_conciliados_anteriores()
         # Plano de contas — aba de topo (não é resultado, é referência)
         self._monta_aba_plano_contas()
 
@@ -1137,6 +1150,21 @@ class App(tk.Tk):
         dlg = DialogoPeriodo(self, titulo, descricao)
         self.wait_window(dlg)
         return dlg.periodo
+
+    def _marcar_filial_empresa_atual(self, transacoes: list) -> None:
+        """Marca cada Transacao com codi_emp_filial + razao_empresa_filial
+        da empresa atualmente selecionada. Importante pra permitir a
+        troca de filial depois (identifica quais transações pertencem a
+        qual empresa do grupo). Não sobrescreve valores já preenchidos
+        (pra não bagunçar as que vieram de 'outras filiais')."""
+        emp = self.cfg.get("dominio_empresa") or {}
+        codi = emp.get("codi_emp")
+        razao = emp.get("razao", "") or ""
+        for t in transacoes:
+            if not t.extras.get("codi_emp_filial"):
+                t.extras["codi_emp_filial"] = codi
+            if not t.extras.get("razao_empresa_filial"):
+                t.extras["razao_empresa_filial"] = razao
 
     def _pedir_filial(
         self, titulo: str, descricao: str,
@@ -1152,6 +1180,123 @@ class App(tk.Tk):
         )
         self.wait_window(dlg)
         return dlg.filial
+
+    def _trocar_para_outra_filial(self) -> None:
+        """Troca a empresa atual pra outra do grupo, mantendo os dados
+        importados. Reclassifica planilha e OFX entre 'principal' e
+        'outras filiais' pelo extras['codi_emp_filial']. Pares conciliados
+        que não pertencem à nova empresa vão pra 'Conciliados anteriores'.
+
+        A empresa selecionada sempre fica com dados na aba principal;
+        as demais ficam nas abas 'outras filiais'."""
+        empresas = getattr(self, "_empresas_grupo", [])
+        if len(empresas) < 2:
+            messagebox.showwarning(
+                "Grupo empresarial não detectado",
+                "Este botão só funciona quando o Domínio identificou "
+                "mais de uma empresa com o mesmo CNPJ raiz.\n\n"
+                "Passos: Conectar Domínio → Selecionar empresa → "
+                "Carregar pagamentos.",
+            )
+            return
+        nova = self._pedir_filial(
+            "Trocar para qual filial?",
+            "A empresa escolhida vira a 'atual' — os dados dela aparecem "
+            "nas abas Planilha e OFX. As demais viram 'outras filiais'. "
+            "Pares já conciliados com outra empresa vão pra aba "
+            "'Conciliados anteriores' na super-aba Conciliados.",
+        )
+        if nova is None:
+            return
+        nova_codi = nova.get("codi_emp")
+        # Reclassifica planilha: quem tem codi_emp_filial == nova_codi
+        # vai pra self.transacoes_planilha; o resto pra outras filiais.
+        # Precisa começar com a UNIÃO das duas listas atuais.
+        todas_planilha = list(self.transacoes_planilha) + list(
+            self.transacoes_planilha_outras_filiais,
+        )
+        # Remove duplicatas (mesmo objeto pode estar em ambas)
+        vistas = set()
+        todas_planilha = [
+            t for t in todas_planilha
+            if id(t) not in vistas and not vistas.add(id(t))
+        ]
+        self.transacoes_planilha = [
+            t for t in todas_planilha
+            if t.extras.get("codi_emp_filial") == nova_codi
+        ]
+        self.transacoes_planilha_outras_filiais = [
+            t for t in todas_planilha
+            if t.extras.get("codi_emp_filial") != nova_codi
+        ]
+
+        # Mesma lógica pra OFX
+        todas_ofx = list(self.transacoes_ofx) + list(
+            self.transacoes_ofx_outras_filiais,
+        )
+        vistas.clear()
+        todas_ofx = [
+            t for t in todas_ofx
+            if id(t) not in vistas and not vistas.add(id(t))
+        ]
+        self.transacoes_ofx = [
+            t for t in todas_ofx
+            if t.extras.get("codi_emp_filial") == nova_codi
+        ]
+        self.transacoes_ofx_outras_filiais = [
+            t for t in todas_ofx
+            if t.extras.get("codi_emp_filial") != nova_codi
+        ]
+
+        # Pares conciliados: os que não são da nova empresa vão pro
+        # histórico. Consideramos "da nova empresa" quando a Transacao
+        # da planilha OU do OFX tem codi_emp_filial == nova_codi.
+        novos_pares = []
+        for p in self.pares_conciliados:
+            codi_p = p.planilha.extras.get("codi_emp_filial")
+            codi_o = p.ofx.extras.get("codi_emp_filial")
+            if codi_p == nova_codi or codi_o == nova_codi:
+                novos_pares.append(p)
+            else:
+                self.pares_conciliados_anteriores.append(p)
+        self.pares_conciliados = novos_pares
+
+        # Atualiza a empresa no cfg
+        self.cfg["dominio_empresa"] = {
+            "codi_emp": nova_codi,
+            "razao": nova.get("razao", "") or "",
+            "cnpj": nova.get("cnpj", "") or "",
+        }
+        config.salvar(self.cfg)
+
+        # Re-renderiza tudo
+        self._atualiza_label_planilha()
+        self._atualiza_label_dominio()
+        self._render_aba_planilha()
+        self._render_aba_ofx()
+        if hasattr(self, "_render_aba_planilha_outras_filiais"):
+            self._render_aba_planilha_outras_filiais()
+        if hasattr(self, "_render_aba_ofx_outras_filiais"):
+            self._render_aba_ofx_outras_filiais()
+        if hasattr(self, "_render_aba_conciliados_anteriores"):
+            self._render_aba_conciliados_anteriores()
+        # Limpa resultados (pendentes/sugestões) — a base mudou
+        self._limpa_resultados(
+            preservar_lancamentos=True,
+            preservar_pendentes_planilha=False,
+            preservar_pendentes_ofx=False,
+        )
+        messagebox.showinfo(
+            "Filial trocada",
+            f"Empresa atual agora é: {nova_codi} - "
+            f"{(nova.get('razao','') or '')[:50]}\n\n"
+            f"Planilha atual: {len(self.transacoes_planilha)} lançamento(s)\n"
+            f"OFX atual: {len(self.transacoes_ofx)} movimentação(ões)\n"
+            f"Outras filiais: "
+            f"{len(self.transacoes_planilha_outras_filiais)} planilha, "
+            f"{len(self.transacoes_ofx_outras_filiais)} OFX\n\n"
+            "Clique em 'Conciliar' pra refazer com os novos dados."
+        )
 
     @staticmethod
     def _dentro_periodo(
@@ -3142,6 +3287,82 @@ class App(tk.Tk):
                 ),
             )
 
+    def _monta_aba_conciliados_anteriores(self) -> None:
+        """Aba com os pares conciliados em OUTRA filial — populada quando
+        o operador troca de empresa via botão 'Trocar filial'. Só
+        rastreio: os pares antigos ficam preservados aqui pra o operador
+        ver o que já foi conciliado nas filiais anteriores durante a
+        mesma sessão."""
+        aba = ttk.Frame(self._notebook_conciliados)
+        self._notebook_conciliados.add(aba, text="Conciliados anteriores (0)")
+        self._aba_conciliados_anteriores = aba
+
+        ttk.Label(
+            aba,
+            text=(
+                "Pares Planilha × OFX que foram conciliados em outra "
+                "filial do grupo (antes de você clicar em 'Trocar filial'). "
+                "Preservados aqui pra rastreio — não fazem parte da "
+                "conciliação atual."
+            ),
+            wraplength=900, foreground="#555", justify="left",
+        ).pack(side="top", fill="x", padx=6, pady=(6, 4))
+
+        corpo = ttk.Frame(aba)
+        corpo.pack(side="top", fill="both", expand=True, padx=6, pady=4)
+        cols = ("empresa", "venc", "pagto", "valor", "nf",
+                "fornecedor", "banco_ofx", "memo_ofx")
+        tree = ttk.Treeview(corpo, columns=cols, show="headings")
+        for c, t, w, a in [
+            ("empresa", "Empresa (filial)", 180, "w"),
+            ("venc", "Vencimento", 90, "center"),
+            ("pagto", "Pagamento", 90, "center"),
+            ("valor", "Valor", 100, "e"),
+            ("nf", "Nº NF", 80, "center"),
+            ("fornecedor", "Fornecedor", 200, "w"),
+            ("banco_ofx", "Banco (OFX)", 130, "w"),
+            ("memo_ofx", "Memo OFX", 260, "w"),
+        ]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor=a)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=tree.yview)
+        sb_x = ttk.Scrollbar(corpo, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb.set, xscrollcommand=sb_x.set)
+        sb_x.pack(side="bottom", fill="x")
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self.tree_conciliados_anteriores = tree
+
+    def _render_aba_conciliados_anteriores(self) -> None:
+        """Popula a aba de conciliados anteriores."""
+        if not hasattr(self, "tree_conciliados_anteriores"):
+            return
+        tree = self.tree_conciliados_anteriores
+        for iid in tree.get_children():
+            tree.delete(iid)
+        for par in self.pares_conciliados_anteriores:
+            codi = par.planilha.extras.get("codi_emp_filial")
+            razao = par.planilha.extras.get("razao_empresa_filial", "") or ""
+            empresa_txt = (
+                f"{codi} - {razao[:30]}" if codi is not None else razao
+            )
+            pagto = par.planilha.data_pagamento or par.ofx.data
+            tree.insert("", "end", values=(
+                empresa_txt,
+                par.planilha.data.strftime("%d/%m/%Y") if par.planilha.data else "",
+                pagto.strftime("%d/%m/%Y") if pagto else "",
+                f"{par.planilha.valor:.2f}",
+                par.planilha.extras.get("numero_nf", "") or "",
+                par.planilha.extras.get("fornecedor", "") or "",
+                par.ofx.extras.get("banco", "") or "",
+                par.ofx.descricao or "",
+            ))
+        total = len(self.pares_conciliados_anteriores)
+        self._notebook_conciliados.tab(
+            self._aba_conciliados_anteriores,
+            text=f"Conciliados anteriores ({total})",
+        )
+
     def _monta_aba_lancamentos(self) -> None:
         aba = ttk.Frame(self._notebook_conciliados)
         self._notebook_conciliados.add(aba, text="Lançamentos contábeis (0)")
@@ -3591,6 +3812,10 @@ class App(tk.Tk):
             self.btn_planilha_outras_filiais.config(
                 state=("normal" if eh_grupo else "disabled"),
             )
+        if hasattr(self, "btn_trocar_filial"):
+            self.btn_trocar_filial.config(
+                state=("normal" if eh_grupo else "disabled"),
+            )
 
         # Se carregou de várias empresas, avisa
         if len(empresas_pra_carregar) > 1:
@@ -4038,6 +4263,10 @@ class App(tk.Tk):
         self.caminho_planilha = Path(caminho)
         self.estrutura_planilha = estrutura
         self.mapeamento_planilha = mapeamento_final
+        # Marca as transações com a empresa atual — facilita a troca
+        # de filial depois: quem for da empresa atual continua na
+        # aba principal; as das outras filiais vão pra "outras filiais".
+        self._marcar_filial_empresa_atual(transacoes)
         self.transacoes_planilha = transacoes
         # Persiste o mapeamento da empresa (regrava sempre — re-sincroniza
         # nomes caso a planilha tenha mudado os rótulos)
@@ -4263,6 +4492,7 @@ class App(tk.Tk):
                 "Nenhuma linha pôde ser convertida em lançamento com esse mapeamento.\n"
                 "O preview no diálogo destaca as linhas inválidas em vermelho.",
             )
+        self._marcar_filial_empresa_atual(transacoes)
         self.transacoes_planilha = transacoes
         self.mapeamento_planilha = dlg.mapeamento
         # Re-salva o mapeamento da empresa com a versão editada
@@ -4348,6 +4578,8 @@ class App(tk.Tk):
                             t, ini, fim, usar_pagamento=False,
                         )
                     ]
+                # Marca com a empresa atual pra permitir troca de filial
+                self._marcar_filial_empresa_atual(txs)
                 self.transacoes_ofx.extend(txs)
                 self.caminhos_ofx.append(Path(caminho))
                 total_ignorados += ignorados
