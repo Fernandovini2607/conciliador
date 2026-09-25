@@ -2645,39 +2645,45 @@ class App(tk.Tk):
         self._notebook_conciliados.add(aba, text="Comparação (0)")
         self._aba_dominio = aba
 
-        # ---- Filtro por cor: Combobox + botão limpar + botão Legenda
-        # Guarda como StringVar pra persistir entre renders.
-        # Mapeia rótulo visível → tag interna do treeview (mesmo nome do status).
-        self._filtro_cor_map = {
-            "Todos": None,
-            "Verde (OK)": "ok",
-            "Amarelo (Falta dom)": "falta_dominio",
-            "Azul (Caixa OK)": "caixa_ok",
-            "Cinza (Caixa falta)": "caixa_falta",
-            "Ciano (OFX OK)": "ofx_ok",
-            "Laranja (OFX falta)": "ofx_falta",
+        # ---- Filtro por cor: uma Checkbutton por cor (multi-select) +
+        # botão Todas / Nenhuma + botão Limpar + campo Buscar + Legenda.
+        # Cada cor é um BooleanVar; default = todas marcadas (mostra tudo).
+        # Rótulo curto → status key (mesmo nome da tag no treeview).
+        cores_cfg = [
+            ("Verde",   "ok"),
+            ("Amarelo", "falta_dominio"),
+            ("Azul",    "caixa_ok"),
+            ("Cinza",   "caixa_falta"),
+            ("Ciano",   "ofx_ok"),
+            ("Laranja", "ofx_falta"),
+        ]
+        self.filtro_cores_comparacao: dict[str, tk.BooleanVar] = {
+            status: tk.BooleanVar(value=True) for _rot, status in cores_cfg
         }
-        self.filtro_cor_comparacao = tk.StringVar(value="Todos")
 
         filtro_frame = ttk.Frame(aba)
         filtro_frame.pack(side="top", fill="x", padx=6, pady=(0, 4))
-        ttk.Label(filtro_frame, text="Filtrar por cor:").pack(
+        ttk.Label(filtro_frame, text="Filtrar cores:").pack(
             side="left", padx=(0, 4),
         )
-        cb_filtro = ttk.Combobox(
-            filtro_frame, textvariable=self.filtro_cor_comparacao,
-            values=list(self._filtro_cor_map.keys()),
-            state="readonly", width=22,
-        )
-        cb_filtro.pack(side="left")
-        cb_filtro.bind(
-            "<<ComboboxSelected>>",
-            lambda _e: self._renderizar_comparacao(),
-        )
+        for rot, status in cores_cfg:
+            ttk.Checkbutton(
+                filtro_frame, text=rot,
+                variable=self.filtro_cores_comparacao[status],
+                command=self._renderizar_comparacao,
+            ).pack(side="left", padx=(0, 2))
+        ttk.Button(
+            filtro_frame, text="Todas",
+            command=self._marcar_todas_cores_comparacao,
+        ).pack(side="left", padx=(6, 0))
+        ttk.Button(
+            filtro_frame, text="Nenhuma",
+            command=self._desmarcar_todas_cores_comparacao,
+        ).pack(side="left", padx=(2, 0))
         ttk.Button(
             filtro_frame, text="Limpar",
             command=self._limpar_filtro_comparacao,
-        ).pack(side="left", padx=(4, 0))
+        ).pack(side="left", padx=(6, 0))
         # Busca por termo — casa contra qualquer coluna (substring case-insensitive)
         ttk.Label(filtro_frame, text="  Buscar:").pack(side="left")
         self.filtro_termo_comparacao = tk.StringVar()
@@ -4388,12 +4394,28 @@ class App(tk.Tk):
         self._renderizar_comparacao()
 
     def _limpar_filtro_comparacao(self) -> None:
-        """Zera os filtros da aba Comparação (cor e termo) e re-renderiza."""
-        if hasattr(self, "filtro_cor_comparacao"):
-            self.filtro_cor_comparacao.set("Todos")
+        """Zera os filtros da aba Comparação (cores e termo) e re-renderiza."""
+        if hasattr(self, "filtro_cores_comparacao"):
+            for v in self.filtro_cores_comparacao.values():
+                v.set(True)
         if hasattr(self, "filtro_termo_comparacao"):
             self.filtro_termo_comparacao.set("")
         self._renderizar_comparacao()
+
+    def _marcar_todas_cores_comparacao(self) -> None:
+        """Marca todas as cores do filtro da aba Comparação."""
+        if hasattr(self, "filtro_cores_comparacao"):
+            for v in self.filtro_cores_comparacao.values():
+                v.set(True)
+            self._renderizar_comparacao()
+
+    def _desmarcar_todas_cores_comparacao(self) -> None:
+        """Desmarca todas as cores do filtro da aba Comparação — a tabela
+        fica vazia até o operador marcar as cores que quer ver."""
+        if hasattr(self, "filtro_cores_comparacao"):
+            for v in self.filtro_cores_comparacao.values():
+                v.set(False)
+            self._renderizar_comparacao()
 
     def _renderizar_comparacao(self) -> None:
         """Monta a lista de resultados e chama _render_aba_dominio.
@@ -4517,19 +4539,27 @@ class App(tk.Tk):
             else:
                 n_ofx_falta += 1
 
-        # Filtro por cor: se selecionado, esconde tudo que não é do
-        # status escolhido. Mantido só como filtro visual — não muda
-        # os totais nem afeta exportação, edição, etc.
-        status_filtro = None
-        if hasattr(self, "filtro_cor_comparacao"):
-            rotulo_sel = self.filtro_cor_comparacao.get()
-            status_filtro = self._filtro_cor_map.get(rotulo_sel)
+        # Filtro por cor: multi-select via Checkbutton. Uma linha aparece
+        # se a cor dela está marcada. Se TODAS estão marcadas, o filtro
+        # não recorta nada (equivalente ao antigo 'Todos'). Mantido só
+        # como filtro visual — não muda os totais nem afeta exportação.
+        cores_marcadas = None
+        if hasattr(self, "filtro_cores_comparacao"):
+            marcadas = {
+                s for s, v in self.filtro_cores_comparacao.items() if v.get()
+            }
+            # Só ativa o filtro quando o usuário desmarcou pelo menos uma
+            if 0 < len(marcadas) < len(self.filtro_cores_comparacao):
+                cores_marcadas = marcadas
+            elif len(marcadas) == 0:
+                # Nenhuma cor marcada → esconde tudo
+                cores_marcadas = set()
         termo = ""
         if hasattr(self, "filtro_termo_comparacao"):
             termo = self.filtro_termo_comparacao.get().strip().lower()
         mostradas = 0
         for status, t_planilha, t_ofx, t_dom, _diff_d, _diff_v, par in resultados:
-            if status_filtro is not None and status != status_filtro:
+            if cores_marcadas is not None and status not in cores_marcadas:
                 continue
             rotulo = rotulos.get(status, status)
             # Extras: prioriza Domínio se houver, depois planilha
