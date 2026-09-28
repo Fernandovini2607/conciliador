@@ -5993,15 +5993,31 @@ class App(tk.Tk):
             # Adiciona os NOVOS pares aos existentes (preservados)
             self.pares_conciliados.extend(novos_pares)
             # Brutos são a fonte da verdade; visível é derivado depois.
-            # Descarta pendentes vindos de PLANILHA e OFX de OUTRAS filiais:
-            # se não casaram com a fonte principal desta empresa, são
-            # lançamentos que pertencem a outra empresa do grupo — não
-            # entram nas abas Pendentes, Comparação, Conciliados x Domínio.
+            # Descarta pendentes vindos de OUTRAS filiais: se não casaram
+            # com a fonte principal desta empresa, são lançamentos que
+            # pertencem a outra empresa do grupo — não entram nas abas
+            # Pendentes, Comparação, Conciliados x Domínio.
+            # IMPORTANTE: o filtro correto e codi_emp_filial != atual, NAO
+            # origem_filial. Uma transacao da empresa atual pode ter
+            # origem_filial preenchido de sessao anterior (quando foi
+            # importada via 'outras empresas' estando em outra filial); o
+            # que importa e a que empresa ela pertence de fato.
+            emp_conc = self.cfg.get("dominio_empresa") or {}
+            codi_conc = emp_conc.get("codi_emp")
+            codi_conc_str = str(codi_conc) if codi_conc is not None else None
+
+            def _da_empresa_atual_conc(t) -> bool:
+                if codi_conc_str is None:
+                    return True
+                c = t.extras.get("codi_emp_filial")
+                # None passa (dados legados sem marcacao)
+                return c is None or str(c) == codi_conc_str
+
             pend_p_filtrada = [
-                t for t in pend_p if not t.extras.get("origem_filial")
+                t for t in pend_p if _da_empresa_atual_conc(t)
             ]
             pend_o_filtrada = [
-                t for t in pend_o if not t.extras.get("origem_filial")
+                t for t in pend_o if _da_empresa_atual_conc(t)
             ]
             self.pendentes_planilha_brutos = list(pend_p_filtrada)
             self.pendentes_planilha = list(pend_p_filtrada)
