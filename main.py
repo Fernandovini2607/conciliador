@@ -8602,21 +8602,62 @@ class App(tk.Tk):
         base = f"{prefixo}_{codi}_{hoje}" if codi else f"{prefixo}_{hoje}"
         return "".join(c if c.isalnum() or c in "_-" else "_" for c in base) + ".xlsx"
 
+    def _filtros_empresa_atual(self) -> tuple:
+        """Helper: devolve (codi_str, e_daqui, par_daqui, dom_daqui) pra
+        aplicar o mesmo recorte por empresa que as abas usam. Assim as
+        exportacoes 'puxam so o que aparece na tela'.
+
+        - e_daqui(t): Transacao passa se codi_emp_filial == atual ou None
+        - par_daqui(par): Par passa se planilha OU OFX daqui
+        - dom_daqui(t_dom): Parcela do Dominio passa se codi_emp_origem
+          == atual ou None
+        Quando nao ha empresa selecionada (codi_atual is None), tudo passa.
+        Comparacoes com str(a) == str(b) toleram int vs str."""
+        emp = self.cfg.get("dominio_empresa") or {}
+        codi = emp.get("codi_emp")
+        codi_str = str(codi) if codi is not None else None
+
+        def _e_daqui(t) -> bool:
+            if codi_str is None or t is None:
+                return codi_str is None
+            c = t.extras.get("codi_emp_filial")
+            return c is None or str(c) == codi_str
+
+        def _par_daqui(par) -> bool:
+            if codi_str is None:
+                return True
+            return _e_daqui(par.planilha) or _e_daqui(par.ofx)
+
+        def _dom_daqui(t_dom) -> bool:
+            if codi_str is None or t_dom is None:
+                return codi_str is None
+            c = t_dom.extras.get("codi_emp_origem")
+            return c is None or str(c) == codi_str
+
+        return codi_str, _e_daqui, _par_daqui, _dom_daqui
+
     def _exportar_conciliados_dominio(self) -> None:
         """Exporta a aba Conciliados × Domínio para .xlsx.
         Inclui pares P×OFX triple-matched, pendentes de Caixa geral E
-        pendentes OFX (sem planilha) que casaram com o Domínio."""
+        pendentes OFX (sem planilha) que casaram com o Domínio.
+
+        Aplica o mesmo filtro da aba: parcela do Dominio precisa ser da
+        empresa atual (via codi_emp_origem)."""
+        _, _e_daqui, _, _dom_daqui = self._filtros_empresa_atual()
         # Fontes de dados exatamente como o render da aba
-        pares_triple = [p for p in self.pares_conciliados if p.dominio is not None]
+        pares_triple = [
+            p for p in self.pares_conciliados
+            if p.dominio is not None and _dom_daqui(p.dominio)
+        ]
         caixa_dominio: list[tuple[Transacao, dict]] = []
         for t in self.pendentes_planilha_brutos:
             m = self.pendentes_planilha_dominio.get(id(t))
-            if m and m.get("dominio") is not None:
+            if m and m.get("dominio") is not None and _dom_daqui(m["dominio"]):
                 caixa_dominio.append((t, m))
         ofx_dominio: list[tuple[Transacao, dict]] = []
         for t in self.pendentes_ofx_brutos:
             m = self.pendentes_ofx_dominio.get(id(t))
-            if m and m.get("dominio") is not None:
+            if m and m.get("dominio") is not None and _dom_daqui(m["dominio"]):
                 ofx_dominio.append((t, m))
 
         if not pares_triple and not caixa_dominio and not ofx_dominio:
@@ -8656,8 +8697,12 @@ class App(tk.Tk):
 
     def _exportar_pendentes(self) -> None:
         """Exporta a aba Pendentes para .xlsx (2 abas: planilha + OFX).
-        Usa a lista VISÍVEL (sem os classificados por regra/manual)."""
-        if not self.pendentes_planilha and not self.pendentes_ofx:
+        Usa a lista VISÍVEL (sem os classificados por regra/manual) e
+        aplica o mesmo filtro por empresa atual da aba."""
+        _, _e_daqui, _, _ = self._filtros_empresa_atual()
+        pend_p_visivel = [t for t in self.pendentes_planilha if _e_daqui(t)]
+        pend_o_visivel = [t for t in self.pendentes_ofx if _e_daqui(t)]
+        if not pend_p_visivel and not pend_o_visivel:
             messagebox.showinfo(
                 "Sem dados",
                 "Não há pendentes para exportar.",
@@ -8673,7 +8718,7 @@ class App(tk.Tk):
             return
         try:
             n_p, n_o = exportar_pendentes(
-                caminho, self.pendentes_planilha, self.pendentes_ofx,
+                caminho, pend_p_visivel, pend_o_visivel,
             )
         except PermissionError:
             messagebox.showerror(
@@ -8695,11 +8740,17 @@ class App(tk.Tk):
     def _exportar_pendencias_comparacao(self) -> None:
         """Exporta as pendências da aba Comparação (linhas amarelas +
         cinzas + laranjas — tudo que falta no Domínio) para .xlsx.
-        Gera abas separadas por tipo pra manter estruturas coerentes."""
+        Gera abas separadas por tipo pra manter estruturas coerentes.
+
+        Aplica o mesmo filtro da aba Comparação: em grupo empresarial,
+        so entra o que envolve a empresa atual."""
+        _, _e_daqui, _par_daqui, _ = self._filtros_empresa_atual()
         # Amarelos: pares P×OFX sem Domínio E que ainda não viraram lançamento
         amarelos = [
             par for par in self.pares_conciliados
-            if par.dominio is None and id(par) not in self.ids_pares_classificados
+            if par.dominio is None
+            and id(par) not in self.ids_pares_classificados
+            and _par_daqui(par)
         ]
         # Cinzas: pendentes planilha sem match no Domínio E não classificados
         ids_p_classificadas = {
@@ -8710,6 +8761,7 @@ class App(tk.Tk):
         cinzas = [
             t for t in self.pendentes_planilha_brutos
             if id(t) not in ids_p_classificadas
+            and _e_daqui(t)
             and not (
                 (m := self.pendentes_planilha_dominio.get(id(t)))
                 and m.get("dominio") is not None
@@ -8724,6 +8776,7 @@ class App(tk.Tk):
         laranjas = [
             t for t in self.pendentes_ofx_brutos
             if id(t) not in ids_o_classificadas
+            and _e_daqui(t)
             and not (
                 (m := self.pendentes_ofx_dominio.get(id(t)))
                 and m.get("dominio") is not None
