@@ -4748,8 +4748,28 @@ class App(tk.Tk):
         resultados: list[tuple] = []
         usados: set[int] = set()
 
+        # Em grupo empresarial, so aparecem linhas cuja PLANILHA ou OFX
+        # e da empresa atual (via codi_emp_filial). Pares cross-filial
+        # em que nenhum lado e daqui somem. Fora de grupo (codi_atual
+        # None) ou legado (codi None nas transacoes), tudo passa.
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+
+        def _e_daqui(t) -> bool:
+            if codi_atual is None or t is None:
+                return codi_atual is None
+            c = t.extras.get("codi_emp_filial")
+            return c is None or str(c) == str(codi_atual)
+
+        def _par_daqui(par) -> bool:
+            if codi_atual is None:
+                return True
+            return _e_daqui(par.planilha) or _e_daqui(par.ofx)
+
         # 1) Pares P×OFX
         for par in self.pares_conciliados:
+            if not _par_daqui(par):
+                continue
             if par.dominio is not None:
                 resultados.append((
                     "ok", par.planilha, par.ofx, par.dominio,
@@ -4775,6 +4795,8 @@ class App(tk.Tk):
         for t_p in self.pendentes_planilha_brutos:
             if id(t_p) in ids_p_classificadas:
                 continue
+            if not _e_daqui(t_p):
+                continue
             match = self.pendentes_planilha_dominio.get(id(t_p))
             if match and match.get("dominio") is not None:
                 resultados.append((
@@ -4797,6 +4819,8 @@ class App(tk.Tk):
         }
         for t_o in self.pendentes_ofx_brutos:
             if id(t_o) in ids_o_classificadas:
+                continue
+            if not _e_daqui(t_o):
                 continue
             match = self.pendentes_ofx_dominio.get(id(t_o))
             if match and match.get("dominio") is not None:
@@ -7306,10 +7330,28 @@ class App(tk.Tk):
             )
 
     def _render_pendentes(self) -> None:
+        # Em grupo empresarial, mostra so pendentes da empresa atual.
+        # None em codi_emp_filial (transacoes legadas pre-grupo) passa.
+        emp_atual = self.cfg.get("dominio_empresa") or {}
+        codi_atual = emp_atual.get("codi_emp")
+
+        def _da_empresa_atual(t) -> bool:
+            if codi_atual is None:
+                return True
+            c = t.extras.get("codi_emp_filial")
+            return c is None or str(c) == str(codi_atual)
+
+        pendentes_p_visiveis = [
+            t for t in self.pendentes_planilha if _da_empresa_atual(t)
+        ]
+        pendentes_o_visiveis = [
+            t for t in self.pendentes_ofx if _da_empresa_atual(t)
+        ]
+
         for item in self.tree_pend_p.get_children():
             self.tree_pend_p.delete(item)
         self.itens_pendentes_p.clear()
-        for t in self.pendentes_planilha:
+        for t in pendentes_p_visiveis:
             iid = self.tree_pend_p.insert(
                 "", "end",
                 values=(
@@ -7327,7 +7369,7 @@ class App(tk.Tk):
         for item in self.tree_pend_o.get_children():
             self.tree_pend_o.delete(item)
         self.itens_pendentes_o.clear()
-        for t in self.pendentes_ofx:
+        for t in pendentes_o_visiveis:
             enriquecido = bool(t.extras.get("enriquecido_por_pdf"))
             tags = ("enriquecido_pdf",) if enriquecido else ()
             iid = self.tree_pend_o.insert(
@@ -7344,13 +7386,14 @@ class App(tk.Tk):
                 tags=tags,
             )
             self.itens_pendentes_o[iid] = t
-        # Contador sincronizado com o que a tabela mostra.
+        # Contador sincronizado com o que a tabela mostra (subconjunto
+        # da empresa atual em grupo empresarial).
         if hasattr(self, "_aba_pendentes"):
             self._notebook_conciliados.tab(
                 self._aba_pendentes,
                 text=(
-                    f"Pendentes ({len(self.pendentes_planilha)}"
-                    f"/{len(self.pendentes_ofx)})"
+                    f"Pendentes ({len(pendentes_p_visiveis)}"
+                    f"/{len(pendentes_o_visiveis)})"
                 ),
             )
 

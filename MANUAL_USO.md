@@ -332,15 +332,26 @@ Na aba Comparação você vê **6 cores**:
 | 🩵 Ciano (OFX OK) | Extrato bateu no Domínio | Nada — está fechado |
 | 🟠 Laranja (OFX falta) | Extrato sem lançamento no Domínio | Criar lançamento ou regra |
 
-### Filtrar por cor
+### Filtrar por cor (múltiplas)
 
-No topo da aba Comparação tem o campo **Filtrar por cor**. Escolha uma
-das 6 cores (ou "Todos") pra ver **só os lançamentos daquela cor** —
-útil quando você quer focar só nos amarelos, cinzas ou laranjas
-(pendências). O botão **Limpar** volta pra "Todos".
+No topo da aba Comparação tem **6 caixinhas** (Verde/Amarelo/Azul/
+Cinza/Ciano/Laranja) — marque só as que você quer ver. Pode marcar
+várias ao mesmo tempo (ex.: só amarelos + laranjas pra focar em
+pendências). Todas marcadas = mostra tudo.
+
+- Botão **Todas** — marca todas.
+- Botão **Nenhuma** — desmarca todas (tabela vazia).
+- Botão **Limpar** — reset (todas marcadas + campo Buscar vazio).
+- Campo **Buscar** ao lado casa qualquer texto contra todas as colunas.
+  Combina com o filtro de cor (ex.: só verdes contendo "SICOOB").
 
 > O filtro é só visual — não altera os totais no título da aba nem
 > afeta a exportação de pendências.
+
+> **Em grupo empresarial (matriz + filiais)** as abas Pendentes e
+> Comparação mostram apenas dados da empresa contabilizada no momento.
+> Pagamentos cruzados entre filiais aparecem nas abas **Pagos por
+> outra empresa** e **Pagos de outra empresa** (ver Passo 7.8).
 
 ### Ações na aba Comparação:
 
@@ -381,6 +392,64 @@ Ações:
 > As decisões ficam salvas durante a sessão. Se você fechar o
 > Conciliador e abrir de novo, todas as revisões voltam a pedir
 > aprovação (não persiste em disco).
+
+---
+
+## 🏢 Passo 7.8 — Grupo empresarial (matriz + filiais)
+
+Quando a empresa selecionada faz parte de um **grupo empresarial**
+(matriz + uma ou mais filiais com o mesmo CNPJ raiz), o Conciliador
+detecta automaticamente e ativa recursos específicos:
+
+### Importar dados de outras filiais
+
+Botões **OFX outras empresas** e **Planilha outras empresas** (no menu
+lateral, na seção *Filiais*) permitem carregar dados das demais empresas
+do grupo na mesma sessão. Ao clicar, escolha a filial e importe. Os
+dados ficam nas abas **OFX outras filiais** e **Planilha outras
+filiais** (só rastreio) — na aba principal (OFX / Planilha) aparecem só
+os da empresa atual.
+
+Por que isso importa: se a matriz **pagou pela filial** (ou vice-versa),
+sem os dados das duas empresas o pagamento vira pendente sem par e pode
+virar lançamento contábil errado. O sistema alerta antes de Conciliar
+ou Comparar se algum grupo está com dados faltando.
+
+### Trocar filial no meio do trabalho
+
+Botão **🔄 Trocar filial** (menu lateral) troca a empresa contabilizada
+sem perder o estado da conciliação. Os pares já casados são preservados,
+os pendentes e o match com Domínio ficam intactos. **Não precisa** rodar
+Conciliar nem Comparar com Domínio de novo — a UI reclassifica os dados
+por empresa e mostra o subconjunto da nova filial.
+
+### Duas abas dedicadas para pagamentos cruzados
+
+Quando planilha e OFX de um par pertencem a **empresas diferentes** do
+grupo, o par vai pra uma aba dedicada:
+
+- **Aba "Pagos por outra empresa"** — todos os cruzamentos, nos dois
+  sentidos. Coluna **Sentido** diz se é "Meu compromisso pago por outra
+  filial" (cinza — lançamento sai na outra empresa) ou "Paguei
+  compromisso de outra filial" (verde — lançamento sai aqui). Colunas:
+  Compromisso de, Pago por, Vencimento, Pagamento, Valor, NF,
+  Fornecedor, Memo OFX.
+- **Aba "Pagos de outra empresa"** — recorte específico do caso
+  "paguei compromisso de outra": OFX daqui × planilha de outra filial.
+  Uso comum: matriz quita boletos das filiais no seu próprio banco.
+
+Em ambas, botões:
+
+- **Desfazer conciliação** — desfaz o par selecionado. O lado da empresa
+  atual (OFX ou planilha) volta pra aba Pendentes daqui; o lado da outra
+  filial fica disponível pra novo pareamento no próximo Conciliar.
+- **Exportar para Excel** — gera .xlsx com as colunas da aba + linha
+  TOTAL no fim.
+
+Regra do lançamento contábil: o lançamento sai **sempre na empresa dona
+do OFX** (o banco de onde o dinheiro saiu). Assim a matriz não gera
+lançamento contábil pra pagamentos que na verdade saíram do banco da
+filial e vice-versa.
 
 ---
 
@@ -425,6 +494,12 @@ Você pode exportar em várias abas pra revisar ou entregar pra alguém:
   lançamentos que vão pro Domínio, com totalização.
 - **Aba Comparação** → botão *Exportar pendências*: só o que falta
   (amarelo + cinza + laranja).
+- **Aba Pagos por outra empresa** → botão *Exportar para Excel*: pares
+  cross-filial (nos dois sentidos) com coluna Sentido + Compromisso de
+  + Pago por + valores.
+- **Aba Pagos de outra empresa** → botão *Exportar para Excel*: pares
+  OFX-daqui × planilha-de-outra (a empresa atual pagou boletos que
+  vinham de outra filial).
 
 Os arquivos são salvos com nome sugerido:
 `<tipo>_<código_empresa>_<data>.xlsx` (ex: `lancamentos_55_2026-09-14.xlsx`).

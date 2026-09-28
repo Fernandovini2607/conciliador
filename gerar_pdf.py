@@ -97,12 +97,21 @@ def tabela_abas() -> Table:
          "(sem planilha) que casaram no Domínio. Botão Exportar Excel."],
         ["7", "Comparação", "6 status coloridos (ok, falta dom, caixa ok/falta, "
          "OFX ok/falta). Colunas: Status, Vencimento, Pagamento, Valor, Emissão, "
-         "Nº NF, CNPJ, Fornecedor, Histórico, Tipo, Memo OFX. Botão Legenda "
-         "detalhada + 4 botões de ação em linha horizontal no rodapé "
-         "(Editar dados, Lançar manual, Criar regra, Exportar pendências)."],
+         "Nº NF, CNPJ, Fornecedor, Histórico, Tipo, Memo OFX, Pago por. Filtro "
+         "de cor MULTI-SELECT (6 checkboxes) + campo Buscar por termo + "
+         "botão Legenda + 4 ações no rodapé (Editar, Lançar manual, Criar "
+         "regra, Exportar pendências)."],
         ["8", "Lançamentos contábeis", "Saídas geradas por regras ou manualmente "
-         "(6 tipos). Botões Editar, Excluir, Exportar Excel."],
-        ["9", "Plano de contas", "Plano da empresa carregado do Domínio, "
+         "(6 tipos). Botões Editar, Excluir, Exportar Excel. Campo Buscar."],
+        ["9", "Pagos por outra empresa", "SÓ em grupo empresarial. Pares em "
+         "que planilha e OFX pertencem a empresas diferentes (ambos os sentidos "
+         "cruzados). Coluna Sentido diz se é 'compromisso daqui pago por outra' "
+         "ou 'paguei compromisso de outra'. Verde = lançamento sai aqui, "
+         "cinza = lá. Botões Desfazer conciliação + Exportar."],
+        ["10", "Pagos de outra empresa", "SÓ em grupo empresarial. Recorte "
+         "específico: OFX daqui × planilha de OUTRA filial (empresa atual "
+         "quitou boletos de outra). Botões Desfazer + Exportar."],
+        ["11", "Plano de contas", "Plano da empresa carregado do Domínio, "
          "FILTRADO só por contas analíticas (tipo A)."],
     ]
     dados = [cabecalho] + [
@@ -600,18 +609,90 @@ def construir() -> list:
         "matriz foi carregada. Também aparece no Excel exportado.",
     ]))
 
-    flow.append(Paragraph("Filtro por cor na aba Comparação", H2))
+    flow.append(Paragraph("Filtro por cor na aba Comparação (multi-select)", H2))
     flow.append(bullets([
-        "Combobox <b>Filtrar por cor</b> no topo da aba Comparação com "
-        "as 6 cores + <i>Todos</i>: ao selecionar uma cor, o treeview "
-        "esconde as demais.",
-        "Botão <b>Limpar</b> volta o filtro pra <i>Todos</i>.",
-        "Filtro é <b>só visual</b> — os totais no título da aba refletem "
-        "sempre TODOS os lançamentos, independentemente do filtro. "
-        "Exportação, criação de regras e lançamento manual continuam "
-        "operando sobre o conjunto completo.",
-        "Rótulo ao lado mostra <i>Mostrando N de M</i> quando o filtro "
-        "está ativo, pra deixar claro que outras linhas estão ocultas.",
+        "<b>6 Checkboxes</b> no topo da aba Comparação (Verde/Amarelo/"
+        "Azul/Cinza/Ciano/Laranja) — cada um alterna a visibilidade da "
+        "respectiva cor em tempo real. Múltiplas cores podem ficar "
+        "marcadas simultaneamente.",
+        "Botões auxiliares: <b>Todas</b> marca todas, <b>Nenhuma</b> "
+        "desmarca todas, <b>Limpar</b> reset completo (todas marcadas "
+        "+ campo Buscar vazio).",
+        "Todas marcadas (default) → sem filtro por cor. Pelo menos "
+        "uma desmarcada → só mostra as marcadas. Nenhuma marcada → "
+        "tabela vazia.",
+        "Campo <b>Buscar</b> ao lado casa substring case-insensitive "
+        "contra todas as colunas. Combina com o filtro de cor: as duas "
+        "condições aplicam juntas (ex.: só verdes que contêm SICOOB).",
+        "Filtro é <b>só visual</b>. Exportação, criação de regras e "
+        "lançamento manual operam sobre o conjunto completo.",
+        "Rótulo ao lado mostra <i>Mostrando N de M</i> quando algum "
+        "filtro está ativo.",
+    ]))
+
+    flow.append(Paragraph(
+        "Filtro por empresa atual em Pendentes e Comparação", H2,
+    ))
+    flow.append(bullets([
+        "Em grupo empresarial (matriz + filiais), as abas <b>Pendentes</b> "
+        "e <b>Comparação</b> exibem apenas dados cuja "
+        "<i>codi_emp_filial</i> bate com a empresa contabilizada no "
+        "momento. Transações de outras filiais somem da lista visível.",
+        "Comparação: linhas P×OFX só aparecem se pelo menos um dos "
+        "lados (planilha OU OFX) é da empresa atual. Pares 100% de "
+        "outras filiais somem — vão pras abas Pagos por outra / de outra.",
+        "Comparação de <i>codi_emp_filial</i> é feita com str(a)==str(b) "
+        "pra tolerar tipos mistos (int vs str) entre sessões.",
+        "Fallback pra dados legados: transações sem marcação "
+        "<i>codi_emp_filial</i> (None) sempre passam pelo filtro.",
+    ]))
+
+    flow.append(Paragraph(
+        "Abas cross-filial: Pagos por/de outra empresa", H2,
+    ))
+    flow.append(bullets([
+        "<b>Aba 'Pagos por outra empresa'</b>: lista pares em que "
+        "planilha e OFX pertencem a empresas diferentes do grupo. "
+        "Coluna <i>Sentido</i> classifica cada linha em 'Meu compromisso "
+        "pago por outra filial' (verde-cinza — o lançamento sai na "
+        "outra empresa) ou 'Paguei compromisso de outra filial' "
+        "(verde — o lançamento sai aqui).",
+        "<b>Aba 'Pagos de outra empresa'</b>: recorte específico do "
+        "caso 'paguei compromisso de outra' — só pares OFX daqui × "
+        "planilha de OUTRA filial. Fluxo comum onde matriz quita "
+        "boletos das filiais.",
+        "Em ambas: campo <b>Buscar</b>, botão <b>Desfazer conciliação</b> "
+        "(devolve só o lado da empresa atual pra Pendentes daqui) e "
+        "botão <b>Exportar para Excel</b>.",
+        "Regra dos lançamentos contábeis (implementada em "
+        "<i>_gerar_lancamentos_contabeis</i>): o lançamento contábil "
+        "sai só na empresa dona do <b>OFX</b> (dinheiro efetivamente "
+        "saiu do banco dela). Pares cujo OFX é de outra filial não "
+        "geram lançamento aqui — evita registrar contabilmente na "
+        "matriz um pagamento que na verdade saiu do banco da filial.",
+    ]))
+
+    flow.append(Paragraph(
+        "Conciliar em grupo empresarial + preservação de estado", H2,
+    ))
+    flow.append(bullets([
+        "Ao clicar em <b>Conciliar</b>, o cross-matching une "
+        "<i>transacoes_planilha</i> + <i>transacoes_planilha_outras_filiais</i> "
+        "(idem OFX) com dedup por id, então pares planilha_A × OFX_B "
+        "saem quando dados de todas as filiais estão importados. "
+        "Sem isso (bug corrigido), pós-troca de filial só a empresa "
+        "atual entrava no matching e nenhum par cross-filial saía.",
+        "Ao clicar em <b>🔄 Trocar filial</b>: os dados são reclassificados "
+        "entre 'principal' e 'outras filiais' por <i>codi_emp_filial</i>, "
+        "mas o estado de conciliação é PRESERVADO — pares cujo lado "
+        "envolve a nova empresa continuam, pendentes brutos são "
+        "re-derivados, matches com Domínio ficam intactos. O operador "
+        "NÃO precisa rodar Conciliar / Comparar de novo.",
+        "Aviso proativo antes de Conciliar/Comparar: se algum grupo "
+        "empresarial tem OFX ou planilha faltando pra alguma filial, "
+        "diálogo askyesno lista as faltantes — pagamentos delas ficam "
+        "órfãos e podem virar lançamento contábil errado se o operador "
+        "prosseguir sem importar.",
     ]))
 
     # ============================ 6
@@ -694,7 +775,12 @@ def construir() -> list:
 
     flow.append(Paragraph("Filtros das abas de dados", H2))
     flow.append(bullets([
-        "<b>Busca global</b> (Buscar:) filtra em tempo real.",
+        "<b>Busca global</b> (Buscar:) filtra em tempo real. Presente em: "
+        "Planilha, OFX, Planilha outras filiais, OFX outras filiais, "
+        "Conciliados, Conciliados × Domínio, Comparação, Lançamentos "
+        "contábeis, Pagos por outra empresa, Pagos de outra empresa. "
+        "Padrão consistente: campo Buscar + botão Limpar + label "
+        "'Mostrando N de M'.",
         "<b>Status</b> (Domínio dados): dropdown Todos/Aberto/Parcial/Paga.",
         "<b>Filtros estilo Excel por coluna</b>: clique no cabeçalho ▾ → "
         "popup com checkboxes + busca + marcar/desmarcar tudo.",
@@ -760,6 +846,13 @@ def construir() -> list:
         "<b>Aba Comparação</b>: botão Exportar pendências separa em 3 abas "
         "por tipo (Amarelos P × OFX / Cinzas Caixa geral / Laranjas OFX-só). "
         "Cores das linhas preservadas.",
+        "<b>Aba Pagos por outra empresa</b>: exporta pares cross-filial "
+        "com colunas Sentido / Compromisso de / Pago por / Vencimento / "
+        "Pagamento / Valor / NF / Fornecedor / Memo OFX + TOTAL final.",
+        "<b>Aba Pagos de outra empresa</b>: exporta pares OFX-daqui × "
+        "planilha-de-outra com colunas Compromisso de (filial) / "
+        "Vencimento / Pagamento / Valor / NF / Fornecedor / Banco / "
+        "Memo OFX + TOTAL final.",
     ]))
 
     # ============================ 11
