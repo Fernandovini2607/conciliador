@@ -1258,6 +1258,17 @@ class App(tk.Tk):
         if nova is None:
             return
         nova_codi = nova.get("codi_emp")
+        # Comparacao TOLERANTE a tipos: codi_emp pode vir como int do
+        # Dominio (SQL) e str do config.json (persistencia). Se um lado
+        # e int e o outro str, '==' retorna False silenciosamente —
+        # entao converto os dois pra str antes de comparar.
+        nova_codi_str = str(nova_codi) if nova_codi is not None else None
+
+        def _mesma(c) -> bool:
+            if c is None or nova_codi_str is None:
+                return False
+            return str(c) == nova_codi_str
+
         # Reclassifica planilha: quem tem codi_emp_filial == nova_codi
         # vai pra self.transacoes_planilha; o resto pra outras filiais.
         # Precisa começar com a UNIÃO das duas listas atuais.
@@ -1272,11 +1283,11 @@ class App(tk.Tk):
         ]
         self.transacoes_planilha = [
             t for t in todas_planilha
-            if t.extras.get("codi_emp_filial") == nova_codi
+            if _mesma(t.extras.get("codi_emp_filial"))
         ]
         self.transacoes_planilha_outras_filiais = [
             t for t in todas_planilha
-            if t.extras.get("codi_emp_filial") != nova_codi
+            if not _mesma(t.extras.get("codi_emp_filial"))
         ]
 
         # Mesma lógica pra OFX
@@ -1290,11 +1301,11 @@ class App(tk.Tk):
         ]
         self.transacoes_ofx = [
             t for t in todas_ofx
-            if t.extras.get("codi_emp_filial") == nova_codi
+            if _mesma(t.extras.get("codi_emp_filial"))
         ]
         self.transacoes_ofx_outras_filiais = [
             t for t in todas_ofx
-            if t.extras.get("codi_emp_filial") != nova_codi
+            if not _mesma(t.extras.get("codi_emp_filial"))
         ]
 
         # Pares conciliados: mantemos apenas os que envolvem a nova
@@ -1303,8 +1314,8 @@ class App(tk.Tk):
         # empresa contabiliza os proprios pagamentos na sua sessao.
         self.pares_conciliados = [
             p for p in self.pares_conciliados
-            if p.planilha.extras.get("codi_emp_filial") == nova_codi
-            or p.ofx.extras.get("codi_emp_filial") == nova_codi
+            if _mesma(p.planilha.extras.get("codi_emp_filial"))
+            or _mesma(p.ofx.extras.get("codi_emp_filial"))
         ]
 
         # Atualiza a empresa no cfg
@@ -3555,12 +3566,17 @@ class App(tk.Tk):
         for par in self.pares_conciliados:
             codi_p = par.planilha.extras.get("codi_emp_filial")
             codi_o = par.ofx.extras.get("codi_emp_filial")
-            # Só interessa quando planilha e OFX vêm de empresas diferentes
-            if codi_p is None or codi_o is None or codi_p == codi_o:
+            # Só interessa quando planilha e OFX vêm de empresas diferentes.
+            # str(...) tolera int vs str em codi_emp_filial.
+            if codi_p is None or codi_o is None or str(codi_p) == str(codi_o):
                 continue
 
-            ofx_e_daqui = (codi_atual is not None and codi_o == codi_atual)
-            planilha_e_daqui = (codi_atual is not None and codi_p == codi_atual)
+            ofx_e_daqui = (
+                codi_atual is not None and str(codi_o) == str(codi_atual)
+            )
+            planilha_e_daqui = (
+                codi_atual is not None and str(codi_p) == str(codi_atual)
+            )
 
             if ofx_e_daqui and not planilha_e_daqui:
                 sentido = "Paguei compromisso de outra filial"
@@ -3812,15 +3828,17 @@ class App(tk.Tk):
 
         total_bruto = 0
         n = 0
+        codi_atual_str = str(codi_atual) if codi_atual is not None else None
         for par in self.pares_conciliados:
             codi_p = par.planilha.extras.get("codi_emp_filial")
             codi_o = par.ofx.extras.get("codi_emp_filial")
-            # Regra: OFX aqui, planilha em OUTRA filial
-            if codi_atual is None:
+            # Regra: OFX aqui, planilha em OUTRA filial.
+            # str(...) tolera int vs str em codi_emp_filial.
+            if codi_atual_str is None:
                 continue
-            if codi_o != codi_atual:
+            if codi_o is None or str(codi_o) != codi_atual_str:
                 continue
-            if codi_p is None or codi_p == codi_atual:
+            if codi_p is None or str(codi_p) == codi_atual_str:
                 continue
 
             pagto = par.planilha.data_pagamento or par.ofx.data
@@ -7270,13 +7288,16 @@ class App(tk.Tk):
         emp_atual = self.cfg.get("dominio_empresa") or {}
         codi_atual = emp_atual.get("codi_emp")
 
+        codi_atual_str = str(codi_atual) if codi_atual is not None else None
+
         def _pertence_a_empresa_atual(par) -> bool:
-            if codi_atual is None:
+            if codi_atual_str is None:
                 return True  # empresa nao definida — comportamento antigo
             codi_p = par.planilha.extras.get("codi_emp_filial")
             # None = transacao ainda nao marcada por filial (pre-grupo);
             # deixa passar pra nao esconder dados legados.
-            return codi_p is None or codi_p == codi_atual
+            # str(...) tolera int vs str em codi_emp_filial.
+            return codi_p is None or str(codi_p) == codi_atual_str
 
         mostradas = 0
         pares_visiveis = [
@@ -7438,14 +7459,18 @@ class App(tk.Tk):
         # todas as parcelas — a checagem deixa passar.
         emp_atual = self.cfg.get("dominio_empresa") or {}
         codi_emp_atual = emp_atual.get("codi_emp")
+        codi_emp_atual_str = (
+            str(codi_emp_atual) if codi_emp_atual is not None else None
+        )
 
         def _dom_pertence_a_empresa(t_dom) -> bool:
-            if codi_emp_atual is None or t_dom is None:
+            if codi_emp_atual_str is None or t_dom is None:
                 return True
             codi_dom = t_dom.extras.get("codi_emp_origem")
             # None = parcela sem marcação de empresa (Domínio pre-grupo);
             # deixa passar pra nao esconder legado.
-            return codi_dom is None or codi_dom == codi_emp_atual
+            # str(...) tolera int vs str em codi_emp_origem.
+            return codi_dom is None or str(codi_dom) == codi_emp_atual_str
 
         mostradas_ref = [0]  # lista pra permitir mutação em closure
         total_bruto_ref = [0]
@@ -7756,13 +7781,15 @@ class App(tk.Tk):
         mostradas = 0
         # Aba Planilha mostra APENAS transações da empresa atualmente
         # selecionada. As de outras filiais ficam na aba dedicada — evita
-        # confundir o operador vendo tudo misturado.
+        # confundir o operador vendo tudo misturado. Comparacao com
+        # str(...) pra tolerar int vs str em codi_emp_filial.
         emp_atual = self.cfg.get("dominio_empresa") or {}
         codi_atual = emp_atual.get("codi_emp")
+        codi_atual_str = str(codi_atual) if codi_atual is not None else None
         transacoes_visiveis = [
             t for t in self.transacoes_planilha
-            if t.extras.get("codi_emp_filial") == codi_atual
-            or t.extras.get("codi_emp_filial") is None
+            if (t.extras.get("codi_emp_filial") is None
+                or str(t.extras.get("codi_emp_filial")) == codi_atual_str)
         ] if codi_atual is not None else list(self.transacoes_planilha)
         for t in transacoes_visiveis:
             row = self._row_planilha(t)
@@ -7801,13 +7828,15 @@ class App(tk.Tk):
         tem_filtro_col = any(v is not None for v in filtros.values())
         mostradas = 0
         # Aba OFX mostra APENAS movimentações da empresa atual — as de
-        # outras filiais ficam na aba dedicada.
+        # outras filiais ficam na aba dedicada. Comparacao com str(...)
+        # pra tolerar int vs str em codi_emp_filial.
         emp_atual = self.cfg.get("dominio_empresa") or {}
         codi_atual = emp_atual.get("codi_emp")
+        codi_atual_str = str(codi_atual) if codi_atual is not None else None
         transacoes_visiveis = [
             t for t in self.transacoes_ofx
-            if t.extras.get("codi_emp_filial") == codi_atual
-            or t.extras.get("codi_emp_filial") is None
+            if (t.extras.get("codi_emp_filial") is None
+                or str(t.extras.get("codi_emp_filial")) == codi_atual_str)
         ] if codi_atual is not None else list(self.transacoes_ofx)
         for t in transacoes_visiveis:
             row = self._row_ofx(t)
@@ -8289,12 +8318,14 @@ class App(tk.Tk):
         # (ou quando OFX não tem marcação de filial — retrocompat).
         emp_atual = self.cfg.get("dominio_empresa") or {}
         codi_atual = emp_atual.get("codi_emp")
+        codi_atual_str = str(codi_atual) if codi_atual is not None else None
 
         def _ofx_e_da_empresa_atual(par) -> bool:
-            if codi_atual is None:
+            if codi_atual_str is None:
                 return True  # sem empresa selecionada, comportamento antigo
             codi_ofx = par.ofx.extras.get("codi_emp_filial")
-            return codi_ofx == codi_atual or codi_ofx is None
+            # str(...) tolera int vs str em codi_emp_filial.
+            return codi_ofx is None or str(codi_ofx) == codi_atual_str
 
         # Candidatos a "fornecedor": pares P×O sem match no Domínio
         # E cujo OFX pertence à empresa atual.
