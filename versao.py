@@ -10,7 +10,7 @@ O ``publicar.bat`` reescreve a linha do VERSAO com a data do dia antes de
 chamar o PyInstaller — não é preciso editar na mão.
 """
 
-VERSAO = "2026.09.25"
+VERSAO = "2026.09.30"
 
 
 def rotulo() -> str:
