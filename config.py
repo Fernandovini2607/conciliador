@@ -151,6 +151,10 @@ def salvar(dados: dict[str, Any]) -> None:
     # antes pra atualizar usuario.empresa_ativa ao final.
     dominio_empresa = escalares.pop("dominio_empresa", None)
 
+    # Lista de regras rejeitadas pelo banco (ENUM / VARCHAR / etc).
+    # Reportada no stderr apos o commit, sem derrubar o save inteiro.
+    regras_rejeitadas: list[dict[str, Any]] = []
+
     with conexao() as conn:
         cur = conn.cursor()
 
@@ -174,8 +178,12 @@ def salvar(dados: dict[str, Any]) -> None:
                 ),
             )
 
-        # --- regra_taxa: apaga tudo e re-insere
+        # --- regra_taxa: apaga tudo e re-insere.
+        # UMA regra com conteudo invalido (tipo nao-ENUM, texto > VARCHAR,
+        # etc) nao derruba as demais — try/except por INSERT. As que
+        # falharam vao pra regras_rejeitadas pra reportar no stderr.
         cur.execute("DELETE FROM regra_taxa")
+        TIPOS_VALIDOS = {"memo", "fornecedor"}
         for codi_emp, regras in regras_por_emp.items():
             if not isinstance(regras, list):
                 continue
@@ -186,24 +194,38 @@ def salvar(dados: dict[str, Any]) -> None:
             for ordem, regra in enumerate(regras):
                 if not isinstance(regra, dict):
                     continue
-                cur.execute(
-                    """
-                    INSERT INTO regra_taxa
-                      (codi_emp, tipo, padrao, historico, conta, banco, ordem)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        codi_int,
-                        (regra.get("tipo") or "memo")[:20],
-                        (regra.get("padrao") or "")[:500],
-                        (regra.get("historico") or "")[:500],
-                        (regra.get("conta") or "")[:100],
-                        (regra.get("banco") or None),
-                        ordem,
-                    ),
-                )
+                tipo = (regra.get("tipo") or "memo").strip()
+                # ENUM so aceita 'memo' ou 'fornecedor'. Qualquer outro
+                # valor (ex: 'fornecedor_planilha', '', typo) seria
+                # rejeitado pelo MariaDB — normaliza aqui.
+                if tipo not in TIPOS_VALIDOS:
+                    tipo = "fornecedor" if "fornec" in tipo.lower() else "memo"
+                padrao = (regra.get("padrao") or "")[:500]
+                historico = (regra.get("historico") or "")[:500]
+                conta = (regra.get("conta") or "")[:100]
+                banco = regra.get("banco") or None
+                if banco is not None:
+                    banco = str(banco)[:200]
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO regra_taxa
+                          (codi_emp, tipo, padrao, historico, conta, banco, ordem)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (codi_int, tipo, padrao, historico, conta, banco, ordem),
+                    )
+                except Exception as e:  # noqa: BLE001
+                    regras_rejeitadas.append({
+                        "codi_emp": codi_int,
+                        "ordem": ordem,
+                        "regra": regra,
+                        "erro": str(e),
+                    })
 
-        # --- mapeamento_planilha: apaga tudo e re-insere
+        # --- mapeamento_planilha: apaga tudo e re-insere.
+        # Mesmo tratamento isolado por insert pra uma linha ruim nao
+        # derrubar as demais.
         cur.execute("DELETE FROM mapeamento_planilha")
         for codi_emp, mapa in mapa_por_emp.items():
             if not isinstance(mapa, dict):
@@ -215,10 +237,34 @@ def salvar(dados: dict[str, Any]) -> None:
             for campo, nome in mapa.items():
                 if not nome:
                     continue
-                cur.execute(
-                    """
-                    INSERT INTO mapeamento_planilha (codi_emp, campo, nome_coluna)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (codi_int, str(campo)[:50], str(nome)[:200]),
-                )
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO mapeamento_planilha (codi_emp, campo, nome_coluna)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (codi_int, str(campo)[:50], str(nome)[:200]),
+                    )
+                except Exception as e:  # noqa: BLE001
+                    import sys as _sys
+                    print(
+                        f"[config.salvar] mapeamento rejeitado "
+                        f"(codi_emp={codi_int}, campo={campo!r}): {e}",
+                        file=_sys.stderr,
+                    )
+
+    # Fora do context manager — commit ja aconteceu. Logar rejeitadas no
+    # stderr pra ficar visivel em modo debug (iniciar_debug.bat).
+    if regras_rejeitadas:
+        import sys as _sys
+        print(
+            f"[config.salvar] {len(regras_rejeitadas)} regra(s) rejeitada(s) "
+            "pelo banco:",
+            file=_sys.stderr,
+        )
+        for r in regras_rejeitadas:
+            print(
+                f"  codi_emp={r['codi_emp']} ordem={r['ordem']} "
+                f"regra={r['regra']} erro={r['erro']}",
+                file=_sys.stderr,
+            )
